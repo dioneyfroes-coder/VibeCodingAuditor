@@ -213,3 +213,32 @@ Estado consolidado das Etapas 0–10 e dos trabalhos posteriores. Decisões e es
 - [x] Árvore da seção 4 do plano atualizada com `history/`
 - [x] `docs/DECISIONS.md` registra a decisão `R7`; `docs/ROADMAP.md` registra o fechamento
 - [x] Verificação final repetida após os ajustes documentais; resultados em `docs/DECISIONS.md` (`R7`)
+
+## Etapa 2 — Confiabilidade do motor (em andamento)
+
+Ordem e critérios vêm de `RELATORIO_ETAPA_1_E_PLANO_ETAPA_2.md`, seção 8. Um item só é marcado como concluído depois que seus critérios de aceite são testados.
+
+### Item 2.1 — Cobertura honesta dos arquivos — Concluído em 25/11/2026
+
+- [x] Diferenciar arquivos inventariados de arquivos de código analisados, sem nota geral de qualidade
+- [x] Detectar extensões de código incluídas sem analisador e contá-las por extensão
+- [x] Gerar limitação explícita quando houver código incluído sem analisador
+- [x] Expor `coverage` no `Analysis` e no `AuditReport`, de forma aditiva no JSON
+- [x] Mostrar a cobertura em texto, Markdown, JSON, `analyze` e desktop
+- [x] Criar a fixture `tests/fixtures/projects/partial_coverage` e testes de regressão antes da implementação
+- [x] Preservar `auditor.toml` v1, o esquema do SQLite e o consumo de `findings` pela extensão
+- [x] Revisar paradigma, nomes descritivos, documentação de código e testes dos helpers
+- [x] Verificação: `cargo fmt --check`, `cargo test --workspace` (105 testes: 92 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `npm test` da extensão (4 testes) e `npm run build` da desktop passaram
+- [x] Smoke na fixture `partial_coverage`: texto, JSON, Markdown e `analyze` mostram 2 de 4 arquivos de código analisados, `.go (1)` e `.rb (1)` sem analisador, 1 limitação, 0 achados
+
+### Itens seguintes — Não iniciados
+
+- [ ] 2.2 — Eliminar conclusões definitivas baseadas em mapeamentos ambíguos
+- [ ] 2.3 — Classificar dependências externas Rust corretamente e resolver `self::`/`super::`
+- [ ] 2.4 — Tratar `workspace.members` com glob
+- [ ] 2.5 — Corrigir a análise TypeScript/JavaScript
+- [ ] 2.6 — Substituir enumeração de ciclos por componentes fortemente conectados
+- [ ] 2.7 — Expor os motivos de exclusão e a cobertura no relatório
+- [ ] 2.8 — Reforçar a verificação automatizada
+
+A cobertura estruturada ainda não é gravada em coluna própria no histórico; a limitação textual continua sendo persistida. Isso será reavaliado no item 2.7, não neste item.

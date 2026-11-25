@@ -225,6 +225,18 @@ fn analyze_project(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!("Declarações mod: {}", analysis.module_declarations.len());
+    println!(
+        "Cobertura do código: {} de {} arquivo(s) analisados",
+        analysis.coverage.code_files_analyzed, analysis.coverage.code_files_included
+    );
+    if !analysis.coverage.unsupported_code_extensions.is_empty() {
+        println!(
+            "  sem analisador: {}",
+            auditor_core::analysis::describe_unsupported_code_extensions(
+                &analysis.coverage.unsupported_code_extensions
+            )
+        );
+    }
     println!("Limitações: {}", analysis.limitations.len());
     for limitation in &analysis.limitations {
         println!("  - {limitation}");
@@ -326,7 +338,7 @@ mod tests {
     use super::Path;
     use super::audit_exit_code;
     use super::dependency_kind_label;
-    use auditor_core::analysis::DependencyKind;
+    use auditor_core::analysis::{AnalysisCoverage, DependencyKind};
     use auditor_core::report::ReportFormat;
     use auditor_core::report::{AuditReport, ReportSummary};
 
@@ -494,6 +506,7 @@ mod tests {
             },
             findings: Vec::new(),
             limitations: Vec::new(),
+            coverage: AnalysisCoverage::default(),
         }
     }
 

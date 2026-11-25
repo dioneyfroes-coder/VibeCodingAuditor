@@ -8,7 +8,7 @@ use std::fmt;
 
 use serde::Serialize;
 
-use crate::analysis::Analysis;
+use crate::analysis::{Analysis, AnalysisCoverage, describe_unsupported_code_extensions};
 use crate::contract::Contract;
 use crate::discovery::Inventory;
 use crate::findings::{Finding, Severity};
@@ -111,6 +111,8 @@ pub struct AuditReport {
     pub findings: Vec<Finding>,
     /// Limitações explícitas da análise, sem conclusões inventadas.
     pub limitations: Vec<String>,
+    /// Cobertura efetiva da análise sobre o código incluído no inventário.
+    pub coverage: AnalysisCoverage,
 }
 
 impl AuditReport {
@@ -143,6 +145,7 @@ impl AuditReport {
             },
             findings,
             limitations: analysis.limitations.clone(),
+            coverage: analysis.coverage.clone(),
         }
     }
 
@@ -172,6 +175,7 @@ impl AuditReport {
             },
             findings,
             limitations,
+            coverage: self.coverage.clone(),
         }
     }
 
@@ -200,6 +204,7 @@ impl AuditReport {
                 "Arquivos: {} incluídos, {} não incluídos",
                 self.summary.files_included, self.summary.files_skipped
             ),
+            coverage_line(&self.coverage),
             format!(
                 "Módulos: {} | Pacotes Cargo: {} | Arestas: {}",
                 self.summary.modules, self.summary.packages, self.summary.edges
@@ -262,6 +267,7 @@ impl AuditReport {
             format!("- Schema: v{}", self.schema_version),
             format!("- Arquivos incluídos: {}", self.summary.files_included),
             format!("- Arquivos não incluídos: {}", self.summary.files_skipped),
+            format!("- {}", coverage_line(&self.coverage)),
             format!("- Módulos: {}", self.summary.modules),
             format!("- Pacotes Cargo: {}", self.summary.packages),
             format!("- Arestas: {}", self.summary.edges),
@@ -322,6 +328,24 @@ impl AuditReport {
     }
 }
 
+/// Resume a cobertura da análise sem inventar uma nota geral de qualidade.
+fn coverage_line(coverage: &AnalysisCoverage) -> String {
+    let mut line = format!(
+        "Cobertura do código: {} de {} arquivo(s) analisados",
+        coverage.code_files_analyzed, coverage.code_files_included
+    );
+    if coverage.partial {
+        line.push_str(" (parcial)");
+    }
+    if !coverage.unsupported_code_extensions.is_empty() {
+        line.push_str(&format!(
+            "; sem analisador: {}",
+            describe_unsupported_code_extensions(&coverage.unsupported_code_extensions)
+        ));
+    }
+    line
+}
+
 /// Conta achados por severidade, usada em relatórios completos e recortados.
 fn severity_counts(findings: &[Finding]) -> (usize, usize, usize, usize) {
     let errors = findings
@@ -366,6 +390,7 @@ fn markdown_text(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analysis::{AnalysisCoverage, UnsupportedCodeExtension};
     use crate::findings::Severity;
 
     /// Achado mínimo usado para testar a renderização.
@@ -405,6 +430,22 @@ mod tests {
             },
             findings: vec![sample_finding()],
             limitations: vec!["arquivo.rs não pôde ser analisado".to_owned()],
+            coverage: AnalysisCoverage {
+                code_files_included: 4,
+                code_files_analyzed: 2,
+                code_files_not_analyzed: 2,
+                unsupported_code_extensions: vec![
+                    UnsupportedCodeExtension {
+                        extension: "go".to_owned(),
+                        files: 1,
+                    },
+                    UnsupportedCodeExtension {
+                        extension: "rb".to_owned(),
+                        files: 1,
+                    },
+                ],
+                partial: true,
+            },
         }
     }
 
@@ -426,6 +467,9 @@ mod tests {
             .expect("text rendering cannot fail");
 
         assert!(output.contains("Auditoria: projeto-teste (schema v1)"));
+        assert!(output.contains(
+            "Cobertura do código: 2 de 4 arquivo(s) analisados (parcial); sem analisador: .go (1), .rb (1)"
+        ));
         assert!(output.contains("[erro] dep.not_allowed"));
         assert!(output.contains("id: dep.not_allowed:domain:application:src/lib.rs:3"));
         assert!(output.contains("local: src/lib.rs:3"));
@@ -442,6 +486,18 @@ mod tests {
 
         assert_eq!(value["project"], "projeto-teste");
         assert_eq!(value["summary"]["findings"], 1);
+        assert_eq!(value["coverage"]["code_files_included"], 4);
+        assert_eq!(value["coverage"]["code_files_analyzed"], 2);
+        assert_eq!(value["coverage"]["code_files_not_analyzed"], 2);
+        assert_eq!(value["coverage"]["partial"], true);
+        assert_eq!(
+            value["coverage"]["unsupported_code_extensions"][0]["extension"],
+            "go"
+        );
+        assert_eq!(
+            value["coverage"]["unsupported_code_extensions"][1]["files"],
+            1
+        );
         assert_eq!(value["findings"][0]["severity"], "error");
         assert_eq!(value["findings"][0]["line_start"], 3);
         assert_eq!(
@@ -460,6 +516,9 @@ mod tests {
             .expect("Markdown rendering cannot fail");
 
         assert!(output.contains("# Auditoria: projeto-teste"));
+        assert!(output.contains(
+            "- Cobertura do código: 2 de 4 arquivo(s) analisados (parcial); sem analisador: .go (1), .rb (1)"
+        ));
         assert!(output.contains("canal \\| linha<br>nova"));
         assert!(output.contains("**Evidência:** `use application::Service;`"));
         assert!(output.contains("## Limitações"));
@@ -477,6 +536,30 @@ mod tests {
             .render(ReportFormat::Text)
             .expect("text rendering cannot fail");
         assert!(text.contains("Nenhum achado."));
+    }
+
+    #[test]
+    fn complete_coverage_does_not_claim_a_partial_audit() {
+        let mut report = sample_report();
+        report.coverage = AnalysisCoverage {
+            code_files_included: 4,
+            code_files_analyzed: 4,
+            code_files_not_analyzed: 0,
+            unsupported_code_extensions: Vec::new(),
+            partial: false,
+        };
+
+        let text = report
+            .render(ReportFormat::Text)
+            .expect("text rendering cannot fail");
+        let markdown = report
+            .render(ReportFormat::Markdown)
+            .expect("Markdown rendering cannot fail");
+
+        assert!(text.contains("Cobertura do código: 4 de 4 arquivo(s) analisados"));
+        assert!(markdown.contains("Cobertura do código: 4 de 4 arquivo(s) analisados"));
+        assert!(!text.contains("parcial"));
+        assert!(!markdown.contains("parcial"));
     }
 
     #[test]

@@ -74,11 +74,60 @@ fn collect_duplicate_lines(
     }
 }
 
+/// Extensões reconhecidas como código que ainda não possuem analisador nesta versão.
+const UNSUPPORTED_CODE_EXTENSIONS: &[&str] = &[
+    "c", "cc", "clj", "cljs", "cpp", "cs", "cxx", "dart", "erl", "ex", "exs", "fs", "fsx", "go",
+    "h", "hs", "hpp", "java", "kt", "kts", "lua", "m", "mm", "php", "pl", "ps1", "pyw", "r", "rb",
+    "scala", "sh", "swift", "vb",
+];
+
 /// Indica se a extensão possui analisador de dependências disponível.
 pub fn is_source_file(extension: Option<&str>) -> bool {
     extension == Some("rs")
         || typescript::is_supported_extension(extension)
         || python::is_supported_extension(extension)
+}
+
+/// Indica se a extensão é código conhecido sem analisador nesta versão.
+pub fn is_unsupported_code_extension(extension: Option<&str>) -> bool {
+    let Some(extension) = extension else {
+        return false;
+    };
+    let normalized = extension.to_ascii_lowercase();
+    UNSUPPORTED_CODE_EXTENSIONS.contains(&normalized.as_str())
+}
+
+/// Extensão de código incluída no inventário que não possui analisador.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UnsupportedCodeExtension {
+    /// Extensão normalizada, sem o ponto inicial (por exemplo, `go`).
+    pub extension: String,
+    /// Quantidade de arquivos incluídos com essa extensão.
+    pub files: usize,
+}
+
+/// Cobertura da análise sobre o código incluído no inventário.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct AnalysisCoverage {
+    /// Arquivos de código incluídos no inventário.
+    pub code_files_included: usize,
+    /// Arquivos de código processados por um analisador disponível.
+    pub code_files_analyzed: usize,
+    /// Arquivos de código incluídos que não foram processados.
+    pub code_files_not_analyzed: usize,
+    /// Extensões de código sem analisador, ordenadas por extensão.
+    pub unsupported_code_extensions: Vec<UnsupportedCodeExtension>,
+    /// Indica que pelo menos um arquivo de código incluído não foi analisado.
+    pub partial: bool,
+}
+
+/// Descreve as extensões sem analisador para mensagens e relatórios.
+pub fn describe_unsupported_code_extensions(extensions: &[UnsupportedCodeExtension]) -> String {
+    extensions
+        .iter()
+        .map(|entry| format!(".{} ({})", entry.extension, entry.files))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Trecho de código idêntico encontrado em mais de um arquivo.
@@ -107,6 +156,8 @@ pub struct Analysis {
     pub limitations: Vec<String>,
     /// Linhas idênticas em mais de um arquivo de código incluído.
     pub duplicate_lines: Vec<DuplicateLine>,
+    /// Cobertura efetiva da análise sobre o código incluído no inventário.
+    pub coverage: AnalysisCoverage,
 }
 
 /// Pacotes descobertos no workspace Cargo.
@@ -290,10 +341,13 @@ pub fn analyze(
         module_declarations: Vec::new(),
         limitations: Vec::new(),
         duplicate_lines: Vec::new(),
+        coverage: AnalysisCoverage::default(),
     };
 
     let mut seen_edges = HashSet::new();
     let mut duplicate_candidates: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut unsupported_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut coverage = AnalysisCoverage::default();
 
     let mut typescript_files = false;
     let mut python_files = false;
@@ -301,6 +355,13 @@ pub fn analyze(
     for file in &inventory.files {
         let extension = file.extension.as_deref();
         if !is_source_file(extension) {
+            if let Some(normalized) = extension
+                .map(str::to_ascii_lowercase)
+                .filter(|value| UNSUPPORTED_CODE_EXTENSIONS.contains(&value.as_str()))
+            {
+                *unsupported_counts.entry(normalized).or_default() += 1;
+                coverage.code_files_not_analyzed += 1;
+            }
             continue;
         }
         if typescript::is_supported_extension(extension) {
@@ -316,6 +377,7 @@ pub fn analyze(
                 analysis
                     .limitations
                     .push(format!("{} não pôde ser lido: {source}", file.path));
+                coverage.code_files_not_analyzed += 1;
                 continue;
             }
         };
@@ -330,6 +392,7 @@ pub fn analyze(
                     analysis
                         .limitations
                         .push(format!("{} não pôde ser analisado: {source}", file.path));
+                    coverage.code_files_not_analyzed += 1;
                     continue;
                 }
             };
@@ -373,7 +436,23 @@ pub fn analyze(
                 &mut seen_edges,
             );
         }
+        coverage.code_files_analyzed += 1;
     }
+
+    coverage.code_files_included = coverage.code_files_analyzed + coverage.code_files_not_analyzed;
+    coverage.unsupported_code_extensions = unsupported_counts
+        .into_iter()
+        .map(|(extension, files)| UnsupportedCodeExtension { extension, files })
+        .collect();
+    coverage.partial = coverage.code_files_not_analyzed > 0;
+    if !coverage.unsupported_code_extensions.is_empty() {
+        analysis.limitations.push(format!(
+            "cobertura parcial: {} arquivo(s) de código incluído(s) não foram analisados; extensões sem analisador observadas: {}",
+            coverage.code_files_not_analyzed,
+            describe_unsupported_code_extensions(&coverage.unsupported_code_extensions)
+        ));
+    }
+    analysis.coverage = coverage;
 
     if typescript_files {
         analysis.limitations.push(
@@ -909,6 +988,35 @@ mod tests {
                 .iter()
                 .any(|limitation| limitation.contains("crates/domain/src/broken.rs"))
         );
+    }
+
+    #[test]
+    fn unsupported_extension_descriptions_are_stable() {
+        let extensions = vec![
+            UnsupportedCodeExtension {
+                extension: "go".to_owned(),
+                files: 2,
+            },
+            UnsupportedCodeExtension {
+                extension: "rb".to_owned(),
+                files: 1,
+            },
+        ];
+
+        assert_eq!(
+            describe_unsupported_code_extensions(&extensions),
+            ".go (2), .rb (1)"
+        );
+    }
+
+    #[test]
+    fn unsupported_code_extensions_are_recognized_without_classifying_documents() {
+        assert!(is_unsupported_code_extension(Some("go")));
+        assert!(is_unsupported_code_extension(Some("RB")));
+        assert!(!is_unsupported_code_extension(Some("rs")));
+        assert!(!is_unsupported_code_extension(Some("md")));
+        assert!(!is_unsupported_code_extension(Some("json")));
+        assert!(!is_unsupported_code_extension(None));
     }
 
     #[test]

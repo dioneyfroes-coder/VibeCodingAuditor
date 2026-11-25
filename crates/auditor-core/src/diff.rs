@@ -335,6 +335,7 @@ fn merge_ranges(ranges: Vec<LineRange>) -> Vec<LineRange> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analysis::AnalysisCoverage;
     use crate::findings::Severity;
     use crate::report::{AuditReport, ReportSummary};
 
@@ -445,6 +446,7 @@ rename to src/new.rs\n";
                 finding("outro", "src/outro.rs", Some(2), Severity::Info),
             ],
             limitations: Vec::new(),
+            coverage: AnalysisCoverage::default(),
         };
         let changes = parse_unified_diff(PATCH).expect("patch must parse");
 
@@ -487,6 +489,7 @@ rename to src/new.rs\n";
                 finding("sem-linha", "src/old.rs", None, Severity::NeedsReview),
             ],
             limitations: Vec::new(),
+            coverage: AnalysisCoverage::default(),
         };
         let changes =
             parse_unified_diff("--- a/src/old.rs\n+++ /dev/null\n@@ -1 +0,0 @@\n-conteudo\n")
@@ -528,6 +531,7 @@ rename to src/new.rs\n";
                 Severity::NeedsReview,
             )],
             limitations: Vec::new(),
+            coverage: AnalysisCoverage::default(),
         };
         let changes = parse_unified_diff(
             "--- a/crates/domain/src/lib.rs\n\

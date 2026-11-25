@@ -20,6 +20,19 @@ interface Finding {
   confidence: string | null;
 }
 
+interface UnsupportedCodeExtension {
+  extension: string;
+  files: number;
+}
+
+interface AnalysisCoverage {
+  code_files_included: number;
+  code_files_analyzed: number;
+  code_files_not_analyzed: number;
+  unsupported_code_extensions: UnsupportedCodeExtension[];
+  partial: boolean;
+}
+
 interface ReportSummary {
   files_included: number;
   files_skipped: number;
@@ -39,6 +52,7 @@ interface AuditReport {
   summary: ReportSummary;
   findings: Finding[];
   limitations: string[];
+  coverage: AnalysisCoverage;
 }
 
 interface DependencyEdge {
@@ -55,6 +69,7 @@ interface Analysis {
   modules: string[];
   edges: DependencyEdge[];
   limitations: string[];
+  coverage: AnalysisCoverage;
 }
 
 interface RunSummary {
@@ -94,6 +109,18 @@ function nodePosition(index: number, total: number): { x: number; y: number } {
     x: GRAPH_WIDTH / 2 + 150 * Math.cos(angle),
     y: GRAPH_HEIGHT / 2 + 105 * Math.sin(angle),
   };
+}
+
+/// Apresenta a cobertura recebida do núcleo, sem interpretar regras na interface.
+function coverageLabel(coverage: AnalysisCoverage): string {
+  const base = `Cobertura do código: ${coverage.code_files_analyzed} de ${coverage.code_files_included} arquivo(s) analisados`;
+  const partial = coverage.partial ? ' (parcial)' : '';
+  const unsupported = coverage.unsupported_code_extensions.length
+    ? `; sem analisador: ${coverage.unsupported_code_extensions
+        .map((item) => `.${item.extension} (${item.files})`)
+        .join(', ')}`
+    : '';
+  return `${base}${partial}${unsupported}`;
 }
 
 export default function App() {
@@ -244,6 +271,7 @@ export default function App() {
             {report.summary.modules} módulos · {report.summary.packages} pacotes ·{' '}
             {report.summary.edges} arestas
           </p>
+          <p className="detail">{coverageLabel(report.coverage)}</p>
           <p className="summary">
             {report.summary.findings} achados ({report.summary.errors} erros,{' '}
             {report.summary.warnings} avisos, {report.summary.infos} informações,{' '}
@@ -314,6 +342,7 @@ export default function App() {
       {analysis && (
         <section className="panel">
           <h2>Grafo de dependências</h2>
+          <p className="detail">{coverageLabel(analysis.coverage)}</p>
           {graphNodes.length === 0 ? (
             <p>Nenhum módulo declarado no contrato.</p>
           ) : (

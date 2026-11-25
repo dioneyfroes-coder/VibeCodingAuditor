@@ -140,6 +140,11 @@ mod tests {
         assert_eq!(report.summary.findings, 0);
         assert!(!report.has_findings());
         assert!(report.limitations.is_empty());
+        assert_eq!(report.coverage.code_files_included, 3);
+        assert_eq!(report.coverage.code_files_analyzed, 3);
+        assert_eq!(report.coverage.code_files_not_analyzed, 0);
+        assert!(!report.coverage.partial);
+        assert!(report.coverage.unsupported_code_extensions.is_empty());
     }
 
     /// Estrutura parcialmente desconhecida gera revisões, nunca conclusões inventadas.
@@ -187,6 +192,11 @@ mod tests {
 
         assert_eq!(report.limitations.len(), 1);
         assert!(report.limitations[0].contains("src/domain/broken.rs"));
+        assert_eq!(report.coverage.code_files_included, 5);
+        assert_eq!(report.coverage.code_files_analyzed, 4);
+        assert_eq!(report.coverage.code_files_not_analyzed, 1);
+        assert!(report.coverage.partial);
+        assert!(report.coverage.unsupported_code_extensions.is_empty());
     }
 
     /// Projeto TypeScript/JavaScript com arestas permitidas, proibidas e ambíguas.
@@ -397,6 +407,38 @@ mod tests {
             Some("0 arestas resolvidas incidentes")
         );
         assert!(finding.confidence.is_none());
+    }
+
+    /// Código incluído sem analisador torna explícita a cobertura parcial.
+    #[test]
+    fn partial_coverage_fixture_exposes_unanalyzed_code_without_inventing_findings() {
+        let root = project_fixture("partial_coverage");
+        let report = audit_project(&root).expect("audit must succeed");
+
+        assert_eq!(report, audit_project(&root).expect("audit must succeed"));
+        assert_eq!(report.project, "projeto-cobertura-parcial");
+        assert_eq!(report.summary.files_included, 5);
+        assert_eq!(report.summary.edges, 1);
+        assert_eq!(report.summary.findings, 0);
+        assert!(!report.has_findings());
+
+        let coverage = &report.coverage;
+        assert_eq!(coverage.code_files_included, 4);
+        assert_eq!(coverage.code_files_analyzed, 2);
+        assert_eq!(coverage.code_files_not_analyzed, 2);
+        assert!(coverage.partial);
+        assert_eq!(coverage.unsupported_code_extensions.len(), 2);
+        assert_eq!(coverage.unsupported_code_extensions[0].extension, "go");
+        assert_eq!(coverage.unsupported_code_extensions[0].files, 1);
+        assert_eq!(coverage.unsupported_code_extensions[1].extension, "rb");
+        assert_eq!(coverage.unsupported_code_extensions[1].files, 1);
+
+        assert_eq!(report.limitations.len(), 1);
+        let limitation = &report.limitations[0];
+        assert!(limitation.contains("cobertura parcial"));
+        assert!(limitation.contains("sem analisador"));
+        assert!(limitation.contains(".go (1)"));
+        assert!(limitation.contains(".rb (1)"));
     }
 
     #[test]

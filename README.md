@@ -2,7 +2,7 @@
 
 Ferramenta local para comparar a arquitetura pretendida de um projeto com a arquitetura realmente implementada. Cada achado deve apontar a regra violada, os arquivos envolvidos e, quando possível, as linhas relevantes. O contrato arquitetural (`auditor.toml`) pertence ao usuário e é versionado junto ao projeto auditado.
 
-**Status atual:** Etapa 8 — aplicação desktop local concluída. A CLI cria um modelo de `auditor.toml`, inventaria arquivos, imprime o grafo de dependências, aplica regras determinísticas, gera relatórios em texto, JSON ou Markdown e registra execuções em SQLite. A aplicação desktop reutiliza o mesmo núcleo para abrir um projeto, auditar, filtrar achados, visualizar o grafo e consultar o histórico. A extensão VS Code ainda não foi iniciada.
+**Status atual:** Etapa 9 — extensão VS Code concluída. A CLI cria um modelo de `auditor.toml`, inventaria arquivos, imprime o grafo de dependências, aplica regras determinísticas, gera relatórios em texto, JSON ou Markdown e registra execuções em SQLite. A aplicação desktop e a extensão VS Code reutilizam o mesmo núcleo: a desktop oferece a interface gráfica local e a extensão leva os achados ao painel Problems do editor.
 
 ## Documentação
 
@@ -13,8 +13,9 @@ Ferramenta local para comparar a arquitetura pretendida de um projeto com a arqu
 
 ## Direção técnica definida no plano
 
-- Núcleo de auditoria em Rust, reutilizado pela CLI e pela futura aplicação desktop.
+- Núcleo de auditoria em Rust, reutilizado pela CLI, pela aplicação desktop e pela extensão VS Code.
 - Interface desktop implementada com Tauri 2, React e TypeScript.
+- Extensão VS Code implementada sobre a interface JSON da CLI, sem daemon e sem regras locais.
 - Histórico local em SQLite; contrato dos projetos auditados em TOML.
 - Processamento local e auditoria somente leitura por padrão.
 - Regras determinísticas, sem dependência de IA ou de internet para o funcionamento básico.
@@ -154,6 +155,23 @@ Segurança: apenas `core:default` e `dialog:allow-open` foram concedidos à jane
 Limitações conhecidas: o caminho do banco é relativo ao diretório de execução do aplicativo (use um caminho absoluto no painel para fixá-lo); o empacotamento de instaladores está desativado (`bundle.active = false`), então `tauri build` gera somente o executável; o ícone incluído é técnico e substituível. A comparação de execuções continua disponível pela CLI, não pela interface.
 
 O critério de conclusão foi verificado por testes de adaptação: o comando `audit_project` devolve exatamente o mesmo `AuditReport` produzido por `auditor-core`, e o binário de release foi gerado e iniciado com sucesso.
+
+## Extensão VS Code (Etapa 9)
+
+A extensão em `extensions/vscode` detecta `auditor.toml` na pasta aberta, oferece auditoria manual pelo paleta de comandos ou menu de contexto, converte o JSON da CLI em diagnósticos do painel **Problems** e abre o arquivo/linha de cada achado. A barra de status mostra a última auditoria e o estado é restaurado ao reabrir o workspace.
+
+```sh
+cd extensions/vscode
+npm install
+npm test
+npm run package
+```
+
+O comando `npm test` compila o TypeScript e executa 4 testes puros de conversão; `npm run package` gera `vibe-coding-auditor-0.1.0.vsix`. O executável usado vem de `vibeCodingAuditor.cliPath` (padrão: procurar no `PATH` e depois em `target/release`/`target/debug` da pasta aberta). A extensão aceita os códigos de saída `0` e `1` da CLI; somente códigos maiores que `1` são falha.
+
+Mapeamento: `error` → `Error`, `warning` e `needs_review` → `Warning`, `info` → `Information`. O `rule_id` vira código do diagnóstico e a mensagem inclui `id`, evidência, expectativa e sugestão. Nenhuma regra é avaliada na extensão e nenhum daemon é criado.
+
+Limitações: não há testes automatizados dentro da host do VS Code; a verificação foi feita com testes de conversão, empacotamento e um smoke CLI→modelo nas três fixtures. O estado local guarda metadados e linhas de evidência já presentes no relatório, não conteúdo integral de arquivos. A extensão não acessa o histórico SQLite. `npm audit` aponta 2 alertas moderados apenas em dependência de desenvolvimento do `@vscode/vsce` (`0` em runtime); a versão anterior sugerida pelo auditor era pior, com 3 alertas e um módulo nativo adicional.
 
 ## Execução
 

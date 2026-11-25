@@ -314,3 +314,31 @@ Não foram criados `Cargo.toml`, `auditor.example.toml`, `.gitignore`, diretóri
 - **Motivo:** a etapa deve provar que a aplicação abre e usa o mesmo motor, não que gera um instalador de distribuição.
 - **Alternativa rejeitada:** marcar a etapa como concluída apenas com `cargo check` — não provaria que o frontend e o contexto Tauri funcionam juntos.
 - **Impacto:** `cargo check`, `cargo test` (78 testes: 65 no núcleo, 10 na CLI e 3 no desktop), `cargo fmt --check`, `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `npm install`, `npm run build` e `npm run tauri build` passaram. `target/release/auditor-desktop.exe` foi gerado e iniciou. Limitações registradas no `README.md`: banco relativo ao cwd, bundle desativado, ícone técnico e ausência de comparação na interface. Extensão VS Code não foi iniciada.
+
+## D9.1 — CLI como interface pública da extensão
+
+- **Decisão:** a extensão executa `vibe-coding-auditor audit <pasta> --format json` e converte o `AuditReport` recebido. O código de saída `1` é tratado como “achados presentes”, não como falha; somente `>1` gera mensagem de erro.
+- **Motivo:** o plano exige consumir uma interface pública e estável sem criar daemon. A CLI já é testada, determinística e produz exatamente o modelo usado pela desktop.
+- **Alternativa rejeitada:** FFI/N-API com o núcleo ou reimplementação das regras em TypeScript — acrescentariam build nativo, acoplamento de versão ou risco de divergência dos achados.
+- **Impacto:** nenhuma mudança no núcleo, na CLI ou na desktop. O setting `vibeCodingAuditor.cliPath` permite apontar o executável; o padrão procura no `PATH` e em `target/release`/`target/debug` da pasta aberta.
+
+## D9.2 — Conversão de achados em diagnósticos
+
+- **Decisão:** mover a conversão para `src/model.ts`, sem importar a API do VS Code, e converter os descritores em `vscode.Diagnostic` somente em `extension.ts`. Severidades: `error` → `Error`; `warning` e `needs_review` → `Warning`; `info` → `Information`.
+- **Motivo:** `needs_review` exige decisão humana, mas não é violação comprovada; classificá-lo como `Error` inventaria certeza. Isolar a conversão permite testá-la com `node --test`, sem baixar a host do VS Code.
+- **Alternativa rejeitada:** criar biblioteca de teste do VS Code ou gerar diagnósticos diretamente na extensão — dependência pesada e lógica sem teste automatizado simples.
+- **Impacto:** 4 testes novos cobrem mapeamento de severidade, conversão de linhas 1-based, mensagem rastreável e preservação de arquivo/regra. O `rule_id` vira `Diagnostic.code`; a mensagem contém `id`, evidência, expectativa e sugestão.
+
+## D9.3 — Estado da última auditoria e navegação
+
+- **Decisão:** detectar `auditor.toml` na ativação, publicar o context key `vibeCodingAuditor.projectConfigured`, mostrar state na barra de status e restaurar o último relatório do `workspaceState`. O comando “Abrir achado...” usa o seletor rápido e posiciona o cursor na linha do achado.
+- **Motivo:** os primeiros funções do plano pedem detecção do projeto configurado, estado da última auditoria e abertura do arquivo/linha. Guardar apenas o relatório evita reler ou copiar arquivos do projeto.
+- **Alternativa rejeitada:** varredura em segundo plano ou cache do conteúdo integral dos arquivos — ambos contrariam os limites de somente leitura e privacidade.
+- **Impacto:** o estado local contém metadados, contagens, achados e linhas de evidência já presentes no relatório. “Ocultar diagnósticos” limpa apenas o painel; a auditoria permanece registrada no estado. Nenhum arquivo do projeto é modificado.
+
+## D9.4 — Verificação, empacotamento e limitações
+
+- **Decisão:** encerrar a Etapa 9 com testes de conversão, geração do `.vsix` e smoke da sequência CLI → JSON → diagnósticos nas três fixtures, sem instalar extensões na instância do usuário.
+- **Motivo:** o critério é que os achados no VS Code correspondam aos relatórios do núcleo. A verificação direta do contrato de dados prova isso sem automatizar a host gráfica.
+- **Alternativa rejeitada:** instalar a extensão com `code --install-extension` apenas para o teste — mudaria o ambiente do usuário sem necessidade. Também foi rejeitado o downgrade de `@vscode/vsce` para `3.9.1`: aumentou os alertas de `2` para `3` e trouxe um módulo nativo.
+- **Impacto:** `npm test` passou com 4 testes; `npm run package` gerou `vibe-coding-auditor-0.1.0.vsix` com 7 arquivos. Smoke: `clean` = 0 achados/0 diagnósticos/saída `0`; `dependencies` = 7/7/saída `1`; `partial` = 4/4/saída `1`. `npm audit --omit=dev` retornou `0`; `npm audit` mantém 2 alertas moderados apenas no `@vscode/vsce` de desenvolvimento. Não há testes automatizados dentro da host do VS Code; extensão não foi instalada; Etapa 10 não foi iniciada.

@@ -1,0 +1,68 @@
+{
+  "name": "vibe-coding-auditor",
+  "displayName": "Vibe Coding Auditor",
+  "description": "Mostra no VS Code os achados determinísticos produzidos pelo núcleo do Vibe Coding Auditor.",
+  "version": "0.1.0",
+  "publisher": "dioneyfroes-coder",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dioneyfroes-coder/VibeCodingAuditor.git"
+  },
+  "engines": {
+    "vscode": "^1.146.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "icon": "icon.png",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "vibeCodingAuditor.audit",
+        "title": "Vibe Coding Auditor: Auditar projeto"
+      },
+      {
+        "command": "vibeCodingAuditor.openFinding",
+        "title": "Vibe Coding Auditor: Abrir achado..."
+      },
+      {
+        "command": "vibeCodingAuditor.clearDiagnostics",
+        "title": "Vibe Coding Auditor: Ocultar diagnósticos"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "vibeCodingAuditor.audit",
+          "when": "explorerResourceIsFolder && vibeCodingAuditor.projectConfigured",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Vibe Coding Auditor",
+      "properties": {
+        "vibeCodingAuditor.cliPath": {
+          "type": "string",
+          "default": "vibe-coding-auditor",
+          "description": "Caminho para o executável vibe-coding-auditor. O valor padrão procura no PATH e, em seguida, em target/release e target/debug da pasta aberta."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "test": "npm run compile && node --test out/model.test.js",
+    "package": "npm run compile && vsce package --no-dependencies --out vibe-coding-auditor-0.1.0.vsix"
+  },
+  "devDependencies": {
+    "@types/node": "24.9.2",
+    "@types/vscode": "1.146.0",
+    "@vscode/vsce": "4.1.1",
+    "typescript": "7.0.2"
+  }
+}

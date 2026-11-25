@@ -3,3 +3,5 @@ data/
 node_modules/
 apps/desktop/dist/
 apps/desktop/src-tauri/gen/schemas/
+extensions/vscode/out/
+*.vsix

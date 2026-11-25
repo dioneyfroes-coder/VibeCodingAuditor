@@ -13,7 +13,7 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 | 6 | Registrar histórico local em SQLite | Concluída em 25/11/2026 — 73 testes passaram; `record`, `list`, `show` e `compare` validados |
 | 7 | Provar o núcleo antes da interface gráfica | Concluída em 25/11/2026 — três projetos fictícios auditados pela CLI; 75 testes passaram |
 | 8 | Criar a aplicação desktop com Tauri | Concluída em 25/11/2026 — Tauri/React compilados e iniciados; 78 testes passaram |
-| 9 | Criar a extensão VS Code | Não iniciada |
+| 9 | Criar a extensão VS Code | Concluída em 25/11/2026 — `.vsix` gerado; diagnósticos conferem com a CLI; 82 testes passaram |
 | 10 | Expandir linguagens e recursos | Não iniciada (após MVP estável) |
 
 ## Critérios da Etapa 0
@@ -117,3 +117,18 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 - [x] `cargo check`, `cargo test` (78 testes: 65 no núcleo, 10 na CLI e 3 no desktop), `cargo fmt --check` e `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` passaram
 - [x] `npm install`, `npm run build` e `npm run tauri build` passaram; `auditor-desktop.exe` foi gerado e iniciado
 - [x] Não antecipar a extensão VS Code da Etapa 9
+
+## Critérios da Etapa 9
+
+- [x] Criar `extensions/vscode` consumindo a interface JSON da CLI, sem daemon e sem regras na extensão
+- [x] Detectar `auditor.toml` na pasta aberta e publicar o estado no contexto do editor
+- [x] Acionar auditoria manual pela paleta de comandos e pelo menu de contexto da pasta
+- [x] Mostrar achados no painel Problems com severidade, código da regra e mensagem rastreável
+- [x] Abrir arquivo e linha do achado selecionado
+- [x] Mostrar e restaurar o estado da última auditoria na barra de status
+- [x] Aceitar os códigos de saída `0` e `1` da CLI como resultados válidos
+- [x] `npm test` com 4 testes puros de conversão e `npm run package` gerando `vibe-coding-auditor-0.1.0.vsix`
+- [x] Smoke CLI → JSON → diagnósticos: `clean` 0/0, `dependencies` 7/7, `partial` 4/4
+- [x] `cargo test` permaneceu com 78 testes; total verificado: 82 testes (78 Rust e 4 da extensão)
+- [x] Limitações registradas: sem testes na host do VS Code, alerta moderado apenas no `@vscode/vsce` de desenvolvimento e sem histórico na extensão
+- [x] Não iniciar a Etapa 10

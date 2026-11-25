@@ -1,0 +1,9 @@
+.vscode/**
+.vscode-test/**
+src/**
+out/**/*.test.js
+tsconfig.json
+node_modules/**
+*.vsix
+**/.DS_Store
+**/Thumbs.db

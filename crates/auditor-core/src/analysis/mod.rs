@@ -9,7 +9,7 @@
 mod python;
 mod typescript;
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::error::Error;
 use std::fmt;
 use std::fs;
@@ -44,11 +44,50 @@ pub(super) fn find_word(text: &str, word: &str, from: usize) -> Option<usize> {
     None
 }
 
+/// Tamanho mínimo de uma linha para ser comparada como duplicata.
+const DUPLICATE_LINE_MIN_LEN: usize = 40;
+
+/// Indica se a linha é comentário ou separador, que não caracteriza duplicação.
+fn is_duplicate_candidate(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.chars().count() < DUPLICATE_LINE_MIN_LEN {
+        return false;
+    }
+    ![
+        "//", "/*", "*", "#", "--", "\"\"\"", "import ", "from ", "use ", "export ", "require(",
+    ]
+    .iter()
+    .any(|marker| trimmed.starts_with(marker))
+}
+
+/// Registra linhas de código candidatas a duplicação por arquivo.
+fn collect_duplicate_lines(
+    duplicates: &mut BTreeMap<String, BTreeSet<String>>,
+    path: &str,
+    text: &str,
+) {
+    for line in text.lines().filter(|line| is_duplicate_candidate(line)) {
+        duplicates
+            .entry(line.trim().to_owned())
+            .or_default()
+            .insert(path.to_owned());
+    }
+}
+
 /// Indica se a extensão possui analisador de dependências disponível.
 pub fn is_source_file(extension: Option<&str>) -> bool {
     extension == Some("rs")
         || typescript::is_supported_extension(extension)
         || python::is_supported_extension(extension)
+}
+
+/// Trecho de código idêntico encontrado em mais de um arquivo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DuplicateLine {
+    /// Linha normalizada, sem espaços nas extremidades.
+    pub text: String,
+    /// Arquivos que contêm a linha, em ordem lexicográfica.
+    pub files: Vec<String>,
 }
 
 /// Resultado da análise do projeto auditado.
@@ -66,6 +105,8 @@ pub struct Analysis {
     pub module_declarations: Vec<ModuleDeclaration>,
     /// Construções ou arquivos que a primeira versão não conseguiu analisar.
     pub limitations: Vec<String>,
+    /// Linhas idênticas em mais de um arquivo de código incluído.
+    pub duplicate_lines: Vec<DuplicateLine>,
 }
 
 /// Pacotes descobertos no workspace Cargo.
@@ -248,9 +289,11 @@ pub fn analyze(
         reviews: Vec::new(),
         module_declarations: Vec::new(),
         limitations: Vec::new(),
+        duplicate_lines: Vec::new(),
     };
 
     let mut seen_edges = HashSet::new();
+    let mut duplicate_candidates: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
 
     let mut typescript_files = false;
     let mut python_files = false;
@@ -277,6 +320,7 @@ pub fn analyze(
             }
         };
 
+        collect_duplicate_lines(&mut duplicate_candidates, &file.path, &text);
         let module = module_for_file(contract, &file.path, &mut analysis);
 
         if extension == Some("rs") {
@@ -343,6 +387,15 @@ pub fn analyze(
                 .to_owned(),
         );
     }
+
+    analysis.duplicate_lines = duplicate_candidates
+        .into_iter()
+        .filter(|(_, files)| files.len() > 1)
+        .map(|(text, files)| DuplicateLine {
+            text,
+            files: files.into_iter().collect(),
+        })
+        .collect();
 
     analysis.edges.sort_by(|left, right| {
         (&left.from, &left.to, &left.path).cmp(&(&right.from, &right.to, &right.path))
@@ -903,6 +956,20 @@ mod tests {
             vec!["crate".to_owned(), "infrastructure".to_owned()],
         ];
         assert_eq!(leaves, expected);
+    }
+
+    #[test]
+    fn duplicate_line_candidates_ignore_declarations_and_comments() {
+        assert!(is_duplicate_candidate(
+            "pub fn calcular_total_com_desconto_e_imposto(valor: f64) -> f64 { valor }"
+        ));
+        assert!(!is_duplicate_candidate(
+            "import { Entity } from \"../domain/entity\";"
+        ));
+        assert!(!is_duplicate_candidate(
+            "// comentário longo o suficiente para ser ignorado"
+        ));
+        assert!(!is_duplicate_candidate("curto"));
     }
 
     #[test]

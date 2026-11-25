@@ -170,3 +170,13 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 - [x] `cargo check`, `cargo test` (90 testes: 77 no núcleo, 10 na CLI e 3 no desktop), `cargo fmt --check`, `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` e `git diff --check` passaram
 - [x] Smoke na CLI: `concentration` = 3 arestas, 1 revisão, 0 limitações, saída `1`; conversão CLI→JSON→extensão gerou 1 diagnóstico `warning`; `npm test` da extensão passou
 - [x] Fixtures `clean`, `dependencies`, `partial`, `typescript` e `python` mantiveram as contagens anteriores
+
+## Critérios de duplicação exata (após a Etapa 10)
+
+- [x] Regra `code.duplicated` no núcleo, sem nova dependência e sem campo novo no contrato
+- [x] Coleta de linhas já lidas pela análise, ignorando comentários e declarações de import/export/use
+- [x] Limite explícito de 40 caracteres e repetição em mais de um arquivo, com identificador FNV-1a estável
+- [x] Fixture `tests/fixtures/projects/duplication` e teste de integração
+- [x] Limitações registradas: somente repetição exata de linha, sem semântica ou blocos
+- [x] `cargo check`, `cargo test` (92 testes: 79 no núcleo, 10 na CLI e 3 no desktop), `cargo fmt --check`, `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` e `git diff --check` passaram
+- [x] Smoke na CLI: `duplication` = 1 aresta, 1 revisão, 0 limitações, saída `1`; conversão CLI→JSON→extensão gerou 1 diagnóstico `warning`

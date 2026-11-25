@@ -25,6 +25,8 @@ pub const RULE_DEPENDENCY_CYCLE: &str = "dep.cycle";
 pub const RULE_MODULE_WITHOUT_FILES: &str = "module.no_files";
 /// Identificador estável da regra de concentração de dependências.
 pub const RULE_MODULE_CONCENTRATION: &str = "module.concentration";
+/// Identificador estável da regra de linha de código duplicada.
+pub const RULE_CODE_DUPLICATED: &str = "code.duplicated";
 
 /// Número de módulos distintos que caracteriza concentração de dependências.
 const CONCENTRATION_THRESHOLD: usize = 3;
@@ -37,6 +39,7 @@ pub fn evaluate(contract: &Contract, inventory: &Inventory, analysis: &Analysis)
     findings.extend(review_findings(analysis));
     findings.extend(cycle_findings(analysis));
     findings.extend(module_concentration_findings(contract, analysis));
+    findings.extend(duplicated_line_findings(analysis));
     findings.extend(module_without_files_findings(contract, inventory));
     findings.sort_by(|left, right| left.id.cmp(&right.id));
     findings
@@ -288,6 +291,52 @@ fn module_concentration_findings(contract: &Contract, analysis: &Analysis) -> Ve
         .collect()
 }
 
+/// Hash FNV-1a estável para identificar um trecho duplicado sem depender da versão do Rust.
+fn stable_hash(text: &str) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in text.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// Converte linhas idênticas em revisões, nunca em violações comprovadas.
+fn duplicated_line_findings(analysis: &Analysis) -> Vec<Finding> {
+    analysis
+        .duplicate_lines
+        .iter()
+        .map(|duplicate| Finding {
+            id: format!(
+                "{}:{:016x}:{}",
+                RULE_CODE_DUPLICATED,
+                stable_hash(&duplicate.text),
+                duplicate.files.join("|")
+            ),
+            rule_id: RULE_CODE_DUPLICATED.to_owned(),
+            severity: Severity::NeedsReview,
+            title: "Trecho de código duplicado".to_owned(),
+            message: format!(
+                "A mesma linha de código aparece em {} arquivos incluídos.",
+                duplicate.files.len()
+            ),
+            path: duplicate.files[0].clone(),
+            line_start: None,
+            line_end: None,
+            evidence: Some(format!(
+                "trecho repetido em {}: {}",
+                duplicate.files.join(", "),
+                duplicate.text
+            )),
+            expected: "Trechos idênticos devem ser revisados antes de serem aceitos como duplicação intencional."
+                .to_owned(),
+            suggestion: "Extraia o trecho para uma função compartilhada ou confirme que a repetição é intencional."
+                .to_owned(),
+            confidence: None,
+        })
+        .collect()
+}
+
 /// Identifica módulos declarados sem arquivos de código correspondentes.
 fn module_without_files_findings(contract: &Contract, inventory: &Inventory) -> Vec<Finding> {
     let source_files: Vec<&str> = inventory
@@ -459,6 +508,7 @@ mod tests {
         assert_eq!(RULE_DEPENDENCY_CYCLE, "dep.cycle");
         assert_eq!(RULE_MODULE_WITHOUT_FILES, "module.no_files");
         assert_eq!(RULE_MODULE_CONCENTRATION, "module.concentration");
+        assert_eq!(RULE_CODE_DUPLICATED, "code.duplicated");
     }
 
     #[test]
@@ -478,6 +528,7 @@ mod tests {
         assert_eq!(count(RULE_DEPENDENCY_CYCLE), 3);
         assert_eq!(count(RULE_MODULE_WITHOUT_FILES), 0);
         assert_eq!(count(RULE_MODULE_CONCENTRATION), 0);
+        assert_eq!(count(RULE_CODE_DUPLICATED), 0);
     }
 
     #[test]

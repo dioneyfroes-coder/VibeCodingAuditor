@@ -335,6 +335,38 @@ mod tests {
         assert!(finding.confidence.is_none());
     }
 
+    /// Linha idêntica em dois arquivos gera revisão, não erro.
+    #[test]
+    fn duplication_fixture_flags_repeated_line_without_inventing_semantics() {
+        let root = project_fixture("duplication");
+        let report = audit_project(&root).expect("audit must succeed");
+
+        assert_eq!(report, audit_project(&root).expect("audit must succeed"));
+        assert_eq!(report.project, "projeto-duplicacao");
+        assert_eq!(report.summary.edges, 1);
+        assert_eq!(report.summary.findings, 1);
+        assert_eq!(report.summary.errors, 0);
+        assert_eq!(report.summary.warnings, 0);
+        assert_eq!(report.summary.needs_review, 1);
+        assert!(report.limitations.is_empty());
+
+        let finding = report
+            .findings
+            .first()
+            .expect("duplication finding must exist");
+        assert_eq!(finding.rule_id, "code.duplicated");
+        assert_eq!(finding.severity, Severity::NeedsReview);
+        assert_eq!(finding.path, "crates/application/src/lib.rs");
+        assert!(
+            finding
+                .evidence
+                .as_deref()
+                .is_some_and(|evidence| evidence.contains("crates/domain/src/lib.rs")
+                    && evidence.contains("calcular_total_com_desconto_e_imposto"))
+        );
+        assert!(finding.confidence.is_none());
+    }
+
     #[test]
     fn missing_root_is_an_audit_error() {
         let missing = project_root().join("nao-existe");

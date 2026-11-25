@@ -83,6 +83,8 @@ Limitações explícitas: em Rust, imports dentro de corpos de funções, macros
 
 A regra `module.concentration` usa apenas arestas resolvidas entre módulos declarados, deduplicadas por par origem/destino. Ela conta origens e destinos distintos e sinaliza revisão quando um deles chega a 3; o limite é fixo para manter a regra determinística e não vira parâmetro do contrato. O custo é `O(M + E)` por auditoria, sem leitura adicional de arquivos; a decisão sobre refatorar permanece com o usuário.
 
+A regra `code.duplicated` compara linhas já lidas pela análise, ignorando comentários e declarações de import/export/use. Somente linhas com 40 ou mais caracteres e repetidas em mais de um arquivo viram revisão; o identificador usa um hash FNV-1a estável do trecho, sem dependência externa. O custo é linear no total de linhas incluídas. Não há detecção semântica, normalização de variáveis nem comparação de blocos: apenas repetição exata de uma linha.
+
 ## Motor de regras e relatórios
 
 O comando `audit <raiz>` reutiliza o mesmo pipeline do núcleo e aplica estas regras com identificadores estáveis:
@@ -96,6 +98,7 @@ O comando `audit <raiz>` reutiliza o mesmo pipeline do núcleo e aplica estas re
 | `dep.cycle` | `warning` | Grafo contém ciclo simples entre módulos, incluindo autoimportação. |
 | `module.no_files` | `warning` | Módulo declarado sem arquivo de código correspondente. |
 | `module.concentration` | `needs_review` | Módulo com 3 ou mais origens ou destinos distintos no grafo resolvido. |
+| `code.duplicated` | `needs_review` | Linha idêntica com 40 ou mais caracteres em dois ou mais arquivos. |
 
 Cada achado contém `id`, `rule_id`, `severity`, `title`, `message`, `path`, `line_start`, `line_end`, `evidence`, `expected`, `suggestion` e `confidence`. Todas as regras são determinísticas, então `confidence` é sempre nulo; o auditor não inventa precisão numérica nem aplica sugestões automaticamente. Dependências não resolvidas e arquivos não mapeados são sinais para decisão humana, não violações comprovadas.
 

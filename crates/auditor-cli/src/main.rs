@@ -41,6 +41,46 @@ enum Commands {
         #[arg(long)]
         output: Option<PathBuf>,
     },
+    /// Registra, consulta e compara auditorias no banco local.
+    History {
+        /// Caminho do banco de histórico.
+        #[arg(long, default_value = auditor_core::history::DEFAULT_DATABASE, global = true)]
+        database: PathBuf,
+        /// Operação de histórico desejada.
+        #[command(subcommand)]
+        action: HistoryCommands,
+    },
+}
+
+/// Operações disponíveis no subcomando `history`.
+#[derive(Subcommand, Debug)]
+enum HistoryCommands {
+    /// Executa a auditoria e grava o resultado no histórico.
+    Record {
+        /// Diretório raiz do projeto a ser auditado.
+        root: PathBuf,
+    },
+    /// Lista execuções gravadas, da mais recente para a mais antiga.
+    List {
+        /// Filtra por nome de projeto do contrato.
+        #[arg(long)]
+        project: Option<String>,
+        /// Número máximo de execuções mostradas.
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
+    /// Mostra uma execução gravada com achados e limitações.
+    Show {
+        /// Identificador da execução.
+        id: i64,
+    },
+    /// Compara duas execuções e separa achados novos, resolvidos e persistentes.
+    Compare {
+        /// Identificador da execução usada como linha de base.
+        before: i64,
+        /// Identificador da execução comparada com a linha de base.
+        after: i64,
+    },
 }
 
 /// Formato de saída aceito pelo subcomando `audit`.
@@ -96,6 +136,7 @@ fn dispatch_command(args: Args) -> Result<u8, Box<dyn std::error::Error>> {
             format,
             output,
         }) => audit_command(&root, format, output.as_deref()),
+        Some(Commands::History { database, action }) => history_command(&database, action),
         None => Ok(0),
     }
 }
@@ -213,6 +254,44 @@ fn audit_exit_code(report: &auditor_core::report::AuditReport) -> u8 {
     if report.has_findings() { 1 } else { 0 }
 }
 
+/// Executa uma operação de histórico e devolve o código de saída.
+fn history_command(
+    database: &Path,
+    action: HistoryCommands,
+) -> Result<u8, Box<dyn std::error::Error>> {
+    use auditor_core::history::{self, History};
+
+    match action {
+        HistoryCommands::Record { root } => {
+            let report = auditor_core::audit::audit_project(&root)?;
+            let mut store = History::open(database)?;
+            let id = store.record(&root, &report)?;
+            println!("Execução #{id} gravada em {}", store.path().display());
+            let detail = store.get(id)?;
+            println!("{}", history::render_run_detail(&detail));
+            Ok(audit_exit_code(&report))
+        }
+        HistoryCommands::List { project, limit } => {
+            let store = History::open(database)?;
+            let runs = store.list(project.as_deref(), limit)?;
+            println!("{}", history::render_run_list(&runs));
+            Ok(0)
+        }
+        HistoryCommands::Show { id } => {
+            let store = History::open(database)?;
+            let detail = store.get(id)?;
+            println!("{}", history::render_run_detail(&detail));
+            Ok(0)
+        }
+        HistoryCommands::Compare { before, after } => {
+            let store = History::open(database)?;
+            let comparison = store.compare(before, after)?;
+            println!("{}", history::render_comparison(&comparison));
+            Ok(0)
+        }
+    }
+}
+
 /// Texto estável usado na saída do terminal para cada tipo de aresta.
 fn dependency_kind_label(kind: auditor_core::analysis::DependencyKind) -> &'static str {
     match kind {
@@ -229,6 +308,7 @@ mod tests {
 
     use super::Args;
     use super::Commands;
+    use super::HistoryCommands;
     use super::OutputFormat;
     use super::Path;
     use super::audit_exit_code;
@@ -317,6 +397,55 @@ mod tests {
             Args::try_parse_from(["vibe-coding-auditor", "audit", "projeto", "--format", "xml"])
                 .expect_err("unknown format must be rejected");
         assert_eq!(error.kind(), ErrorKind::InvalidValue);
+    }
+
+    #[test]
+    fn history_subcommands_parse_database_and_arguments() {
+        let args = Args::try_parse_from([
+            "vibe-coding-auditor",
+            "history",
+            "--database",
+            "historico.db",
+            "record",
+            "projeto",
+        ])
+        .expect("history record must parse");
+        match args.command {
+            Some(Commands::History { database, action }) => {
+                assert_eq!(database.as_path(), Path::new("historico.db"));
+                assert!(
+                    matches!(action, HistoryCommands::Record { root } if root.as_path() == Path::new("projeto"))
+                );
+            }
+            _ => panic!("history command must be selected"),
+        }
+
+        let args = Args::try_parse_from([
+            "vibe-coding-auditor",
+            "history",
+            "compare",
+            "1",
+            "2",
+            "--database",
+            "outro.db",
+        ])
+        .expect("history compare must accept a global database option");
+        match args.command {
+            Some(Commands::History { database, action }) => {
+                assert_eq!(database.as_path(), Path::new("outro.db"));
+                assert!(
+                    matches!(action, HistoryCommands::Compare { before, after } if before == 1 && after == 2)
+                );
+            }
+            _ => panic!("history command must be selected"),
+        }
+
+        let error = Args::try_parse_from(["vibe-coding-auditor", "history"])
+            .expect_err("history must require an operation");
+        assert_eq!(
+            error.kind(),
+            ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+        );
     }
 
     #[test]

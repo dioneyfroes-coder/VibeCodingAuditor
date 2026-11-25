@@ -10,7 +10,7 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 | 3 | Descobrir e inventariar o projeto | Concluída em 25/11/2026 — 16 testes passaram; `scan` validado em fixture |
 | 4 | Implementar a primeira análise de dependências Rust | Concluída em 25/11/2026 — 36 testes passaram; `analyze` validado em fixture |
 | 5 | Criar o motor de regras e os relatórios | Concluída em 25/11/2026 — 60 testes passaram; `audit` validado em três formatos |
-| 6 | Registrar histórico local em SQLite | Não iniciada |
+| 6 | Registrar histórico local em SQLite | Concluída em 25/11/2026 — 73 testes passaram; `record`, `list`, `show` e `compare` validados |
 | 7 | Provar o núcleo antes da interface gráfica | Não iniciada |
 | 8 | Criar a aplicação desktop com Tauri | Não iniciada |
 | 9 | Criar a extensão VS Code | Não iniciada |
@@ -79,3 +79,15 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 - [x] Garantir que os mesmos dados gerem relatórios idênticos e que cada achado traga arquivo, linha e evidência quando disponíveis
 - [x] Revisar paradigma, nomes descritivos, documentação de código e testes dos helpers
 - [x] `cargo check`, `cargo test` (60 testes: 51 no núcleo e 9 na CLI), `cargo fmt --check` e `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` passaram
+
+## Critérios da Etapa 6
+
+- [x] Salvar data/hora UTC, raiz canonicalizada, nome do projeto, versão do contrato e resumo da execução
+- [x] Salvar achados associados à execução, com severidade, local, evidência e sugestão
+- [x] Permitir listar execuções com filtro por projeto e limite, e consultar uma execução pelo identificador
+- [x] Comparar duas execuções e classificar achados novos, resolvidos e persistentes pelo identificador estável
+- [x] Definir política de migração versionada, sem downgrade automático e com rejeição explícita de schema mais novo
+- [x] Não armazenar conteúdo integral dos arquivos do usuário no banco
+- [x] Manter a renderização de texto do histórico no núcleo; a CLI apenas imprime
+- [x] Revisar paradigma, nomes descritivos, documentação de código e testes dos helpers
+- [x] `cargo check`, `cargo test` (73 testes: 63 no núcleo e 10 na CLI), `cargo fmt --check` e `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` passaram

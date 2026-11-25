@@ -20,6 +20,16 @@ pub enum Severity {
 }
 
 impl Severity {
+    /// Valor estável usado em JSON, banco de dados e comparações.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Warning => "warning",
+            Self::Info => "info",
+            Self::NeedsReview => "needs_review",
+        }
+    }
+
     /// Rótulo curto usado na saída legível.
     pub fn label(self) -> &'static str {
         match self {
@@ -63,6 +73,14 @@ pub struct Finding {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn severity_values_are_stable() {
+        assert_eq!(Severity::Error.as_str(), "error");
+        assert_eq!(Severity::Warning.as_str(), "warning");
+        assert_eq!(Severity::Info.as_str(), "info");
+        assert_eq!(Severity::NeedsReview.as_str(), "needs_review");
+    }
 
     #[test]
     fn severity_labels_are_stable() {

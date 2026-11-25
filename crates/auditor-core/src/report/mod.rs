@@ -309,7 +309,7 @@ impl AuditReport {
 }
 
 /// Formata o caminho e as linhas de um achado para saída legível.
-fn finding_location(finding: &Finding) -> String {
+pub fn finding_location(finding: &Finding) -> String {
     match (finding.line_start, finding.line_end) {
         (Some(start), Some(end)) if start == end => format!("{}:{}", finding.path, start),
         (Some(start), Some(end)) => format!("{}:{}-{}", finding.path, start, end),

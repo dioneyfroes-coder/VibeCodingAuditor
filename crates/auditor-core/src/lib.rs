@@ -10,6 +10,7 @@ pub mod audit;
 pub mod contract;
 pub mod discovery;
 pub mod findings;
+pub mod history;
 pub mod report;
 pub mod rules;
 

@@ -226,4 +226,42 @@ Não foram criados `Cargo.toml`, `auditor.example.toml`, `.gitignore`, diretóri
 - **Motivo:** manter o limite "a interface não implementa regras de auditoria" e permitir que a futura aplicação desktop reutilize o mesmo pipeline.
 - **Revisão:** nomes como `run` foram trocados por `dispatch_command`; campos, helpers e tipos públicos foram documentados; testes diretos cobrem regras, formatação de local, escape Markdown, serialização JSON, mapeamento de formatos e códigos de saída. Um teste tautológico sobre `ArchitectureStyle` foi removido e substituído por teste de autoimportação.
 - **Limitações conhecidas:** ciclos são enumerados como caminhos simples canônicos; a fixture produz três ciclos, não um. A detecção depende das arestas já classificadas na Etapa 4 e herda suas limitações (imports em corpos de funções, macros complexos, código gerado e nomes dinâmicos). Arquivos que não fazem parse continuam apenas em `limitations`, sem virar achado de erro.
-- **Impacto:** 60 testes no total (51 no núcleo e 9 na CLI), todos passando. Nenhuma persistência SQLite, interface desktop, extensão VS Code ou uso de IA foi adicionado.
+- **Impacto:** 60 testes no total (51 no núcleo e 9 na CLI), todos passando. Nenhuma persistência SQLite, interface desktop, extensão VS Code ou uso de IA foi adicionado. A última frase é substituída por D6.1 a partir da Etapa 6.
+
+## D6.1 — Dependência `rusqlite` com SQLite embarcado
+
+- **Decisão:** declarar `rusqlite = { version = "0.43.0", features = ["bundled"] }` no workspace e no `auditor-core`. Esta decisão substitui o escopo de dependências registrado em D4.7 e a ausência de SQLite registrada em D5.4.
+- **Motivo:** o plano exige histórico local em SQLite. A feature `bundled` compila o SQLite junto com o núcleo, sem depender de biblioteca do sistema nem de instalação externa no Windows. `rusqlite` mantém o histórico no processo local; a CLI e a futura interface compartilham o mesmo módulo.
+- **Alternativas rejeitadas:** arquivo JSON — contrariaria o plano; SQLite do sistema — dependeria de biblioteca externa não garantida; persistência na interface — violaria o limite de que a interface não implementa regras nem acessa dados diretamente.
+- **Verificação oficial:** <https://docs.rs/rusqlite/latest/rusqlite/> e <https://crates.io/api/v1/crates/rusqlite/0.43.0> confirmam 0.43.0, não yanked, licença MIT e MSRV 1.89, compatível com o rustc verificado no projeto. Os 17 pacotes adicionados ao `Cargo.lock` — `bitflags 2.13.2`, `cc 1.11.3`, `fallible-iterator 0.3.0`, `fallible-streaming-iterator 0.1.9`, `find-msvc-tools 0.1.15`, `foldhash 0.2.0`, `hashlink 0.12.2`, `libsqlite3-sys 0.40.0`, `pkg-config 0.3.34`, `rsqlite-vfs 0.2.0`, `rusqlite 0.43.0`, `shlex 2.0.1`, `smallvec 1.16.6`, `sqlite-wasm-rs 0.6.3`, `thiserror 2.0.21`, `thiserror-impl 2.0.21` e `vcpkg 0.2.15` — foram consultados na API oficial do crates.io: nenhum está yanked e todos os checksums conferem com o lockfile. Nenhuma ferramenta do sistema foi instalada, atualizada ou removida.
+- **Impacto:** `auditor-core` passou a depender de `rusqlite`; a CLI continua dependendo apenas de `clap` e do núcleo. O banco padrão é `data/auditor.db`, relativo ao diretório de trabalho, e o diretório `data/` já era ignorado pelo Git.
+
+## D6.2 — Dados gravados e privacidade
+
+- **Decisão:** gravar em `audit_runs` a data/hora em segundos Unix, a raiz canonicalizada, o nome do projeto, a versão do schema do contrato e o resumo; em `audit_findings`, os doze campos de cada achado; em `audit_limitations`, as limitações da análise. `Severity::as_str` passou a ser a representação estável de severidade no banco.
+- **Motivo:** o plano pede comparação reproduzível sem guardar código do usuário. O `id` estável do achado permite comparar execuções mesmo quando a mensagem muda; a linha de evidência já era necessária no relatório da Etapa 5.
+- **Alternativa rejeitada:** serializar o `AuditReport` inteiro em uma coluna JSON — perderia consultas por execução/achado e dificultaria a comparação por identificador.
+- **Impacto:** nenhum conteúdo integral de arquivo é gravado; a verificação sobre a fixture confirmou que `pub fn forbidden()` não aparece no banco, enquanto a evidência `use infrastructure::Client;` aparece. O prefixo `\\?\` do Windows é removido apenas na raiz exibida; ele não altera a auditoria nem os arquivos auditados.
+
+## D6.3 — Política de migração do banco
+
+- **Decisão:** manter `schema_migrations` com a versão aplicada. Na abertura, versão ausente aplica a migração `1` em transação; versão igual à suportada não altera nada; versão superior gera `HistoryError::UnsupportedSchema` e encerra a operação.
+- **Motivo:** o plano pede política explícita de migração. Falhar para frente é mais seguro que downgrade silencioso, que poderia descartar dados escritos por versão posterior.
+- **Alternativa rejeitada:** `CREATE TABLE IF NOT EXISTS` sem controle de versão — não detectaria schema mais novo nem permitiria evolução futura controlada.
+- **Impacto:** não há deleção, limpeza ou alteração destrutiva automática. Bancos de versões futuras exigem atualização do auditor; o tamanho do histórico cresce com novas execuções e cabe ao usuário gerenciar o arquivo.
+
+## D6.4 — Comandos de histórico e códigos de saída
+
+- **Decisão:** adicionar `history record`, `history list`, `history show` e `history compare`, com `--database` global ao subcomando. A renderização em texto (`render_run_list`, `render_run_detail`, `render_comparison`) fica no núcleo. `record` e `audit` retornam `0`/`1` conforme os achados da execução; `list`, `show` e `compare` retornam `0` em sucesso; qualquer falha retorna `2`.
+- **Motivo:** manter a CLI como despacho e saída, sem regras nem formatação duplicada. `record` precisa do mesmo código de `audit` porque executa a auditoria; consultas não são auditorias e não devem sinalizar achados como falha.
+- **Impacto:** formulários de data/hora e caminhos são determinísticos; comparações usam `BTreeSet` de identificadores e conservam a ordem gravada dos achados. Nenhum comando modifica o projeto auditado.
+
+## D6.5 — Revisão de paradigma, nomes, documentação e testes
+
+- **Paradigma:** monólito modular mantido. O módulo `history` pertence ao núcleo; `History::open`, `record`, `list`, `get` e `compare` são a API pública, e a CLI apenas encaminha argumentos e imprime o texto devolvido pelo núcleo.
+- **Nomes:** helpers receberam nomes descritivos — `database_error`, `display_root`, `format_utc`, `civil_from_days`, `read_optional_usize`, `read_usize`, `read_u32`, `conversion_error`, `parse_severity`, `summary_phrase`, `push_finding_header`, `push_detailed_findings` e `push_compact_findings`. O comando `run` da CLI continuou como `dispatch_command`, e `history_command` concentra as operações de histórico.
+- **Documentação:** todos os tipos públicos, campos e helpers do módulo `history` foram documentados; `finding_location` foi tornado público e documentado para reutilização consistente. O `README.md` registra comandos, dados gravados, limitações de privacidade, migração e códigos de saída.
+- **Testes:** 11 testes focados do histórico cobrem abertura/reabertura, listagem com filtro e limite, consulta, comparação, execução inexistente, schema mais novo, formatação UTC, severidades, prefixo do Windows e os três renderizadores. A CLI ganhou teste de parsing para `record` e `compare`, incluindo `--database` antes e depois da operação.
+- **Correções durante a implementação:** `rusqlite::Type` passou a ser importado de `rusqlite::types`; a união de `source()` com tipos diferentes foi separada; colunas opcionais de linha passaram por `read_optional_usize`; transações usam uma cópia do caminho para evitar conflito de empréstimo; o Clippy apontou dois closures redundantes, corrigidos antes da verificação final.
+- **Limitações conhecidas:** não há interface para apagar ou exportar o banco, nem compressão de histórico. A data é gravada em segundos, sem fuso horário configurável; a exibição converte para UTC. Comparações consideram apenas o `id` do achado: mudanças de severidade ou mensagem com o mesmo `id` são tratadas como persistentes, usando os dados da execução posterior.
+- **Impacto:** 73 testes no total (63 no núcleo e 10 na CLI), todos passando. Nenhuma interface desktop, extensão VS Code ou uso de IA foi adicionado.

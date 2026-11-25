@@ -2,7 +2,7 @@
 
 Ferramenta local para comparar a arquitetura pretendida de um projeto com a arquitetura realmente implementada. Cada achado deve apontar a regra violada, os arquivos envolvidos e, quando possível, as linhas relevantes. O contrato arquitetural (`auditor.toml`) pertence ao usuário e é versionado junto ao projeto auditado.
 
-**Status atual:** Etapa 5 — motor de regras e relatórios concluído. A CLI cria um modelo de `auditor.toml`, inventaria arquivos, imprime o grafo de dependências e aplica regras determinísticas, gerando saída em texto, JSON ou Markdown. Ainda não há histórico em SQLite nem interface desktop.
+**Status atual:** Etapa 6 — histórico local em SQLite concluído. A CLI cria um modelo de `auditor.toml`, inventaria arquivos, imprime o grafo de dependências, aplica regras determinísticas, gera relatórios em texto, JSON ou Markdown e registra execuções em SQLite para consulta e comparação. Ainda não há aplicação desktop.
 
 ## Documentação
 
@@ -38,6 +38,11 @@ cargo run -p auditor-cli -- analyze <raiz>
 cargo run -p auditor-cli -- audit <raiz>
 cargo run -p auditor-cli -- audit <raiz> --format json
 cargo run -p auditor-cli -- audit <raiz> --format markdown --output relatorio.md
+cargo run -p auditor-cli -- history record <raiz>
+cargo run -p auditor-cli -- history list
+cargo run -p auditor-cli -- history show <id>
+cargo run -p auditor-cli -- history compare <id-anterior> <id-posterior>
+cargo run -p auditor-cli -- history list --database /caminho/historico.db
 ```
 
 No Windows, com a pasta do projeto sincronizada pelo OneDrive, o Cargo pode emitir avisos `Acesso negado` ao finalizar sessões de compilação incremental. Para uma execução limpa do Clippy nesse ambiente:
@@ -92,8 +97,24 @@ Cada achado contém `id`, `rule_id`, `severity`, `title`, `message`, `path`, `li
 
 Os formatos disponíveis são `text` (padrão), `json` e `markdown`. Sem `--output`, o relatório vai para o terminal; com `--output <arquivo>`, o arquivo indicado é gravado e sobrescrito se já existir. O projeto auditado nunca é modificado.
 
+## Histórico local
+
+O banco padrão é `data/auditor.db`, relativo ao diretório de execução da CLI; esse diretório é ignorado pelo Git. `--database <arquivo>` pode ser usado antes ou depois da operação `history` para escolher outro local.
+
+| Comando | Finalidade |
+|---|---|
+| `history record <raiz>` | executa a auditoria e salva uma nova execução |
+| `history list` | lista execuções da mais recente para a mais antiga |
+| `history list --project <nome> --limit <n>` | filtra por nome do contrato e limita a quantidade |
+| `history show <id>` | mostra uma execução com achados e limitações |
+| `history compare <antes> <depois>` | classifica achados como novos, resolvidos ou persistentes |
+
+São gravados data/hora em UTC, raiz canonicalizada do projeto, nome e versão do schema do contrato, resumo da execução, achados e limitações. **O conteúdo integral dos arquivos auditados nunca é gravado**: de cada achado ficam apenas metadados e a linha de evidência já apresentada no relatório. A comparação usa o `id` estável de cada achado, não texto livre, e preserva a ordem dos achados gravados.
+
+Política de migração: a tabela `schema_migrations` registra a versão do schema do histórico. A versão atual é `1`; aberturas em bancos já migrados não alteram dados, e um banco com versão superior à suportada é rejeitado com mensagem explícita, sem downgrade ou exclusão automática. Não há comando de limpeza nesta etapa: o banco cresce com novas execuções e deve ser gerenciado pelo usuário.
+
 ## Execução
 
-O executável `vibe-coding-auditor` responde a `--help`, `--version`, `init <diretorio>`, `scan <raiz>`, `analyze <raiz>` e `audit <raiz>`. `init` cria `auditor.toml` sem sobrescrever arquivo existente; `scan` e `analyze` são somente leitura e servem para inspeção. `audit` produz achados e relatórios no formato escolhido.
+O executável `vibe-coding-auditor` responde a `--help`, `--version`, `init <diretorio>`, `scan <raiz>`, `analyze <raiz>`, `audit <raiz>` e `history <operacao>`. `init` cria `auditor.toml` sem sobrescrever arquivo existente; `scan` e `analyze` são somente leitura e servem para inspeção. `audit` produz achados e relatórios no formato escolhido. `history record` reutiliza a auditoria e grava o banco; `list`, `show` e `compare` apenas leem o banco.
 
-Códigos de saída: `0` quando a auditoria não gera achados, `1` quando há pelo menos um achado e `2` para falha operacional ou argumento inválido. Esses códigos valem para todos os subcomandos; `init`, `scan` e `analyze` retornam `0` em sucesso e `2` em falha.
+Códigos de saída: `0` quando a auditoria não gera achados, `1` quando há pelo menos um achado e `2` para falha operacional ou argumento inválido. `audit` e `history record` usam `0`/`1` conforme os achados da execução; `init`, `scan`, `analyze`, `history list`, `history show` e `history compare` retornam `0` em sucesso e `2` em falha.

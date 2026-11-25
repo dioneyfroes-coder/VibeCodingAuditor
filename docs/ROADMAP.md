@@ -1,6 +1,6 @@
 # Roadmap
 
-Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md). Uma etapa só avança depois de concluída, testada e revisada.
+Estado consolidado das Etapas 0–10 e dos trabalhos posteriores. Decisões e escopo em [docs/DECISIONS.md](DECISIONS.md). Uma etapa só avança depois de concluída, testada e revisada.
 
 | Etapa | Nome | Status |
 |---|---|---|

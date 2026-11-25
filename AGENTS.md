@@ -60,4 +60,4 @@ Construir uma aplicação desktop local para comparar a arquitetura pretendida d
 - Se o OneDrive causar avisos de sessão incremental: `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`
 
 ## Referências
-- O plano integral está em `PLANO_VIBE_CODING_AUDITOR.md` e deve ser preservado.
+- O estado corrente está em `docs/ROADMAP.md` e as decisões em `docs/DECISIONS.md`. O plano inicial foi removido após o fechamento da primeira fase, por decisão explícita (`R8`).

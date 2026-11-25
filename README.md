@@ -6,12 +6,11 @@ Ferramenta local para comparar a arquitetura pretendida de um projeto com a arqu
 
 ## Documentação
 
-- Plano completo e critérios de cada etapa: [PLANO_VIBE_CODING_AUDITOR.md](PLANO_VIBE_CODING_AUDITOR.md)
 - Decisões técnicas e ambiente verificado: [docs/DECISIONS.md](docs/DECISIONS.md)
 - Progresso das etapas: [docs/ROADMAP.md](docs/ROADMAP.md)
 - Regras para agentes: [AGENTS.md](AGENTS.md)
 
-## Direção técnica definida no plano
+## Direção técnica definida
 
 - Núcleo de auditoria em Rust, reutilizado pela CLI, pela aplicação desktop e pela extensão VS Code.
 - Interface desktop implementada com Tauri 2, React e TypeScript.

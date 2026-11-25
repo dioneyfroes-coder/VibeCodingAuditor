@@ -4,7 +4,7 @@ Este arquivo registra decisões explícitas do projeto. Conforme a regra 11 do p
 
 ## D0.1 — Executar somente a Etapa 0 neste trabalho
 - **Data:** 2026-11-25
-- **Decisão:** preservar `PLANO_VIBE_CODING_AUDITOR.md` sem reescrever o escopo, sem criar código de funcionalidade e sem antecipar etapas posteriores.
+- **Decisão:** preservar `PLANO_VIBE_CODING_AUDITOR.md` sem reescrever o escopo, sem criar código de funcionalidade e sem antecipar etapas posteriores. Preservação substituída por `R8` após o fechamento da primeira fase.
 - **Motivo:** o plano exige que cada etapa seja concluída, testada e revisada antes da seguinte.
 - **Impacto:** nesta etapa existem apenas documentos; nenhum crate, comando de auditoria ou contrato de exemplo foi criado.
 
@@ -407,3 +407,11 @@ Não foram criados `Cargo.toml`, `auditor.example.toml`, `.gitignore`, diretóri
 - **Alternativas rejeitadas:** incluir `decisões aprovadas` no SQLite com migração v2 e confirmação explícita; implementar limite de tamanho de arquivo com campo novo no contrato; implementar regras personalizadas, sugestões com IA ou auditoria agendada nesta fase. IA no núcleo permanece vedada pelo princípio 4 do plano.
 - **Impacto:** `decisões aprovadas` ficam fora do escopo da ferramenta: o auditor permanece somente leitura e a aprovação de uma mudança arquitetural é ação humana externa, registrada no projeto auditado. A regra de limite de tamanho permanece fora do MVP, conforme D5.2, sem limite inventado. Regras personalizadas, IA e agendamento seguem diferidos. Nenhuma dependência, campo de contrato, tabela, regra ou mensagem de relatório mudou. Documentação atualizada: `README.md` (status e nomenclatura do `init`), árvore da seção 4 do plano com `history/` e este registro.
 - **Verificação:** após os ajustes documentais, `cargo check`, `cargo fmt --check`, `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` e `git diff --check` retornaram `0`; `cargo test` passou com 101 testes (88 no núcleo, 10 na CLI e 3 no desktop); `npm test` da extensão passou com 4 testes; `npm run build` da desktop retornou `0`. `git diff --check` emitiu apenas os avisos LF/CRLF esperados do OneDrive.
+
+## R8 — Remoção do plano inicial e limpeza documental
+
+- **Decisão:** remover `PLANO_VIBE_CODING_AUDITOR.md` e as referências a ele, mantendo `docs/ROADMAP.md`, `docs/DECISIONS.md`, `README.md` e `AGENTS.md` como registro corrente. Esta decisão substitui a preservação registrada em `D0.1`.
+- **Motivo:** o usuário pediu a remoção depois de a primeira fase ter sido declarada concluída. O plano era documento de partida; critérios concluídos, decisões tomadas e escopo remanescente já estão consolidados nos documentos corrente.
+- **Alternativas rejeitadas:** manter o plano como arquivo histórico; reescrever seu conteúdo para refletir o estado final. A primeira manteria referência morta e a segunda duplicaria o roadmap.
+- **Impacto:** nenhum código, contrato, schema ou teste mudou. Referências atualizadas em `AGENTS.md`, `README.md` e `docs/ROADMAP.md`; `D0.1` passou a indicar a substituição. Não havia arquivos vazios nem pastas vazias fora de diretórios de build; `*.vsix` e `target/` foram mantidos por serem artefatos de build, não arquivos inúteis do projeto.
+- **Verificação:** após a remoção, `cargo check`, `cargo fmt --check`, `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` e `git diff --check` retornaram `0`; `cargo test` passou com 101 testes (88 no núcleo, 10 na CLI e 3 no desktop); `npm test` da extensão passou com 4 testes; `npm run build` da desktop retornou `0`. Busca por `PLANO_VIBE_CODING_AUDITOR` encontrou apenas as duas referências históricas em `docs/DECISIONS.md` (`D0.1` e `R8`). `git diff --check` emitiu apenas os avisos LF/CRLF esperados do OneDrive.

@@ -33,6 +33,7 @@ Construir uma aplicação desktop local para comparar a arquitetura pretendida d
 - Executar testes focados após cada mudança.
 - Executar a suíte completa antes de concluir uma etapa.
 - Usar `cargo fmt` e `cargo clippy` para Rust.
+- Revisar paradigma, nomes descritivos, documentação de código e testes dos helpers após cada mudança.
 - Não declarar uma etapa concluída se os testes relevantes falharem.
 - Relatar exatamente os comandos executados e seus resultados.
 

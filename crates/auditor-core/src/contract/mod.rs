@@ -21,9 +21,13 @@ pub const EXAMPLE_CONTRACT: &str = include_str!("../../../../auditor.example.tom
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Contract {
+    /// Versão do schema usada no arquivo.
     pub schema_version: u32,
+    /// Identificação do projeto auditado.
     pub project: Project,
+    /// Regras de inclusão e exclusão da descoberta.
     pub scan: Scan,
+    /// Organização desejada pelo usuário.
     pub architecture: Architecture,
 }
 
@@ -31,6 +35,7 @@ pub struct Contract {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Project {
+    /// Nome legível do projeto.
     pub name: String,
 }
 
@@ -38,7 +43,9 @@ pub struct Project {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Scan {
+    /// Padrões que precisam corresponder para um arquivo entrar no inventário.
     pub include: Vec<String>,
+    /// Padrões que removem caminhos mesmo quando incluídos.
     pub exclude: Vec<String>,
 }
 
@@ -46,7 +53,9 @@ pub struct Scan {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Architecture {
+    /// Estilo arquitetural declarado.
     pub style: ArchitectureStyle,
+    /// Módulos declarados e suas fronteiras de dependência.
     pub modules: Vec<Module>,
 }
 
@@ -54,6 +63,7 @@ pub struct Architecture {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ArchitectureStyle {
+    /// Monólito modular, único estilo aceito nesta versão.
     ModularMonolith,
 }
 
@@ -61,9 +71,13 @@ pub enum ArchitectureStyle {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Module {
+    /// Nome usado em `allowed_dependencies` e nas arestas do grafo.
     pub name: String,
+    /// Padrão de caminho que associa arquivos do inventário a este módulo.
     pub path: String,
+    /// Descrição legível da responsabilidade do módulo.
     pub responsibility: String,
+    /// Nomes de módulos permitidos como destino de dependências.
     #[serde(default)]
     pub allowed_dependencies: Vec<String>,
 }
@@ -71,14 +85,21 @@ pub struct Module {
 /// Erros de leitura, parsing e validação do contrato.
 #[derive(Debug)]
 pub enum ContractError {
+    /// Falha ao ler o arquivo de contrato.
     Io {
+        /// Caminho informado pelo usuário.
         path: PathBuf,
+        /// Erro de E/S original.
         source: std::io::Error,
     },
+    /// Sintaxe TOML inválida ou campos inesperados.
     Parse(toml::de::Error),
+    /// Versão de schema diferente da suportada.
     UnsupportedSchemaVersion {
+        /// Versão encontrada no arquivo.
         found: u32,
     },
+    /// Contrato sintaticamente válido, mas semanticamente inválido.
     Validation(String),
 }
 
@@ -152,6 +173,7 @@ pub fn example_contract() -> &'static str {
 }
 
 impl Contract {
+    /// Valida campos obrigatórios, caminhos e referências entre módulos.
     fn validate(&self) -> Result<(), ContractError> {
         require_non_empty("project.name", &self.project.name)?;
 
@@ -220,6 +242,7 @@ impl Contract {
     }
 }
 
+/// Exige que um campo obrigatório não contenha apenas espaços.
 fn require_non_empty(field: &str, value: &str) -> Result<(), ContractError> {
     if value.trim().is_empty() {
         return Err(ContractError::Validation(format!(
@@ -229,6 +252,7 @@ fn require_non_empty(field: &str, value: &str) -> Result<(), ContractError> {
     Ok(())
 }
 
+/// Valida que um padrão seja relativo, use `/` e não contenha `..`.
 fn validate_pattern(field: &str, pattern: &str) -> Result<(), ContractError> {
     require_non_empty(field, pattern)?;
 
@@ -261,7 +285,8 @@ mod tests {
 
     use super::*;
 
-    fn fixture(name: &str) -> PathBuf {
+    /// Caminho absoluto de um contrato de teste, relativo ao crate.
+    fn fixture_path(name: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../tests/fixtures/contracts")
             .join(name)
@@ -269,8 +294,8 @@ mod tests {
 
     #[test]
     fn valid_contract_is_loaded() {
-        let contract =
-            load_contract(&fixture("valid/complete.toml")).expect("the valid fixture must load");
+        let contract = load_contract(&fixture_path("valid/complete.toml"))
+            .expect("the valid fixture must load");
 
         assert_eq!(contract.schema_version, SUPPORTED_SCHEMA_VERSION);
         assert_eq!(contract.project.name, "projeto-exemplo");
@@ -288,14 +313,14 @@ mod tests {
 
     #[test]
     fn unknown_fields_are_rejected() {
-        let error = load_contract(&fixture("invalid/unknown_field.toml"))
+        let error = load_contract(&fixture_path("invalid/unknown_field.toml"))
             .expect_err("unknown fields must be rejected");
         assert!(matches!(error, ContractError::Parse(_)));
     }
 
     #[test]
     fn unsupported_schema_version_has_clear_message() {
-        let error = load_contract(&fixture("invalid/unsupported_version.toml"))
+        let error = load_contract(&fixture_path("invalid/unsupported_version.toml"))
             .expect_err("schema v2 must be rejected");
         let message = error.to_string();
 
@@ -317,7 +342,7 @@ mod tests {
             "absolute_path.toml",
             "empty_name.toml",
         ] {
-            let error = load_contract(&fixture(&format!("invalid/{name}")))
+            let error = load_contract(&fixture_path(&format!("invalid/{name}")))
                 .expect_err(&format!("{name} must be rejected"));
             assert!(
                 !error.to_string().is_empty(),
@@ -328,10 +353,24 @@ mod tests {
 
     #[test]
     fn missing_file_names_the_path() {
-        let missing = fixture("invalid/inexistente.toml");
+        let missing = fixture_path("invalid/inexistente.toml");
         let error = load_contract(&missing).expect_err("a missing file must be reported");
 
         assert!(matches!(error, ContractError::Io { .. }));
         assert!(error.to_string().contains("inexistente.toml"));
+    }
+
+    #[test]
+    fn required_fields_reject_blank_values() {
+        assert!(require_non_empty("project.name", "   ").is_err());
+        assert!(require_non_empty("project.name", "projeto").is_ok());
+    }
+
+    #[test]
+    fn patterns_reject_unsafe_paths() {
+        assert!(validate_pattern("scan.include", "crates/**/*.rs").is_ok());
+        assert!(validate_pattern("scan.include", "crates\\app.rs").is_err());
+        assert!(validate_pattern("scan.include", "/abs/root.rs").is_err());
+        assert!(validate_pattern("scan.include", "../root.rs").is_err());
     }
 }

@@ -112,7 +112,7 @@ fn analyze_project(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
                 "  {} -> {} [{}] {}:{}",
                 edge.from,
                 edge.to,
-                kind_label(edge.kind),
+                dependency_kind_label(edge.kind),
                 edge.path,
                 line
             ),
@@ -120,7 +120,7 @@ fn analyze_project(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
                 "  {} -> {} [{}] {}",
                 edge.from,
                 edge.to,
-                kind_label(edge.kind),
+                dependency_kind_label(edge.kind),
                 edge.path
             ),
         }
@@ -146,7 +146,8 @@ fn analyze_project(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn kind_label(kind: auditor_core::analysis::DependencyKind) -> &'static str {
+/// Texto estável usado na saída do terminal para cada tipo de aresta.
+fn dependency_kind_label(kind: auditor_core::analysis::DependencyKind) -> &'static str {
     match kind {
         auditor_core::analysis::DependencyKind::Allowed => "permitida",
         auditor_core::analysis::DependencyKind::Forbidden => "proibida",
@@ -162,6 +163,8 @@ mod tests {
     use super::Args;
     use super::Commands;
     use super::Path;
+    use super::dependency_kind_label;
+    use auditor_core::analysis::DependencyKind;
 
     #[test]
     fn help_flag_is_recognized() {
@@ -208,5 +211,15 @@ mod tests {
         let error = Args::try_parse_from(["vibe-coding-auditor", "analyze"])
             .expect_err("analyze must require a root");
         assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn dependency_kind_labels_are_stable() {
+        assert_eq!(dependency_kind_label(DependencyKind::Allowed), "permitida");
+        assert_eq!(dependency_kind_label(DependencyKind::Forbidden), "proibida");
+        assert_eq!(
+            dependency_kind_label(DependencyKind::Unresolved),
+            "não resolvida"
+        );
     }
 }

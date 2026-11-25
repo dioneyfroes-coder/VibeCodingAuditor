@@ -46,26 +46,37 @@ pub struct DiscoveredFile {
 /// Entrada não incluída no inventário.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkippedEntry {
+    /// Caminho relativo da entrada, usando `/` como separador.
     pub path: String,
+    /// Motivo pelo qual a entrada ficou de fora.
     pub reason: SkipReason,
 }
 
 /// Motivo pelo qual uma entrada não entrou no inventário.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SkipReason {
+    /// Diretório ignorado por padrão em qualquer profundidade.
     DefaultIgnored,
+    /// Caminho excluído explicitamente por `scan.exclude`.
     Excluded,
+    /// Arquivo fora de todos os padrões de `scan.include`.
     NotIncluded,
+    /// Link simbólico nunca seguido.
     Symlink,
+    /// Entrada que não pôde ser lida.
     Inaccessible,
+    /// Tipo de entrada não tratado pela varredura.
     Unsupported,
 }
 
 /// Falha operacional que impede a varredura da raiz inteira.
 #[derive(Debug)]
 pub enum DiscoveryError {
+    /// A raiz informada não pôde ser canonicalizada.
     Root {
+        /// Caminho informado pelo usuário.
         path: PathBuf,
+        /// Erro de E/S original.
         source: std::io::Error,
     },
 }
@@ -101,7 +112,7 @@ pub fn discover(root: &Path, contract: &Contract) -> Result<Inventory, Discovery
         skipped: Vec::new(),
     };
 
-    walk(&canonical_root, &canonical_root, contract, &mut inventory);
+    walk_tree(&canonical_root, &canonical_root, contract, &mut inventory);
 
     inventory
         .files
@@ -112,12 +123,13 @@ pub fn discover(root: &Path, contract: &Contract) -> Result<Inventory, Discovery
     Ok(inventory)
 }
 
-fn walk(root: &Path, directory: &Path, contract: &Contract, inventory: &mut Inventory) {
+/// Percorre um diretório, registrando arquivos incluídos e entradas ignoradas.
+fn walk_tree(root: &Path, directory: &Path, contract: &Contract, inventory: &mut Inventory) {
     let entries = match fs::read_dir(directory) {
         Ok(entries) => entries,
         Err(_) => {
             inventory.skipped.push(SkippedEntry {
-                path: relative(root, directory),
+                path: relative_path(root, directory),
                 reason: SkipReason::Inaccessible,
             });
             return;
@@ -132,7 +144,7 @@ fn walk(root: &Path, directory: &Path, contract: &Contract, inventory: &mut Inve
             Ok(entry) => entry,
             Err(_) => {
                 inventory.skipped.push(SkippedEntry {
-                    path: relative(root, directory),
+                    path: relative_path(root, directory),
                     reason: SkipReason::Inaccessible,
                 });
                 continue;
@@ -140,7 +152,7 @@ fn walk(root: &Path, directory: &Path, contract: &Contract, inventory: &mut Inve
         };
 
         let entry_path = entry.path();
-        let path = relative(root, &entry_path);
+        let path = relative_path(root, &entry_path);
 
         let metadata = match fs::symlink_metadata(&entry_path) {
             Ok(metadata) => metadata,
@@ -172,19 +184,19 @@ fn walk(root: &Path, directory: &Path, contract: &Contract, inventory: &mut Inve
                 });
                 continue;
             }
-            if is_excluded(&path, contract) {
+            if is_excluded_path(&path, contract) {
                 inventory.skipped.push(SkippedEntry {
                     path,
                     reason: SkipReason::Excluded,
                 });
                 continue;
             }
-            walk(root, &entry_path, contract, inventory);
+            walk_tree(root, &entry_path, contract, inventory);
             continue;
         }
 
         if file_type.is_file() {
-            if is_excluded(&path, contract) {
+            if is_excluded_path(&path, contract) {
                 inventory.skipped.push(SkippedEntry {
                     path,
                     reason: SkipReason::Excluded,
@@ -221,7 +233,8 @@ fn walk(root: &Path, directory: &Path, contract: &Contract, inventory: &mut Inve
     }
 }
 
-fn relative(root: &Path, path: &Path) -> String {
+/// Converte um caminho absoluto em relativo à raiz, com `/` como separador.
+fn relative_path(root: &Path, path: &Path) -> String {
     path.strip_prefix(root)
         .unwrap_or(path)
         .components()
@@ -230,7 +243,8 @@ fn relative(root: &Path, path: &Path) -> String {
         .join("/")
 }
 
-fn is_excluded(path: &str, contract: &Contract) -> bool {
+/// Indica se o caminho foi excluído por `scan.exclude`.
+fn is_excluded_path(path: &str, contract: &Contract) -> bool {
     contract
         .scan
         .exclude
@@ -244,36 +258,43 @@ fn is_excluded(path: &str, contract: &Contract) -> bool {
 pub(crate) fn matches_pattern(pattern: &str, path: &str) -> bool {
     let pattern_parts: Vec<&str> = pattern.split('/').filter(|part| !part.is_empty()).collect();
     let path_parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
-    matches_parts(&pattern_parts, &path_parts)
+    matches_path_parts(&pattern_parts, &path_parts)
 }
 
-fn matches_parts(pattern: &[&str], path: &[&str]) -> bool {
+/// Compara componentes de caminho, permitindo `**` como componente inteiro.
+fn matches_path_parts(pattern: &[&str], path: &[&str]) -> bool {
     match pattern {
         [] => path.is_empty(),
         [only] if *only == "**" => true,
         [first, rest @ ..] if *first == "**" => {
-            (0..=path.len()).any(|skip| matches_parts(rest, &path[skip..]))
+            (0..=path.len()).any(|skip| matches_path_parts(rest, &path[skip..]))
         }
         [first, rest @ ..] => match path.first() {
-            Some(value) => matches_component(first, value) && matches_parts(rest, &path[1..]),
+            Some(value) => {
+                matches_pattern_component(first, value) && matches_path_parts(rest, &path[1..])
+            }
             None => false,
         },
     }
 }
 
-fn matches_component(pattern: &str, value: &str) -> bool {
+/// Compara um componente de padrão com um componente de caminho.
+fn matches_pattern_component(pattern: &str, value: &str) -> bool {
     let pattern: Vec<char> = pattern.chars().collect();
     let value: Vec<char> = value.chars().collect();
 
-    fn compare(pattern: &[char], value: &[char]) -> bool {
+    /// Compara caracteres, permitindo `*` dentro do componente.
+    fn matches_chars(pattern: &[char], value: &[char]) -> bool {
         match pattern {
             [] => value.is_empty(),
-            ['*', rest @ ..] => (0..=value.len()).any(|skip| compare(rest, &value[skip..])),
-            [expected, rest @ ..] => value.first() == Some(expected) && compare(rest, &value[1..]),
+            ['*', rest @ ..] => (0..=value.len()).any(|skip| matches_chars(rest, &value[skip..])),
+            [expected, rest @ ..] => {
+                value.first() == Some(expected) && matches_chars(rest, &value[1..])
+            }
         }
     }
 
-    compare(&pattern, &value)
+    matches_chars(&pattern, &value)
 }
 
 #[cfg(test)]
@@ -283,15 +304,18 @@ mod tests {
     use super::*;
     use crate::contract::{load_contract, parse_contract};
 
+    /// Raiz da fixture de descoberta, relativa ao crate.
     fn project_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/projects/simple")
     }
 
-    fn contract() -> Contract {
+    /// Contrato válido da fixture de descoberta.
+    fn fixture_contract() -> Contract {
         load_contract(&project_root().join("auditor.toml")).expect("fixture contract must load")
     }
 
-    fn reason_for(inventory: &Inventory, path: &str) -> Option<SkipReason> {
+    /// Motivo registrado para um caminho específico, quando houver.
+    fn reason_for_path(inventory: &Inventory, path: &str) -> Option<SkipReason> {
         inventory
             .skipped
             .iter()
@@ -301,7 +325,8 @@ mod tests {
 
     #[test]
     fn inventory_respects_include_exclude_and_default_ignores() {
-        let inventory = discover(&project_root(), &contract()).expect("discovery must succeed");
+        let inventory =
+            discover(&project_root(), &fixture_contract()).expect("discovery must succeed");
 
         let files: Vec<&str> = inventory
             .files
@@ -317,44 +342,48 @@ mod tests {
             ]
         );
 
-        assert_eq!(reason_for(&inventory, "vendor"), Some(SkipReason::Excluded));
         assert_eq!(
-            reason_for(&inventory, "target"),
+            reason_for_path(&inventory, "vendor"),
+            Some(SkipReason::Excluded)
+        );
+        assert_eq!(
+            reason_for_path(&inventory, "target"),
             Some(SkipReason::DefaultIgnored)
         );
         assert_eq!(
-            reason_for(&inventory, "node_modules"),
+            reason_for_path(&inventory, "node_modules"),
             Some(SkipReason::DefaultIgnored)
         );
         assert_eq!(
-            reason_for(&inventory, "dist"),
+            reason_for_path(&inventory, "dist"),
             Some(SkipReason::DefaultIgnored)
         );
         assert_eq!(
-            reason_for(&inventory, "build"),
+            reason_for_path(&inventory, "build"),
             Some(SkipReason::DefaultIgnored)
         );
         assert_eq!(
-            reason_for(&inventory, ".venv"),
+            reason_for_path(&inventory, ".venv"),
             Some(SkipReason::DefaultIgnored)
         );
         assert_eq!(
-            reason_for(&inventory, "venv"),
+            reason_for_path(&inventory, "venv"),
             Some(SkipReason::DefaultIgnored)
         );
         assert_eq!(
-            reason_for(&inventory, "notes.txt"),
+            reason_for_path(&inventory, "notes.txt"),
             Some(SkipReason::NotIncluded)
         );
         assert_eq!(
-            reason_for(&inventory, "crates/app/src/unmapped/gamma.txt"),
+            reason_for_path(&inventory, "crates/app/src/unmapped/gamma.txt"),
             Some(SkipReason::NotIncluded)
         );
     }
 
     #[test]
     fn extension_and_size_are_recorded() {
-        let inventory = discover(&project_root(), &contract()).expect("discovery must succeed");
+        let inventory =
+            discover(&project_root(), &fixture_contract()).expect("discovery must succeed");
         let file = inventory
             .files
             .iter()
@@ -399,7 +428,7 @@ modules = []
                 .all(|file| file.path != "crates/app/src/application/beta.rs")
         );
         assert_eq!(
-            reason_for(&inventory, "crates/app/src/application"),
+            reason_for_path(&inventory, "crates/app/src/application"),
             Some(SkipReason::Excluded)
         );
     }
@@ -408,7 +437,7 @@ modules = []
     fn missing_root_is_an_operational_error() {
         let missing = project_root().join("nao-existe");
         assert!(matches!(
-            discover(&missing, &contract()),
+            discover(&missing, &fixture_contract()),
             Err(DiscoveryError::Root { .. })
         ));
     }
@@ -423,5 +452,36 @@ modules = []
         assert!(!matches_pattern("crates/**/*.rs", "other/root.rs"));
         assert!(matches_pattern("*.rs", "root.rs"));
         assert!(!matches_pattern("*.rs", "dir/root.rs"));
+    }
+
+    #[test]
+    fn relative_paths_use_forward_slashes() {
+        let root = Path::new("projeto");
+        assert_eq!(
+            relative_path(root, &root.join("crates/app.rs")),
+            "crates/app.rs"
+        );
+    }
+
+    #[test]
+    fn excluded_paths_follow_the_contract() {
+        let contract = fixture_contract();
+        assert!(is_excluded_path("vendor/x.rs", &contract));
+        assert!(!is_excluded_path("crates/root.rs", &contract));
+    }
+
+    #[test]
+    fn pattern_components_are_compared_literally_except_star() {
+        assert!(matches_path_parts(
+            &["crates", "**", "*.rs"],
+            &["crates", "root.rs"]
+        ));
+        assert!(!matches_path_parts(
+            &["crates", "*.rs"],
+            &["other", "root.rs"]
+        ));
+        assert!(matches_pattern_component("*.rs", "root.rs"));
+        assert!(matches_pattern_component("app*.rs", "application.rs"));
+        assert!(!matches_pattern_component("*.rs", "dir"));
     }
 }

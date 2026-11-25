@@ -39,13 +39,16 @@ pub struct Analysis {
 /// Pacotes descobertos no workspace Cargo.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceInfo {
+    /// Pacotes ordenados por nome e caminho de manifesto.
     pub packages: Vec<WorkspacePackage>,
 }
 
 /// Pacote identificado em um `Cargo.toml`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspacePackage {
+    /// Nome declarado em `[package].name`.
     pub name: String,
+    /// Manifesto relativo à raiz do projeto auditado.
     pub manifest_path: String,
 }
 
@@ -63,21 +66,32 @@ pub enum DependencyKind {
 /// Aresta direcional entre dois módulos.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DependencyEdge {
+    /// Módulo de origem, conforme o contrato.
     pub from: String,
+    /// Nome do destino encontrado na importação.
     pub to: String,
+    /// Classificação determinística da aresta.
     pub kind: DependencyKind,
+    /// Arquivo de origem, relativo à raiz.
     pub path: String,
+    /// Linha da declaração que originou a aresta, quando localizada.
     pub line: Option<usize>,
+    /// Texto da linha de código usado como evidência.
     pub evidence: Option<String>,
+    /// Explicação curta da classificação.
     pub detail: String,
 }
 
 /// Item que o auditor não consegue classificar sozinho.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviewItem {
+    /// Arquivo que exige decisão humana.
     pub path: String,
+    /// Linha relacionada ao item, quando houver.
     pub line: Option<usize>,
+    /// Motivo da revisão.
     pub reason: ReviewReason,
+    /// Explicação do que não pôde ser concluído.
     pub detail: String,
 }
 
@@ -95,22 +109,33 @@ pub enum ReviewReason {
 /// Declaração `mod` localizada em um arquivo Rust.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModuleDeclaration {
-    pub module: Option<String>,
+    /// Módulo do contrato ao qual o arquivo de origem pertence, quando mapeado.
+    pub module_name: Option<String>,
+    /// Nome da declaração `mod`.
     pub name: String,
+    /// Arquivo de origem, relativo à raiz.
     pub path: String,
+    /// Linha da declaração, quando localizada.
     pub line: Option<usize>,
+    /// Indica se a declaração abre um bloco `mod { ... }`.
     pub inline: bool,
 }
 
 /// Erros operacionais da análise.
 #[derive(Debug)]
 pub enum AnalysisError {
+    /// Falha ao ler um manifesto ou arquivo Rust.
     Io {
+        /// Caminho que não pôde ser lido.
         path: PathBuf,
+        /// Erro de E/S original.
         source: std::io::Error,
     },
+    /// Manifesto Cargo com sintaxe inválida.
     Toml {
+        /// Caminho do manifesto inválido.
         path: PathBuf,
+        /// Erro de parsing original.
         source: toml::de::Error,
     },
 }
@@ -144,7 +169,7 @@ impl Error for AnalysisError {
 /// Estado compartilhado durante a visita de uma única unidade Rust.
 struct VisitContext<'a> {
     path: &'a str,
-    module: Option<&'a Module>,
+    contract_module: Option<&'a Module>,
     lines: &'a [&'a str],
     use_cursor: &'a mut usize,
     mod_cursor: &'a mut usize,
@@ -160,7 +185,7 @@ pub fn analyze(
     contract: &Contract,
     inventory: &Inventory,
 ) -> Result<Analysis, AnalysisError> {
-    let workspace = read_workspace(root)?;
+    let workspace = read_cargo_workspace(root)?;
     let workspace_names: HashSet<String> = workspace
         .as_ref()
         .map(|info| {
@@ -219,14 +244,14 @@ pub fn analyze(
             }
         };
 
-        let matched: Vec<&Module> = contract
+        let matching_modules: Vec<&Module> = contract
             .architecture
             .modules
             .iter()
             .filter(|module| matches_pattern(&module.path, &file.path))
             .collect();
 
-        if matched.len() > 1 {
+        if matching_modules.len() > 1 {
             analysis.reviews.push(ReviewItem {
                 path: file.path.clone(),
                 line: None,
@@ -235,7 +260,7 @@ pub fn analyze(
             });
         }
 
-        let module = matched.first().copied();
+        let module = matching_modules.first().copied();
 
         if module.is_none() {
             analysis.reviews.push(ReviewItem {
@@ -252,7 +277,7 @@ pub fn analyze(
 
         let mut context = VisitContext {
             path: &file.path,
-            module,
+            contract_module: module,
             lines: &lines,
             use_cursor: &mut use_cursor,
             mod_cursor: &mut mod_cursor,
@@ -278,12 +303,16 @@ pub fn analyze(
     Ok(analysis)
 }
 
+/// Visita itens Rust na ordem do código, registrando `mod` e classificando `use`.
 fn visit_items(items: &[Item], context: &mut VisitContext<'_>) {
     for item in items {
         match item {
             Item::Use(item_use) => {
-                let (line, evidence) = match locate(context.lines, context.use_cursor, is_use_line)
-                {
+                let (line, evidence) = match locate_source_line(
+                    context.lines,
+                    context.use_cursor,
+                    is_use_declaration_line,
+                ) {
                     Some(located) => (Some(located.0), Some(located.1)),
                     None => {
                         context.analysis.limitations.push(format!(
@@ -294,17 +323,21 @@ fn visit_items(items: &[Item], context: &mut VisitContext<'_>) {
                     }
                 };
 
-                let mut leaves = Vec::new();
-                collect_use_paths(&item_use.tree, &mut Vec::new(), &mut leaves);
+                let mut use_path_leaves = Vec::new();
+                collect_use_path_leaves(&item_use.tree, &mut Vec::new(), &mut use_path_leaves);
 
-                if context.module.is_some() {
-                    for leaf in leaves {
+                if context.contract_module.is_some() {
+                    for leaf in use_path_leaves {
                         classify_use(context, &leaf, line, evidence.as_deref());
                     }
                 }
             }
             Item::Mod(item_mod) => {
-                let (line, _) = match locate(context.lines, context.mod_cursor, is_mod_line) {
+                let (line, _) = match locate_source_line(
+                    context.lines,
+                    context.mod_cursor,
+                    is_mod_declaration_line,
+                ) {
                     Some(located) => (Some(located.0), located.1),
                     None => {
                         context.analysis.limitations.push(format!(
@@ -319,7 +352,7 @@ fn visit_items(items: &[Item], context: &mut VisitContext<'_>) {
                     .analysis
                     .module_declarations
                     .push(ModuleDeclaration {
-                        module: context.module.map(|module| module.name.clone()),
+                        module_name: context.contract_module.map(|module| module.name.clone()),
                         name: item_mod.ident.to_string(),
                         path: context.path.to_owned(),
                         line,
@@ -335,13 +368,14 @@ fn visit_items(items: &[Item], context: &mut VisitContext<'_>) {
     }
 }
 
+/// Classifica uma folha de caminho de `use` e registra a aresta correspondente.
 fn classify_use(
     context: &mut VisitContext<'_>,
     leaf: &[String],
     line: Option<usize>,
     evidence: Option<&str>,
 ) {
-    let Some(module) = context.module else {
+    let Some(module) = context.contract_module else {
         return;
     };
     let Some(first) = leaf.first() else {
@@ -393,8 +427,8 @@ fn classify_use(
         });
     }
 
-    let key = format!("{from}\0{target}\0{kind:?}\0{}\0{line:?}", context.path);
-    if !context.seen_edges.insert(key) {
+    let edge_key = format!("{from}\0{target}\0{kind:?}\0{}\0{line:?}", context.path);
+    if !context.seen_edges.insert(edge_key) {
         return;
     }
 
@@ -409,33 +443,39 @@ fn classify_use(
     });
 }
 
-fn collect_use_paths(tree: &UseTree, prefix: &mut Vec<String>, out: &mut Vec<Vec<String>>) {
+/// Coleta os caminhos completos das folhas de um `use`, incluindo grupos e renomes.
+fn collect_use_path_leaves(
+    tree: &UseTree,
+    prefix: &mut Vec<String>,
+    leaves: &mut Vec<Vec<String>>,
+) {
     match tree {
         UseTree::Path(path) => {
             prefix.push(path.ident.to_string());
-            collect_use_paths(&path.tree, prefix, out);
+            collect_use_path_leaves(&path.tree, prefix, leaves);
             prefix.pop();
         }
         UseTree::Name(name) => {
             prefix.push(name.ident.to_string());
-            out.push(prefix.clone());
+            leaves.push(prefix.clone());
             prefix.pop();
         }
         UseTree::Rename(rename) => {
             prefix.push(rename.ident.to_string());
-            out.push(prefix.clone());
+            leaves.push(prefix.clone());
             prefix.pop();
         }
-        UseTree::Glob(_) => out.push(prefix.clone()),
+        UseTree::Glob(_) => leaves.push(prefix.clone()),
         UseTree::Group(group) => {
             for tree in &group.items {
-                collect_use_paths(tree, prefix, out);
+                collect_use_path_leaves(tree, prefix, leaves);
             }
         }
     }
 }
 
-fn locate(
+/// Localiza a próxima linha que satisfaz o predicate e devolve número e texto.
+fn locate_source_line(
     lines: &[&str],
     cursor: &mut usize,
     predicate: fn(&str) -> bool,
@@ -449,7 +489,8 @@ fn locate(
     None
 }
 
-fn is_use_line(line: &str) -> bool {
+/// Reconhece linhas de declaração `use`, inclusive indentadas e `pub use`.
+fn is_use_declaration_line(line: &str) -> bool {
     let rest = line.trim_start();
     let rest = rest
         .strip_prefix("pub")
@@ -458,7 +499,8 @@ fn is_use_line(line: &str) -> bool {
     rest.starts_with("use ") || rest.starts_with("use{")
 }
 
-fn is_mod_line(line: &str) -> bool {
+/// Reconhece linhas de declaração `mod`, inclusive indentadas e `pub mod`.
+fn is_mod_declaration_line(line: &str) -> bool {
     let rest = line.trim_start();
     let rest = rest
         .strip_prefix("pub")
@@ -467,7 +509,8 @@ fn is_mod_line(line: &str) -> bool {
     rest.starts_with("mod ") || rest.starts_with("mod{")
 }
 
-fn read_workspace(root: &Path) -> Result<Option<WorkspaceInfo>, AnalysisError> {
+/// Lê o manifesto raiz e os manifestos dos membros declarados no workspace.
+fn read_cargo_workspace(root: &Path) -> Result<Option<WorkspaceInfo>, AnalysisError> {
     let manifest = root.join("Cargo.toml");
     if !manifest.exists() {
         return Ok(None);
@@ -538,13 +581,16 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::contract::load_contract;
+    use crate::contract::{Architecture, ArchitectureStyle, Project, Scan, load_contract};
     use crate::discovery::discover;
+    use syn::Item;
 
+    /// Raiz da fixture de dependências, relativa ao crate.
     fn project_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/projects/dependencies")
     }
 
+    /// Análise completa da fixture de dependências.
     fn analyze_fixture() -> Analysis {
         let root = project_root();
         let contract =
@@ -643,7 +689,7 @@ mod tests {
             .iter()
             .find(|declaration| declaration.name == "internal")
             .expect("mod declaration must be recorded");
-        assert_eq!(declaration.module.as_deref(), Some("domain"));
+        assert_eq!(declaration.module_name.as_deref(), Some("domain"));
         assert_eq!(declaration.path, "crates/domain/src/lib.rs");
         assert_eq!(declaration.line, Some(1));
         assert!(!declaration.inline);
@@ -668,7 +714,7 @@ mod tests {
             .iter()
             .find(|declaration| declaration.name == "nested")
             .expect("inline mod declaration must be recorded");
-        assert_eq!(declaration.module.as_deref(), Some("domain"));
+        assert_eq!(declaration.module_name.as_deref(), Some("domain"));
         assert_eq!(declaration.path, "crates/domain/src/inline.rs");
         assert_eq!(declaration.line, Some(1));
         assert!(declaration.inline);
@@ -695,6 +741,115 @@ mod tests {
                 .limitations
                 .iter()
                 .any(|limitation| limitation.contains("crates/domain/src/broken.rs"))
+        );
+    }
+
+    #[test]
+    fn declaration_lines_are_recognized() {
+        assert!(is_use_declaration_line("use domain::Entity;"));
+        assert!(is_use_declaration_line("    pub use domain::Entity;"));
+        assert!(!is_use_declaration_line("// use domain::Entity;"));
+        assert!(is_mod_declaration_line("mod internal;"));
+        assert!(is_mod_declaration_line("    pub mod nested {"));
+        assert!(!is_mod_declaration_line("let valor = 1;"));
+    }
+
+    #[test]
+    fn locate_source_line_advances_the_cursor() {
+        let lines = ["use a::A;", "let valor = 1;", "    use b::B;"];
+        let mut cursor = 0;
+
+        assert_eq!(
+            locate_source_line(&lines, &mut cursor, is_use_declaration_line),
+            Some((1, "use a::A;".to_owned()))
+        );
+        assert_eq!(
+            locate_source_line(&lines, &mut cursor, is_use_declaration_line),
+            Some((3, "use b::B;".to_owned()))
+        );
+        assert_eq!(
+            locate_source_line(&lines, &mut cursor, is_use_declaration_line),
+            None
+        );
+    }
+
+    #[test]
+    fn use_path_leaves_cover_groups_and_renames() {
+        let parsed = syn::parse_file("use crate::{domain::Entity, infrastructure as infra};")
+            .expect("use statement must parse");
+        let Item::Use(item_use) = &parsed.items[0] else {
+            panic!("first item must be a use declaration");
+        };
+        let mut leaves = Vec::new();
+
+        collect_use_path_leaves(&item_use.tree, &mut Vec::new(), &mut leaves);
+
+        let expected = vec![
+            vec!["crate".to_owned(), "domain".to_owned(), "Entity".to_owned()],
+            vec!["crate".to_owned(), "infrastructure".to_owned()],
+        ];
+        assert_eq!(leaves, expected);
+    }
+
+    #[test]
+    fn analysis_errors_explain_the_operation() {
+        let io_error = AnalysisError::Io {
+            path: PathBuf::from("Cargo.toml"),
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "ausente"),
+        };
+        assert!(io_error.to_string().contains("Cargo.toml"));
+        assert!(Error::source(&io_error).is_some());
+
+        let toml_error = AnalysisError::Toml {
+            path: PathBuf::from("Cargo.toml"),
+            source: toml::from_str::<toml::Value>("invalid =").expect_err("invalid TOML"),
+        };
+        assert!(toml_error.to_string().contains("TOML inválido"));
+        assert!(Error::source(&toml_error).is_some());
+    }
+
+    #[test]
+    fn ambiguous_module_becomes_review() {
+        let root = project_root();
+        let overlapping_contract = Contract {
+            schema_version: 1,
+            project: Project {
+                name: "sobreposicao".to_owned(),
+            },
+            scan: Scan {
+                include: vec!["**/*.rs".to_owned()],
+                exclude: Vec::new(),
+            },
+            architecture: Architecture {
+                style: ArchitectureStyle::ModularMonolith,
+                modules: vec![
+                    Module {
+                        name: "geral".to_owned(),
+                        path: "crates/**/*.rs".to_owned(),
+                        responsibility: "Todos os arquivos Rust".to_owned(),
+                        allowed_dependencies: Vec::new(),
+                    },
+                    Module {
+                        name: "dominio".to_owned(),
+                        path: "crates/domain/src/**".to_owned(),
+                        responsibility: "Arquivos de domínio".to_owned(),
+                        allowed_dependencies: Vec::new(),
+                    },
+                ],
+            },
+        };
+        let inventory = discover(&root, &overlapping_contract).expect("discovery must succeed");
+        let analysis =
+            analyze(&root, &overlapping_contract, &inventory).expect("analysis must succeed");
+
+        let review = analysis
+            .reviews
+            .iter()
+            .find(|review| review.reason == ReviewReason::AmbiguousModule)
+            .expect("overlapping module paths must require review");
+        assert!(
+            review.path.starts_with("crates/domain/src/"),
+            "review must point to a domain source file"
         );
     }
 }

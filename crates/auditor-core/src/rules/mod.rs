@@ -135,7 +135,7 @@ fn review_findings(analysis: &Analysis) -> Vec<Finding> {
                 id: format!("{}:{}", RULE_FILE_UNMAPPED, review.path),
                 rule_id: RULE_FILE_UNMAPPED.to_owned(),
                 severity: Severity::NeedsReview,
-                title: "Arquivo Rust fora dos módulos declarados".to_owned(),
+                title: "Arquivo de código fora dos módulos declarados".to_owned(),
                 message: format!(
                     "O arquivo {} foi incluído na varredura, mas nenhum módulo do contrato o reivindica.",
                     review.path
@@ -144,7 +144,7 @@ fn review_findings(analysis: &Analysis) -> Vec<Finding> {
                 line_start: None,
                 line_end: None,
                 evidence: Some(review.detail.clone()),
-                expected: "Cada arquivo Rust incluído deve corresponder a um módulo declarado."
+                expected: "Cada arquivo de código incluído deve corresponder a um módulo declarado."
                     .to_owned(),
                 suggestion: "Ajuste o path do módulo no contrato ou mova o arquivo após revisão."
                     .to_owned(),
@@ -212,12 +212,12 @@ fn cycle_findings(analysis: &Analysis) -> Vec<Finding> {
         .collect()
 }
 
-/// Identifica módulos declarados sem arquivos Rust correspondentes.
+/// Identifica módulos declarados sem arquivos de código correspondentes.
 fn module_without_files_findings(contract: &Contract, inventory: &Inventory) -> Vec<Finding> {
-    let rust_files: Vec<&str> = inventory
+    let source_files: Vec<&str> = inventory
         .files
         .iter()
-        .filter(|file| file.extension.as_deref() == Some("rs"))
+        .filter(|file| crate::analysis::is_source_file(file.extension.as_deref()))
         .map(|file| file.path.as_str())
         .collect();
 
@@ -226,7 +226,7 @@ fn module_without_files_findings(contract: &Contract, inventory: &Inventory) -> 
         .modules
         .iter()
         .filter(|module| {
-            !rust_files
+            !source_files
                 .iter()
                 .any(|path| matches_pattern(&module.path, path))
         })
@@ -236,15 +236,16 @@ fn module_without_files_findings(contract: &Contract, inventory: &Inventory) -> 
             severity: Severity::Warning,
             title: format!("Módulo sem arquivos: {}", module.name),
             message: format!(
-                "Nenhum arquivo Rust corresponde ao path declarado por {}.",
+                "Nenhum arquivo de código corresponde ao path declarado por {}.",
                 module.name
             ),
             path: module.path.clone(),
             line_start: None,
             line_end: None,
-            evidence: Some("0 arquivos .rs corresponderam ao path".to_owned()),
-            expected: "Cada módulo declarado deve ter ao menos um arquivo Rust correspondente."
-                .to_owned(),
+            evidence: Some("0 arquivos de código corresponderam ao path".to_owned()),
+            expected:
+                "Cada módulo declarado deve ter ao menos um arquivo de código correspondente."
+                    .to_owned(),
             suggestion: format!(
                 "Revise o path de {} ou crie arquivos dentro da pasta declarada.",
                 module.name

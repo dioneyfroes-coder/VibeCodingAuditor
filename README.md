@@ -2,7 +2,7 @@
 
 Ferramenta local para comparar a arquitetura pretendida de um projeto com a arquitetura realmente implementada. Cada achado deve apontar a regra violada, os arquivos envolvidos e, quando possível, as linhas relevantes. O contrato arquitetural (`auditor.toml`) pertence ao usuário e é versionado junto ao projeto auditado.
 
-**Status atual:** Etapa 9 — extensão VS Code concluída. A CLI cria um modelo de `auditor.toml`, inventaria arquivos, imprime o grafo de dependências, aplica regras determinísticas, gera relatórios em texto, JSON ou Markdown e registra execuções em SQLite. A aplicação desktop e a extensão VS Code reutilizam o mesmo núcleo: a desktop oferece a interface gráfica local e a extensão leva os achados ao painel Problems do editor.
+**Status atual:** Etapa 10 — suporte determinístico a TypeScript e JavaScript concluído nesta rodada. A CLI cria um modelo de `auditor.toml`, inventaria arquivos, imprime o grafo de dependências, aplica regras determinísticas, gera relatórios em texto, JSON ou Markdown e registra execuções em SQLite. A aplicação desktop e a extensão VS Code reutilizam o mesmo núcleo. Os demais itens da Etapa 10 (Python, complexidade, duplicação, regras personalizadas, IA, Git e agendamento) foram avaliados e ficaram para rodadas futuras, sem caso de uso validado.
 
 ## Documentação
 
@@ -65,11 +65,11 @@ Campos desconhecidos, nomes ou caminhos duplicados, referências a módulos inex
 
 ## Descoberta
 
-O comando `scan <raiz>` lê `<raiz>/auditor.toml`, percorre a árvore sem executar arquivos e imprime o inventário. Os padrões suportados são `**` como componente inteiro e `*` dentro de um componente; `?`, classes e chaves não são interpretados. Diretórios `.git`, `target`, `node_modules`, `dist`, `build`, `.venv` e `venv` são ignorados em qualquer profundidade, além de `scan.exclude`. Links simbólicos nunca são seguidos, e entradas inacessíveis são registradas sem interromper a varredura. Cada arquivo incluído registra caminho relativo, extensão e tamanho em bytes.
+O comando `scan <raiz>` lê `<raiz>/auditor.toml`, percorre a árvore sem executar arquivos e imprime o inventário. Os padrões suportados são `**` como componente inteiro e `*` dentro de um componente; `?`, classes e chaves não são interpretados. Diretórios `.git`, `target`, `node_modules`, `dist`, `build`, `.venv`, `venv`, `.next`, `out`, `coverage` e `.turbo` são ignorados em qualquer profundidade, além de `scan.exclude`. Links simbólicos nunca são seguidos, e entradas inacessíveis são registradas sem interromper a varredura. Cada arquivo incluído registra caminho relativo, extensão e tamanho em bytes.
 
 ## Análise de dependências
 
-O comando `analyze <raiz>` lê o contrato e o inventário, lê os manifests `Cargo.toml` do workspace e usa `syn` para interpretar declarações `mod` e importações `use` dos arquivos `.rs` incluídos. Cada arquivo é associado ao primeiro módulo do contrato cujo `path` corresponde ao caminho relativo; múltiplas correspondências e arquivos sem correspondência viram itens de revisão.
+O comando `analyze <raiz>` lê o contrato e o inventário, lê os manifests `Cargo.toml` do workspace e usa `syn` para interpretar declarações `mod` e importações `use` dos arquivos `.rs` incluídos. Para `.ts`, `.tsx`, `.js` e `.jsx`, um scanner próprio reconhece `import`, `export ... from`, `require(...)` e `import(...)`; comentários e strings são descartados antes da leitura, e especificadores relativos são resolvidos lexicalmente contra os arquivos do inventário. Cada arquivo é associado ao primeiro módulo do contrato cujo `path` corresponde ao caminho relativo; múltiplas correspondências e arquivos sem correspondência viram itens de revisão.
 
 As arestas são classificadas assim:
 
@@ -77,9 +77,9 @@ As arestas são classificadas assim:
 - `proibida`: o destino é um módulo declarado no contrato, mas não está em `allowed_dependencies`.
 - `não resolvida`: o destino não corresponde a nenhum módulo declarado; também gera item de revisão.
 
-A origem de cada aresta guarda arquivo relativo, linha e a linha de código encontrada. Declarações `mod` também são registradas com arquivo e linha; o conteúdo de `mod` inline é percorrido. `use` de `std`, `core`, `alloc`, `test`, `self`, `super` e dependências do próprio módulo não geram arestas arquiteturais.
+A origem de cada aresta guarda arquivo relativo, linha e a linha de código encontrada. Declarações `mod` também são registradas com arquivo e linha; o conteúdo de `mod` inline é percorrido. `use` de `std`, `core`, `alloc`, `test`, `self`, `super` e dependências do próprio módulo não geram arestas arquiteturais. Em TS/JS, especificadores sem `./` ou `../` são ignorados como pacote externo, exceto quando o nome coincide com um módulo do contrato — nesse caso viram revisão, nunca erro.
 
-Limitações explícitas desta primeira versão: são analisados apenas arquivos `.rs` que entraram no inventário; imports dentro de corpos de funções, macros complexos, código gerado e nomes resolvidos dinamicamente não são classificados. Arquivos que não fazem parse viram limitação e não interrompem a análise. Quando a linha de uma declaração não pode ser localizada no texto, a evidência fica vazia e a limitação é registrada.
+Limitações explícitas: em Rust, imports dentro de corpos de funções, macros complexos, código gerado e nomes resolvidos dinamicamente não são classificados; arquivos que não fazem parse viram limitação. Em TS/JS, não há suporte a `tsconfig.paths`, workspaces npm, resolução de pacotes, template literals ou imports construídos dinamicamente; `import type` é contado como acoplamento. O contador `packages` continua se referindo somente a pacotes Cargo, e uma limitation informa isso quando há arquivos TS/JS.
 
 ## Motor de regras e relatórios
 
@@ -89,14 +89,25 @@ O comando `audit <raiz>` reutiliza o mesmo pipeline do núcleo e aplica estas re
 |---|---|---|
 | `dep.not_allowed` | `error` | Destino é módulo declarado, mas ausente de `allowed_dependencies`. |
 | `dep.unresolved` | `needs_review` | Destino não corresponde a nenhum módulo do contrato. |
-| `file.unmapped` | `needs_review` | Arquivo Rust incluído não corresponde a nenhum módulo. |
+| `file.unmapped` | `needs_review` | Arquivo de código incluído não corresponde a nenhum módulo. |
 | `file.ambiguous_module` | `needs_review` | Arquivo corresponde a mais de um módulo do contrato. |
 | `dep.cycle` | `warning` | Grafo contém ciclo simples entre módulos, incluindo autoimportação. |
-| `module.no_files` | `warning` | Módulo declarado sem arquivo Rust correspondente. |
+| `module.no_files` | `warning` | Módulo declarado sem arquivo de código correspondente. |
 
 Cada achado contém `id`, `rule_id`, `severity`, `title`, `message`, `path`, `line_start`, `line_end`, `evidence`, `expected`, `suggestion` e `confidence`. Todas as regras são determinísticas, então `confidence` é sempre nulo; o auditor não inventa precisão numérica nem aplica sugestões automaticamente. Dependências não resolvidas e arquivos não mapeados são sinais para decisão humana, não violações comprovadas.
 
 Os formatos disponíveis são `text` (padrão), `json` e `markdown`. Sem `--output`, o relatório vai para o terminal; com `--output <arquivo>`, o arquivo indicado é gravado e sobrescrito se já existir. O projeto auditado nunca é modificado.
+
+## TypeScript e JavaScript (Etapa 10)
+
+Para auditar TS/JS, declare extensões explícitas em `scan.include` — chaves como `*.{ts,tsx}` não são curingas suportadas:
+
+```toml
+[scan]
+include = ["src/**/*.ts", "src/**/*.tsx", "src/**/*.js", "src/**/*.jsx"]
+```
+
+A fixture `tests/fixtures/projects/typescript` exercita imports permitidos e proibidos, `require`, `import()` dinâmico, reexportação, pacote externo ignorado, nome de módulo ambíguo e comentário/string que não podem virar aresta. CLI, desktop e extensão VS Code consomem o mesmo relatório, sem regras locais. Nenhuma dependência Rust foi adicionada ao núcleo.
 
 ## Histórico local
 

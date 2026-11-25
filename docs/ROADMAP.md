@@ -14,7 +14,7 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 | 7 | Provar o núcleo antes da interface gráfica | Concluída em 25/11/2026 — três projetos fictícios auditados pela CLI; 75 testes passaram |
 | 8 | Criar a aplicação desktop com Tauri | Concluída em 25/11/2026 — Tauri/React compilados e iniciados; 78 testes passaram |
 | 9 | Criar a extensão VS Code | Concluída em 25/11/2026 — `.vsix` gerado; diagnósticos conferem com a CLI; 82 testes passaram |
-| 10 | Expandir linguagens e recursos | Não iniciada (após MVP estável) |
+| 10 | Expandir linguagens e recursos | Concluída nesta rodada em 25/11/2026 — TypeScript/JavaScript no núcleo; 84 testes Rust e 4 da extensão passaram. Demais opções avaliadas e diferidas |
 
 ## Critérios da Etapa 0
 
@@ -131,4 +131,21 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 - [x] Smoke CLI → JSON → diagnósticos: `clean` 0/0, `dependencies` 7/7, `partial` 4/4
 - [x] `cargo test` permaneceu com 78 testes; total verificado: 82 testes (78 Rust e 4 da extensão)
 - [x] Limitações registradas: sem testes na host do VS Code, alerta moderado apenas no `@vscode/vsce` de desenvolvimento e sem histórico na extensão
-- [x] Não iniciar a Etapa 10
+- [x] Não iniciar a Etapa 10 antes de fechar a Etapa 9
+
+## Critérios da Etapa 10
+
+- [x] Avaliar todas as opções do plano e escolher TypeScript/JavaScript por caso de uso real e menor risco arquitetural
+- [x] Manter o schema v1 do contrato: ativação por globs explícitos de extensão, sem campos novos
+- [x] Adicionar analisador determinístico no núcleo, sem nova dependência Rust e sem regras na CLI, na UI ou na extensão
+- [x] Reconhecer `import`, `export ... from`, `require(...)` e `import(...)` em `.ts`, `.tsx`, `.js` e `.jsx`
+- [x] Ignorar comentários e strings; resolver imports relativos contra o inventário e classificar pela mesma regra do Rust
+- [x] Transformar especificador ambíguo em `needs_review`, nunca em `error`; limitar pacotes npm não enumerados
+- [x] Ignorar diretórios gerados do ecossistema frontend (`.next`, `out`, `coverage`, `.turbo`) com teste na descoberta
+- [x] Criar a fixture `tests/fixtures/projects/typescript` com imports permitidos, proibidos, dinâmicos, reexportação e ruído
+- [x] Preservar contagens das fixtures anteriores e o contrato JSON consumido por desktop e extensão
+- [x] `cargo check`, `cargo test` (84 testes: 71 no núcleo, 10 na CLI e 3 no desktop), `cargo fmt --check` e `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` passaram
+- [x] Smoke na CLI: `typescript` = 8 arestas, 4 achados (2 erros e 2 revisões), 1 limitação, saída `1`
+- [x] Smoke CLI → JSON → extensão: 4 achados produziram 4 diagnósticos (2 `error` e 2 `warning`); `npm test` e `npm run build` da desktop passaram
+- [x] Limitações registradas: sem `tsconfig.paths`, workspaces npm, resolução de pacotes, template literals ou imports dinâmicos construídos em tempo de execução; `import type` conta como acoplamento; `packages` continua sendo Cargo
+- [x] Python, complexidade, duplicação, regras personalizadas, IA, Git diff e auditoria agendada avaliados e diferidos por falta de caso de uso validado nesta rodada

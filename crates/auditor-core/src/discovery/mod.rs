@@ -19,6 +19,10 @@ pub const DEFAULT_IGNORED_DIRS: &[&str] = &[
     "build",
     ".venv",
     "venv",
+    ".next",
+    "out",
+    "coverage",
+    ".turbo",
 ];
 
 /// Resultado de uma varredura.
@@ -370,6 +374,12 @@ mod tests {
             reason_for_path(&inventory, "venv"),
             Some(SkipReason::DefaultIgnored)
         );
+        for build_dir in [".next", "out", "coverage", ".turbo"] {
+            assert_eq!(
+                reason_for_path(&inventory, build_dir),
+                Some(SkipReason::DefaultIgnored)
+            );
+        }
         assert_eq!(
             reason_for_path(&inventory, "notes.txt"),
             Some(SkipReason::NotIncluded)

@@ -1,9 +1,12 @@
 //! Análise inicial de dependências entre os módulos declarados no contrato.
 //!
 //! A análise é determinística e somente leitura. Ela usa `syn` para interpretar
-//! declarações `mod` e `use`, e os manifests Cargo para conhecer os pacotes do
-//! workspace. Construções que não podem ser resolvidas com segurança viram
-//! itens de revisão ou limitações explícitas, nunca conclusões inventadas.
+//! declarações `mod` e `use` em Rust, e um scanner conservador para importações
+//! TypeScript/JavaScript. Os manifests Cargo informam os pacotes do workspace.
+//! Construções que não podem ser resolvidas com segurança viram itens de revisão
+//! ou limitações explícitas, nunca conclusões inventadas.
+
+mod typescript;
 
 use std::collections::HashSet;
 use std::error::Error;
@@ -19,6 +22,11 @@ use crate::discovery::{Inventory, matches_pattern};
 
 /// Raízes da biblioteca padrão, que não são dependências arquiteturais.
 const IGNORED_ROOTS: &[&str] = &["std", "core", "alloc", "test"];
+
+/// Indica se a extensão possui analisador de dependências disponível.
+pub fn is_source_file(extension: Option<&str>) -> bool {
+    extension == Some("rs") || typescript::is_supported_extension(extension)
+}
 
 /// Resultado da análise do projeto auditado.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -221,9 +229,15 @@ pub fn analyze(
 
     let mut seen_edges = HashSet::new();
 
+    let mut typescript_files = false;
+
     for file in &inventory.files {
-        if file.extension.as_deref() != Some("rs") {
+        let extension = file.extension.as_deref();
+        if !is_source_file(extension) {
             continue;
+        }
+        if extension != Some("rs") {
+            typescript_files = true;
         }
 
         let full_path = root.join(&file.path);
@@ -237,59 +251,54 @@ pub fn analyze(
             }
         };
 
-        let parsed = match syn::parse_file(&text) {
-            Ok(parsed) => parsed,
-            Err(source) => {
-                analysis
-                    .limitations
-                    .push(format!("{} não pôde ser analisado: {source}", file.path));
-                continue;
-            }
-        };
+        let module = module_for_file(contract, &file.path, &mut analysis);
 
-        let matching_modules: Vec<&Module> = contract
-            .architecture
-            .modules
-            .iter()
-            .filter(|module| matches_pattern(&module.path, &file.path))
-            .collect();
+        if extension == Some("rs") {
+            let parsed = match syn::parse_file(&text) {
+                Ok(parsed) => parsed,
+                Err(source) => {
+                    analysis
+                        .limitations
+                        .push(format!("{} não pôde ser analisado: {source}", file.path));
+                    continue;
+                }
+            };
 
-        if matching_modules.len() > 1 {
-            analysis.reviews.push(ReviewItem {
-                path: file.path.clone(),
-                line: None,
-                reason: ReviewReason::AmbiguousModule,
-                detail: "o arquivo corresponde a mais de um módulo do contrato".to_owned(),
-            });
+            let lines: Vec<&str> = text.lines().collect();
+            let mut use_cursor = 0;
+            let mut mod_cursor = 0;
+
+            let mut context = VisitContext {
+                path: &file.path,
+                contract_module: module,
+                lines: &lines,
+                use_cursor: &mut use_cursor,
+                mod_cursor: &mut mod_cursor,
+                contract_names: &contract_names,
+                workspace_names: &workspace_names,
+                analysis: &mut analysis,
+                seen_edges: &mut seen_edges,
+            };
+            visit_items(&parsed.items, &mut context);
+        } else {
+            typescript::analyze_text(
+                contract,
+                &contract_names,
+                inventory,
+                &file.path,
+                &text,
+                module,
+                &mut analysis,
+                &mut seen_edges,
+            );
         }
+    }
 
-        let module = matching_modules.first().copied();
-
-        if module.is_none() {
-            analysis.reviews.push(ReviewItem {
-                path: file.path.clone(),
-                line: None,
-                reason: ReviewReason::UnmappedFile,
-                detail: "nenhum path de módulo do contrato corresponde ao arquivo".to_owned(),
-            });
-        }
-
-        let lines: Vec<&str> = text.lines().collect();
-        let mut use_cursor = 0;
-        let mut mod_cursor = 0;
-
-        let mut context = VisitContext {
-            path: &file.path,
-            contract_module: module,
-            lines: &lines,
-            use_cursor: &mut use_cursor,
-            mod_cursor: &mut mod_cursor,
-            contract_names: &contract_names,
-            workspace_names: &workspace_names,
-            analysis: &mut analysis,
-            seen_edges: &mut seen_edges,
-        };
-        visit_items(&parsed.items, &mut context);
+    if typescript_files {
+        analysis.limitations.push(
+            "pacotes npm não são enumerados: o contador de pacotes refere-se apenas ao Cargo"
+                .to_owned(),
+        );
     }
 
     analysis.edges.sort_by(|left, right| {
@@ -371,6 +380,78 @@ fn visit_items(items: &[Item], context: &mut VisitContext<'_>) {
     }
 }
 
+/// Associa um arquivo a um módulo do contrato e registra revisões de mapeamento.
+pub(crate) fn module_for_file<'a>(
+    contract: &'a Contract,
+    path: &str,
+    analysis: &mut Analysis,
+) -> Option<&'a Module> {
+    let matching_modules: Vec<&Module> = contract
+        .architecture
+        .modules
+        .iter()
+        .filter(|module| matches_pattern(&module.path, path))
+        .collect();
+
+    if matching_modules.len() > 1 {
+        analysis.reviews.push(ReviewItem {
+            path: path.to_owned(),
+            line: None,
+            reason: ReviewReason::AmbiguousModule,
+            detail: "o arquivo corresponde a mais de um módulo do contrato".to_owned(),
+        });
+    }
+
+    let module = matching_modules.first().copied();
+    if module.is_none() {
+        analysis.reviews.push(ReviewItem {
+            path: path.to_owned(),
+            line: None,
+            reason: ReviewReason::UnmappedFile,
+            detail: "nenhum path de módulo do contrato corresponde ao arquivo".to_owned(),
+        });
+    }
+    module
+}
+
+/// Registra uma aresta já classificada, sem duplicatas nem revisões repetidas.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn record_dependency(
+    module: &Module,
+    target: &str,
+    kind: DependencyKind,
+    detail: String,
+    line: Option<usize>,
+    evidence: Option<&str>,
+    path: &str,
+    analysis: &mut Analysis,
+    seen_edges: &mut HashSet<String>,
+) {
+    if kind == DependencyKind::Unresolved {
+        analysis.reviews.push(ReviewItem {
+            path: path.to_owned(),
+            line,
+            reason: ReviewReason::UnresolvedDependency,
+            detail: format!("{target}: {detail}"),
+        });
+    }
+
+    let edge_key = format!("{}\0{target}\0{kind:?}\0{path}\0{line:?}", module.name);
+    if !seen_edges.insert(edge_key) {
+        return;
+    }
+
+    analysis.edges.push(DependencyEdge {
+        from: module.name.clone(),
+        to: target.to_owned(),
+        kind,
+        path: path.to_owned(),
+        line,
+        evidence: evidence.map(str::to_owned),
+        detail,
+    });
+}
+
 /// Classifica uma folha de caminho de `use` e registra a aresta correspondente.
 fn classify_use(
     context: &mut VisitContext<'_>,
@@ -397,8 +478,7 @@ fn classify_use(
         first.clone()
     };
 
-    let from = &module.name;
-    if IGNORED_ROOTS.contains(&target.as_str()) || &target == from {
+    if IGNORED_ROOTS.contains(&target.as_str()) || target == module.name {
         return;
     }
 
@@ -421,29 +501,17 @@ fn classify_use(
         (DependencyKind::Unresolved, detail)
     };
 
-    if kind == DependencyKind::Unresolved {
-        context.analysis.reviews.push(ReviewItem {
-            path: context.path.to_owned(),
-            line,
-            reason: ReviewReason::UnresolvedDependency,
-            detail: format!("{target}: {detail}"),
-        });
-    }
-
-    let edge_key = format!("{from}\0{target}\0{kind:?}\0{}\0{line:?}", context.path);
-    if !context.seen_edges.insert(edge_key) {
-        return;
-    }
-
-    context.analysis.edges.push(DependencyEdge {
-        from: from.clone(),
-        to: target,
+    record_dependency(
+        module,
+        &target,
         kind,
-        path: context.path.to_owned(),
-        line,
-        evidence: evidence.map(str::to_owned),
         detail,
-    });
+        line,
+        evidence,
+        context.path,
+        &mut *context.analysis,
+        &mut *context.seen_edges,
+    );
 }
 
 /// Coleta os caminhos completos das folhas de um `use`, incluindo grupos e renomes.

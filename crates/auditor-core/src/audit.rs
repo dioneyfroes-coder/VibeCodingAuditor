@@ -188,6 +188,69 @@ mod tests {
         assert!(report.limitations[0].contains("src/domain/broken.rs"));
     }
 
+    /// Projeto TypeScript/JavaScript com arestas permitidas, proibidas e ambíguas.
+    #[test]
+    fn typescript_fixture_reports_resolved_edges_without_inventing_aliases() {
+        let root = project_fixture("typescript");
+        let report = audit_project(&root).expect("audit must succeed");
+
+        assert_eq!(report, audit_project(&root).expect("audit must succeed"));
+        assert_eq!(report.project, "projeto-typescript");
+        assert_eq!(report.summary.modules, 3);
+        assert_eq!(report.summary.edges, 8);
+        assert_eq!(report.summary.findings, 4);
+        assert_eq!(report.summary.errors, 2);
+        assert_eq!(report.summary.warnings, 0);
+        assert_eq!(report.summary.needs_review, 2);
+        assert_eq!(report.limitations.len(), 1);
+        assert!(report.limitations[0].contains("pacotes npm"));
+
+        let forbidden: Vec<_> = report
+            .findings
+            .iter()
+            .filter(|finding| finding.rule_id == RULE_DEPENDENCY_NOT_ALLOWED)
+            .collect();
+        assert_eq!(forbidden.len(), 2);
+        assert!(forbidden.iter().any(|finding| {
+            finding.path == "src/application/use-case.ts" && finding.line_start == Some(2)
+        }));
+        assert!(forbidden.iter().any(|finding| {
+            finding.path == "src/application/legacy.js" && finding.line_start == Some(1)
+        }));
+        assert!(forbidden.iter().all(|finding| {
+            finding
+                .evidence
+                .as_deref()
+                .is_some_and(|evidence| evidence.contains("infrastructure"))
+        }));
+
+        let unresolved = report
+            .findings
+            .iter()
+            .find(|finding| {
+                finding.rule_id == RULE_DEPENDENCY_UNRESOLVED
+                    && finding.path == "src/application/ambiguous.ts"
+            })
+            .expect("bare specifier must be a review");
+        assert_eq!(unresolved.severity, Severity::NeedsReview);
+        assert_eq!(unresolved.line_start, Some(2));
+        assert_eq!(unresolved.evidence.as_deref(), Some("import \"domain\";"));
+    }
+
+    /// Comentários e strings não podem virar dependências inventadas.
+    #[test]
+    fn typescript_comments_and_strings_do_not_create_findings() {
+        let root = project_fixture("typescript");
+        let report = audit_project(&root).expect("audit must succeed");
+
+        assert!(
+            report
+                .findings
+                .iter()
+                .all(|finding| finding.path != "src/application/comments.ts")
+        );
+    }
+
     #[test]
     fn missing_root_is_an_audit_error() {
         let missing = project_root().join("nao-existe");

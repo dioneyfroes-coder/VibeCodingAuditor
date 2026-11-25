@@ -14,7 +14,7 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 | 7 | Provar o núcleo antes da interface gráfica | Concluída em 25/11/2026 — três projetos fictícios auditados pela CLI; 75 testes passaram |
 | 8 | Criar a aplicação desktop com Tauri | Concluída em 25/11/2026 — Tauri/React compilados e iniciados; 78 testes passaram |
 | 9 | Criar a extensão VS Code | Concluída em 25/11/2026 — `.vsix` gerado; diagnósticos conferem com a CLI; 82 testes passaram |
-| 10 | Expandir linguagens e recursos | Concluída nesta rodada em 25/11/2026 — TypeScript/JavaScript no núcleo; 84 testes Rust e 4 da extensão passaram. Demais opções avaliadas e diferidas |
+| 10 | Expandir linguagens e recursos | Concluída em 25/11/2026; extensões adicionais nesta rodada: TypeScript/JavaScript e Python no núcleo. Demais opções avaliadas e diferidas |
 
 ## Critérios da Etapa 0
 
@@ -149,3 +149,13 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 - [x] Smoke CLI → JSON → extensão: 4 achados produziram 4 diagnósticos (2 `error` e 2 `warning`); `npm test` e `npm run build` da desktop passaram
 - [x] Limitações registradas: sem `tsconfig.paths`, workspaces npm, resolução de pacotes, template literals ou imports dinâmicos construídos em tempo de execução; `import type` conta como acoplamento; `packages` continua sendo Cargo
 - [x] Python, complexidade, duplicação, regras personalizadas, IA, Git diff e auditoria agendada avaliados e diferidos por falta de caso de uso validado nesta rodada
+
+## Critérios da extensão para Python (após a Etapa 10)
+
+- [x] Analisador determinístico para `.py`, sem nova dependência, sem mudança no schema e sem regras fora do núcleo
+- [x] Reconhecer `import` e `from ... import`; mascarar comentários `#` e strings triplas
+- [x] Resolver nomes absolutos contra módulos do contrato e sufixos de arquivo do inventário; nomes ambíguos viram revisão
+- [x] Criar a fixture `tests/fixtures/projects/python` com imports permitidos, proibidos, ruído e arquivo fora dos módulos
+- [x] Registrar limitações: pacotes pip não enumerados, `import *`, nomes absolutos sem sufixo, imports relativos fora da raiz e resolução dinâmica
+- [x] Verificação completa: `cargo check`, `cargo test` (89 testes: 76 no núcleo, 10 na CLI e 3 no desktop), `cargo fmt --check`, `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` e `git diff --check` passaram
+- [x] Smoke na CLI: `python` = 4 arestas, 3 achados (2 erros e 1 revisão), 1 limitação, saída `1`; fixtures anteriores mantiveram as contagens

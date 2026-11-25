@@ -251,6 +251,59 @@ mod tests {
         );
     }
 
+    /// Projeto Python com imports permitidos, proibidos, relativos e ruído.
+    #[test]
+    fn python_fixture_reports_resolved_edges_without_inventing_aliases() {
+        let root = project_fixture("python");
+        let report = audit_project(&root).expect("audit must succeed");
+
+        assert_eq!(report, audit_project(&root).expect("audit must succeed"));
+        assert_eq!(report.project, "projeto-python");
+        assert_eq!(report.summary.modules, 3);
+        assert_eq!(report.summary.edges, 4);
+        assert_eq!(report.summary.findings, 3);
+        assert_eq!(report.summary.errors, 2);
+        assert_eq!(report.summary.warnings, 0);
+        assert_eq!(report.summary.needs_review, 1);
+        assert_eq!(report.limitations.len(), 1);
+        assert!(
+            report
+                .limitations
+                .iter()
+                .any(|item| item.contains("pacotes pip"))
+        );
+
+        let forbidden: Vec<_> = report
+            .findings
+            .iter()
+            .filter(|finding| finding.rule_id == RULE_DEPENDENCY_NOT_ALLOWED)
+            .collect();
+        assert_eq!(forbidden.len(), 2);
+        assert!(
+            forbidden
+                .iter()
+                .any(|finding| finding.path == "src/application/use_case.py")
+        );
+        assert!(
+            forbidden
+                .iter()
+                .any(|finding| finding.path == "src/application/legacy.py")
+        );
+
+        assert!(
+            report
+                .findings
+                .iter()
+                .all(|finding| finding.path != "src/application/noise.py")
+        );
+        assert!(
+            report
+                .findings
+                .iter()
+                .any(|finding| finding.path == "src/unmapped.py")
+        );
+    }
+
     #[test]
     fn missing_root_is_an_audit_error() {
         let missing = project_root().join("nao-existe");

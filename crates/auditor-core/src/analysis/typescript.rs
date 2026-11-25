@@ -9,7 +9,9 @@
 use std::collections::HashSet;
 use std::path::{Component, Path};
 
-use super::{Analysis, DependencyKind, Module, ReviewItem, ReviewReason, record_dependency};
+use super::{
+    Analysis, DependencyKind, Module, ReviewItem, ReviewReason, find_word, record_dependency,
+};
 use crate::contract::Contract;
 use crate::discovery::{Inventory, matches_pattern};
 
@@ -88,26 +90,6 @@ fn mask_line(line: &str, state: &mut ScanState) -> (String, Vec<String>) {
     }
 
     (masked, literals)
-}
-
-/// Indica se um caractere pode fazer parte de um identificador.
-fn is_word_char(ch: char) -> bool {
-    ch.is_alphanumeric() || ch == '_' || ch == '$'
-}
-
-/// Encontra uma palavra inteira a partir de `from`.
-fn find_word(text: &str, word: &str, from: usize) -> Option<usize> {
-    let mut cursor = from;
-    while let Some(offset) = text.get(cursor..)?.find(word) {
-        let index = cursor + offset;
-        let before = text[..index].chars().next_back();
-        let after = text[index + word.len()..].chars().next();
-        if before.is_none_or(|ch| !is_word_char(ch)) && after.is_none_or(|ch| !is_word_char(ch)) {
-            return Some(index);
-        }
-        cursor = index + word.len();
-    }
-    None
 }
 
 /// Devolve o literal que aparece depois de `from`, usando os marcadores `\0`.

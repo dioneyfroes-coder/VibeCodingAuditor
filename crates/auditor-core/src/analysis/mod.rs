@@ -1,11 +1,12 @@
 //! Análise inicial de dependências entre os módulos declarados no contrato.
 //!
 //! A análise é determinística e somente leitura. Ela usa `syn` para interpretar
-//! declarações `mod` e `use` em Rust, e um scanner conservador para importações
-//! TypeScript/JavaScript. Os manifests Cargo informam os pacotes do workspace.
-//! Construções que não podem ser resolvidas com segurança viram itens de revisão
-//! ou limitações explícitas, nunca conclusões inventadas.
+//! declarações `mod` e `use` em Rust, e scanners conservadores para importações
+//! TypeScript/JavaScript e Python. Os manifests Cargo informam os pacotes do
+//! workspace. Construções que não podem ser resolvidas com segurança viram itens
+//! de revisão ou limitações explícitas, nunca conclusões inventadas.
 
+mod python;
 mod typescript;
 
 use std::collections::HashSet;
@@ -23,9 +24,31 @@ use crate::discovery::{Inventory, matches_pattern};
 /// Raízes da biblioteca padrão, que não são dependências arquiteturais.
 const IGNORED_ROOTS: &[&str] = &["std", "core", "alloc", "test"];
 
+/// Indica se um caractere pode fazer parte de um identificador.
+pub(super) fn is_word_char(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '_' || ch == '$'
+}
+
+/// Encontra uma palavra inteira a partir de `from`.
+pub(super) fn find_word(text: &str, word: &str, from: usize) -> Option<usize> {
+    let mut cursor = from;
+    while let Some(offset) = text.get(cursor..)?.find(word) {
+        let index = cursor + offset;
+        let before = text[..index].chars().next_back();
+        let after = text[index + word.len()..].chars().next();
+        if before.is_none_or(|ch| !is_word_char(ch)) && after.is_none_or(|ch| !is_word_char(ch)) {
+            return Some(index);
+        }
+        cursor = index + word.len();
+    }
+    None
+}
+
 /// Indica se a extensão possui analisador de dependências disponível.
 pub fn is_source_file(extension: Option<&str>) -> bool {
-    extension == Some("rs") || typescript::is_supported_extension(extension)
+    extension == Some("rs")
+        || typescript::is_supported_extension(extension)
+        || python::is_supported_extension(extension)
 }
 
 /// Resultado da análise do projeto auditado.
@@ -230,14 +253,17 @@ pub fn analyze(
     let mut seen_edges = HashSet::new();
 
     let mut typescript_files = false;
+    let mut python_files = false;
 
     for file in &inventory.files {
         let extension = file.extension.as_deref();
         if !is_source_file(extension) {
             continue;
         }
-        if extension != Some("rs") {
+        if typescript::is_supported_extension(extension) {
             typescript_files = true;
+        } else if python::is_supported_extension(extension) {
+            python_files = true;
         }
 
         let full_path = root.join(&file.path);
@@ -280,8 +306,19 @@ pub fn analyze(
                 seen_edges: &mut seen_edges,
             };
             visit_items(&parsed.items, &mut context);
-        } else {
+        } else if typescript::is_supported_extension(extension) {
             typescript::analyze_text(
+                contract,
+                &contract_names,
+                inventory,
+                &file.path,
+                &text,
+                module,
+                &mut analysis,
+                &mut seen_edges,
+            );
+        } else {
+            python::analyze_text(
                 contract,
                 &contract_names,
                 inventory,
@@ -297,6 +334,12 @@ pub fn analyze(
     if typescript_files {
         analysis.limitations.push(
             "pacotes npm não são enumerados: o contador de pacotes refere-se apenas ao Cargo"
+                .to_owned(),
+        );
+    }
+    if python_files {
+        analysis.limitations.push(
+            "pacotes pip não são enumerados: o contador de pacotes refere-se apenas ao Cargo"
                 .to_owned(),
         );
     }

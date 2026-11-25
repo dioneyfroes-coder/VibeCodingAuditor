@@ -2,7 +2,7 @@
 
 Ferramenta local para comparar a arquitetura pretendida de um projeto com a arquitetura realmente implementada. Cada achado deve apontar a regra violada, os arquivos envolvidos e, quando possível, as linhas relevantes. O contrato arquitetural (`auditor.toml`) pertence ao usuário e é versionado junto ao projeto auditado.
 
-**Status atual:** Etapa 10 — suporte determinístico a TypeScript e JavaScript concluído nesta rodada. A CLI cria um modelo de `auditor.toml`, inventaria arquivos, imprime o grafo de dependências, aplica regras determinísticas, gera relatórios em texto, JSON ou Markdown e registra execuções em SQLite. A aplicação desktop e a extensão VS Code reutilizam o mesmo núcleo. Os demais itens da Etapa 10 (Python, complexidade, duplicação, regras personalizadas, IA, Git e agendamento) foram avaliados e ficaram para rodadas futuras, sem caso de uso validado.
+**Status atual:** Etapa 10 concluída, com extensões determinísticas para TypeScript/JavaScript e Python adicionadas ao núcleo. A CLI cria um modelo de `auditor.toml`, inventaria arquivos, imprime o grafo de dependências, aplica regras determinísticas, gera relatórios em texto, JSON ou Markdown e registra execuções em SQLite. A aplicação desktop e a extensão VS Code reutilizam o mesmo núcleo. Complexidade, duplicação, regras personalizadas, IA, Git e agendamento permanecem diferidos até surgir caso de uso validado.
 
 ## Documentação
 
@@ -69,7 +69,7 @@ O comando `scan <raiz>` lê `<raiz>/auditor.toml`, percorre a árvore sem execut
 
 ## Análise de dependências
 
-O comando `analyze <raiz>` lê o contrato e o inventário, lê os manifests `Cargo.toml` do workspace e usa `syn` para interpretar declarações `mod` e importações `use` dos arquivos `.rs` incluídos. Para `.ts`, `.tsx`, `.js` e `.jsx`, um scanner próprio reconhece `import`, `export ... from`, `require(...)` e `import(...)`; comentários e strings são descartados antes da leitura, e especificadores relativos são resolvidos lexicalmente contra os arquivos do inventário. Cada arquivo é associado ao primeiro módulo do contrato cujo `path` corresponde ao caminho relativo; múltiplas correspondências e arquivos sem correspondência viram itens de revisão.
+O comando `analyze <raiz>` lê o contrato e o inventário, lê os manifests `Cargo.toml` do workspace e usa `syn` para interpretar declarações `mod` e importações `use` dos arquivos `.rs` incluídos. Para `.ts`, `.tsx`, `.js` e `.jsx`, um scanner próprio reconhece `import`, `export ... from`, `require(...)` e `import(...)`. Para `.py`, reconhece `import` e `from ... import`. Comentários e strings são descartados antes da leitura, e especificadores relativos são resolvidos lexicalmente contra os arquivos do inventário. Cada arquivo é associado ao primeiro módulo do contrato cujo `path` corresponde ao caminho relativo; múltiplas correspondências e arquivos sem correspondência viram itens de revisão.
 
 As arestas são classificadas assim:
 
@@ -77,9 +77,9 @@ As arestas são classificadas assim:
 - `proibida`: o destino é um módulo declarado no contrato, mas não está em `allowed_dependencies`.
 - `não resolvida`: o destino não corresponde a nenhum módulo declarado; também gera item de revisão.
 
-A origem de cada aresta guarda arquivo relativo, linha e a linha de código encontrada. Declarações `mod` também são registradas com arquivo e linha; o conteúdo de `mod` inline é percorrido. `use` de `std`, `core`, `alloc`, `test`, `self`, `super` e dependências do próprio módulo não geram arestas arquiteturais. Em TS/JS, especificadores sem `./` ou `../` são ignorados como pacote externo, exceto quando o nome coincide com um módulo do contrato — nesse caso viram revisão, nunca erro.
+A origem de cada aresta guarda arquivo relativo, linha e a linha de código encontrada. Declarações `mod` também são registradas com arquivo e linha; o conteúdo de `mod` inline é percorrido. `use` de `std`, `core`, `alloc`, `test`, `self`, `super` e dependências do próprio módulo não geram arestas arquiteturais. Em TS/JS, especificadores sem `./` ou `../` são ignorados como pacote externo, exceto quando o nome coincide com um módulo do contrato — nesse caso viram revisão, nunca erro. Em Python, nomes absolutos só viram aresta quando começam com um módulo do contrato e possuem sufixo de arquivo encontrado no inventário; pacotes externos e `import *` são ignorados.
 
-Limitações explícitas: em Rust, imports dentro de corpos de funções, macros complexos, código gerado e nomes resolvidos dinamicamente não são classificados; arquivos que não fazem parse viram limitação. Em TS/JS, não há suporte a `tsconfig.paths`, workspaces npm, resolução de pacotes, template literals ou imports construídos dinamicamente; `import type` é contado como acoplamento. O contador `packages` continua se referindo somente a pacotes Cargo, e uma limitation informa isso quando há arquivos TS/JS.
+Limitações explícitas: em Rust, imports dentro de corpos de funções, macros complexos, código gerado e nomes resolvidos dinamicamente não são classificados; arquivos que não fazem parse viram limitação. Em TS/JS, não há suporte a `tsconfig.paths`, workspaces npm, resolução de pacotes, template literals ou imports construídos dinamicamente; `import type` é contado como acoplamento. Em Python, apenas `import` e `from ... import` em uma linha são reconhecidos; nomes absolutos sem sufixo de arquivo, imports relativos fora da raiz, `import *` e resolução dinâmica não geram arestas. O contador `packages` continua se referindo somente a pacotes Cargo, com limitation explícita quando há arquivos TS/JS ou Python.
 
 ## Motor de regras e relatórios
 
@@ -107,7 +107,7 @@ Para auditar TS/JS, declare extensões explícitas em `scan.include` — chaves 
 include = ["src/**/*.ts", "src/**/*.tsx", "src/**/*.js", "src/**/*.jsx"]
 ```
 
-A fixture `tests/fixtures/projects/typescript` exercita imports permitidos e proibidos, `require`, `import()` dinâmico, reexportação, pacote externo ignorado, nome de módulo ambíguo e comentário/string que não podem virar aresta. CLI, desktop e extensão VS Code consomem o mesmo relatório, sem regras locais. Nenhuma dependência Rust foi adicionada ao núcleo.
+A fixture `tests/fixtures/projects/typescript` exercita imports permitidos e proibidos, `require`, `import()` dinâmico, reexportação, pacote externo ignorado, nome de módulo ambíguo e comentário/string que não podem virar aresta. A fixture `tests/fixtures/projects/python` cobre `import`, `from ... import`, comentários, strings triplas e pacote externo. CLI, desktop e extensão VS Code consomem o mesmo relatório, sem regras locais. Nenhuma dependência Rust foi adicionada ao núcleo.
 
 ## Histórico local
 

@@ -569,3 +569,23 @@ O sucesso não será medido pela quantidade de funcionalidades ou pelo tamanho d
 - Tauri, documentação: https://tauri.app/start/
 - Rust, instalação e toolchain: https://www.rust-lang.org/tools/install
 - Cargo, referência oficial: https://doc.rust-lang.org/cargo/
+
+---
+
+## 13. Anotações de execução — correções pendentes (Etapas 0 a 6)
+
+Esta seção foi acrescentada depois da conclusão da Etapa 6. Ela **não substitui** nenhuma tarefa, critério de conclusão ou regra das seções 1 a 12: o texto original continua como referência arquitetural. Decisões já tomadas permanecem em `docs/DECISIONS.md`; o progresso real, em `docs/ROADMAP.md`. Os campos "Versão do documento" e "Status" do topo foram mantidos de propósito — o status corrente não é reescrito no plano.
+
+Nenhuma correção abaixo foi aplicada nesta solicitação. Cada item exige decisão explícita antes de virar código, contrato ou documentação.
+
+| Ponto do plano | Situação observada até a Etapa 6 | Correção necessária / encaminhamento |
+|---|---|---|
+| Seção 3 (`Persistência`), princípio 6 e Etapa 8, item 4 | O SQLite grava execuções, achados e limitações. Decisões aprovadas e a atualização explícita do `auditor.toml` ainda não existem (limitação em D6.5). | Decidir antes das etapas seguintes: incluir decisões aprovadas no schema, com nova versão de migração e confirmação explícita, ou removê-las do escopo por decisão registrada. Não alterar contrato nem banco silenciosamente (regras 10 e 11 da seção 8). |
+| Etapa 5, regra 5 (limite de tamanho de arquivo) | Adiada porque o schema v1 não prevê o limite; decisão já registrada em D5.2. | Não reintroduzir com limite inventado. Implementar somente com campo explícito no contrato e versão de schema, ou manter fora do MVP por decisão registrada. |
+| Etapa 7, tarefa 1 (três projetos fictícios) | Existem apenas duas fixtures de projeto: `tests/fixtures/projects/simple` e `tests/fixtures/projects/dependencies`. | Criar a terceira fixture, com estrutura parcialmente desconhecida, na Etapa 7 e antes de declarar o critério de conclusão. Não antecipar para a Etapa 6. |
+| Etapa 2, tarefa 5 (`auditor init`) | O executável real é `vibe-coding-auditor` e o subcomando é `init`, invocado por `cargo run -p auditor-cli -- init <diretorio>`. O `README.md` ainda repete `auditor init` na seção do contrato. | Corrigir a nomenclatura quando a documentação for atualizada. Nenhuma mudança de código: a regra de não sobrescrever `auditor.toml` já está implementada. |
+| Seção 4 (árvore de referência) | O núcleo passou a conter `crates/auditor-core/src/history/`; `docs/ARCHITECTURE.md` ainda não foi criado. | Acrescentar `history/` à árvore na próxima revisão documental. Não criar `ARCHITECTURE.md` só para completar o desenho: a própria seção 4 define a árvore como direção, não como ordem. |
+| Seção 6 (`confidence`) | O campo existe no modelo e no banco, mas fica `None`: as seis regras atuais são determinísticas (D5.2, D5.4 e `README.md`). | Manter nulo e não inventar precisão numérica. Revisar somente se entrar regra heurística, com decisão prévia e limitação registrada. |
+| Etapa 1, critério de conclusão (`cargo clippy ...`) | No ambiente Windows/OneDrive, a compilação incremental pode gerar avisos de acesso; a forma estável já está em `AGENTS.md` e no `README.md`, com `--config 'build.incremental=false'`. | Usar essa variante quando os avisos aparecerem, sem enfraquecer o critério `-D warnings`. |
+
+Para evitar duplicação: as correções de código aplicadas na Etapa 6 (import de `rusqlite::Type`, separação de `source()`, colunas opcionais, cópia do caminho na transação e closures redundantes) já estão em D6.5; a política de migração está em D6.3; a comparação por identificador estável, em D6.4 e D6.5. Nenhum desses pontos é reaberto aqui.

@@ -203,3 +203,13 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 - [x] `cargo check`, `cargo test` (101 testes: 88 no núcleo, 10 na CLI e 3 no desktop), `cargo fmt --check`, `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` e `git diff --check` passaram
 - [x] `cargo run -p auditor-cli -- audit --help` mostrou `--diff <ARQUIVO>`; `npm test` da extensão e `npm run build` da desktop passaram
 - [x] Smoke com `git diff` real: `dependencies` caiu de 7 para 3 achados no arquivo alterado; CLI→JSON→extensão gerou 3 diagnósticos (1 `error` e 2 `warning`)
+
+## Fechamento da primeira fase
+
+- [x] Decisão registrada: `decisões aprovadas` ficam fora do escopo; sem mudança de schema, contrato ou banco
+- [x] Decisão registrada: limite de tamanho de arquivo permanece fora do MVP (D5.2), sem campo novo no contrato
+- [x] Decisão registrada: regras personalizadas, sugestões com IA e auditoria agendada ficam fora desta fase; IA no núcleo continua vedada
+- [x] `README.md` atualizado com o status da primeira fase e o nome correto do subcomando `init`
+- [x] Árvore da seção 4 do plano atualizada com `history/`
+- [x] `docs/DECISIONS.md` registra a decisão `R7`; `docs/ROADMAP.md` registra o fechamento
+- [x] Verificação final repetida após os ajustes documentais; resultados em `docs/DECISIONS.md` (`R7`)

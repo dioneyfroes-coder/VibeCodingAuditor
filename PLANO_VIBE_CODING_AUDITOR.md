@@ -120,6 +120,7 @@ vibe-coding-auditor/
 │   │       ├── graph/           # Grafo de módulos e dependências
 │   │       ├── rules/           # Avaliação das regras
 │   │       ├── findings/        # Modelo e classificação dos achados
+│   │       ├── history/         # Histórico local em SQLite
 │   │       └── report/          # Relatórios JSON e Markdown
 │   └── auditor-cli/             # Interface de linha de comando
 ├── docs/

@@ -1,8 +1,9 @@
+use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 /// Auditor local de arquitetura de projetos.
 #[derive(Parser, Debug)]
@@ -29,32 +30,73 @@ enum Commands {
         /// Diretório raiz do projeto a ser auditado.
         root: PathBuf,
     },
+    /// Aplica as regras e gera um relatório de auditoria.
+    Audit {
+        /// Diretório raiz do projeto a ser auditado.
+        root: PathBuf,
+        /// Formato do relatório.
+        #[arg(long, value_enum, default_value = "text")]
+        format: OutputFormat,
+        /// Arquivo onde gravar o relatório; sem este argumento, imprime no terminal.
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+}
+
+/// Formato de saída aceito pelo subcomando `audit`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum OutputFormat {
+    /// Texto legível no terminal.
+    Text,
+    /// JSON estruturado para consumo por outras ferramentas.
+    Json,
+    /// Markdown para revisão humana.
+    Markdown,
+}
+
+impl From<OutputFormat> for auditor_core::report::ReportFormat {
+    fn from(format: OutputFormat) -> Self {
+        match format {
+            OutputFormat::Text => Self::Text,
+            OutputFormat::Json => Self::Json,
+            OutputFormat::Markdown => Self::Markdown,
+        }
+    }
 }
 
 fn main() {
-    let args = Args::parse();
+    let exit_code = match dispatch_command(Args::parse()) {
+        Ok(code) => code,
+        Err(error) => {
+            eprintln!("Falha operacional: {error}");
+            2
+        }
+    };
+    std::process::exit(i32::from(exit_code));
+}
 
+/// Despacha o comando selecionado e devolve o código de saída.
+fn dispatch_command(args: Args) -> Result<u8, Box<dyn std::error::Error>> {
     match args.command {
         Some(Commands::Init { path }) => {
             let directory = path.unwrap_or_else(|| PathBuf::from("."));
-            if let Err(error) = init_contract(&directory) {
-                eprintln!("Falha ao criar modelo de contrato: {error}");
-                std::process::exit(1);
-            }
+            init_contract(&directory)?;
+            Ok(0)
         }
         Some(Commands::Scan { root }) => {
-            if let Err(error) = scan_project(&root) {
-                eprintln!("Falha na descoberta: {error}");
-                std::process::exit(1);
-            }
+            scan_project(&root)?;
+            Ok(0)
         }
         Some(Commands::Analyze { root }) => {
-            if let Err(error) = analyze_project(&root) {
-                eprintln!("Falha na análise: {error}");
-                std::process::exit(1);
-            }
+            analyze_project(&root)?;
+            Ok(0)
         }
-        None => {}
+        Some(Commands::Audit {
+            root,
+            format,
+            output,
+        }) => audit_command(&root, format, output.as_deref()),
+        None => Ok(0),
     }
 }
 
@@ -146,6 +188,31 @@ fn analyze_project(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Executa a auditoria, renderiza o relatório e o envia ao destino escolhido.
+fn audit_command(
+    root: &Path,
+    format: OutputFormat,
+    output: Option<&Path>,
+) -> Result<u8, Box<dyn std::error::Error>> {
+    let report = auditor_core::audit::audit_project(root)?;
+    let content = report.render(format.into())?;
+
+    match output {
+        Some(path) => {
+            fs::write(path, content)?;
+            println!("Relatório gravado em {}", path.display());
+        }
+        None => println!("{content}"),
+    }
+
+    Ok(audit_exit_code(&report))
+}
+
+/// Código `0` para execução sem achados e `1` quando há achados.
+fn audit_exit_code(report: &auditor_core::report::AuditReport) -> u8 {
+    if report.has_findings() { 1 } else { 0 }
+}
+
 /// Texto estável usado na saída do terminal para cada tipo de aresta.
 fn dependency_kind_label(kind: auditor_core::analysis::DependencyKind) -> &'static str {
     match kind {
@@ -162,9 +229,13 @@ mod tests {
 
     use super::Args;
     use super::Commands;
+    use super::OutputFormat;
     use super::Path;
+    use super::audit_exit_code;
     use super::dependency_kind_label;
     use auditor_core::analysis::DependencyKind;
+    use auditor_core::report::ReportFormat;
+    use auditor_core::report::{AuditReport, ReportSummary};
 
     #[test]
     fn help_flag_is_recognized() {
@@ -211,6 +282,79 @@ mod tests {
         let error = Args::try_parse_from(["vibe-coding-auditor", "analyze"])
             .expect_err("analyze must require a root");
         assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn audit_subcommand_parses_format_and_output() {
+        let args = Args::try_parse_from([
+            "vibe-coding-auditor",
+            "audit",
+            "projeto",
+            "--format",
+            "json",
+            "--output",
+            "relatorio.json",
+        ])
+        .expect("audit must parse");
+        match args.command {
+            Some(Commands::Audit {
+                root,
+                format,
+                output,
+            }) => {
+                assert_eq!(root.as_path(), Path::new("projeto"));
+                assert_eq!(format, OutputFormat::Json);
+                assert_eq!(output.as_deref(), Some(Path::new("relatorio.json")));
+            }
+            _ => panic!("audit command must be selected"),
+        }
+
+        let error = Args::try_parse_from(["vibe-coding-auditor", "audit"])
+            .expect_err("audit must require a root");
+        assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument);
+
+        let error =
+            Args::try_parse_from(["vibe-coding-auditor", "audit", "projeto", "--format", "xml"])
+                .expect_err("unknown format must be rejected");
+        assert_eq!(error.kind(), ErrorKind::InvalidValue);
+    }
+
+    #[test]
+    fn output_formats_map_to_the_core_model() {
+        assert_eq!(ReportFormat::from(OutputFormat::Text), ReportFormat::Text);
+        assert_eq!(ReportFormat::from(OutputFormat::Json), ReportFormat::Json);
+        assert_eq!(
+            ReportFormat::from(OutputFormat::Markdown),
+            ReportFormat::Markdown
+        );
+    }
+
+    /// Relatório em memória com a quantidade informada de achados.
+    fn report_with_findings(findings: usize) -> AuditReport {
+        AuditReport {
+            project: "projeto".to_owned(),
+            schema_version: 1,
+            summary: ReportSummary {
+                files_included: 0,
+                files_skipped: 0,
+                modules: 0,
+                packages: 0,
+                edges: 0,
+                findings,
+                errors: findings,
+                warnings: 0,
+                infos: 0,
+                needs_review: 0,
+            },
+            findings: Vec::new(),
+            limitations: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn audit_exit_codes_reflect_finding_presence() {
+        assert_eq!(audit_exit_code(&report_with_findings(0)), 0);
+        assert_eq!(audit_exit_code(&report_with_findings(1)), 1);
     }
 
     #[test]

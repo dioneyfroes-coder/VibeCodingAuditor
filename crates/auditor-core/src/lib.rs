@@ -1,13 +1,17 @@
 //! Núcleo de auditoria do Vibe Coding Auditor.
 //!
-//! O núcleo já contém o modelo e a validação do contrato e a descoberta
-//! somente leitura de arquivos. Ainda não contém regras de arquitetura, grafo
-//! de dependências nem persistência; será reutilizado pela CLI e, no futuro,
-//! pelo adaptador desktop.
+//! O núcleo contém contrato, descoberta somente leitura, análise de
+//! dependências, avaliação determinística de regras e geração de relatórios.
+//! Será reutilizado pela CLI e, no futuro, pelo adaptador desktop.
+//! Persistência em SQLite pertence a uma etapa posterior.
 
 pub mod analysis;
+pub mod audit;
 pub mod contract;
 pub mod discovery;
+pub mod findings;
+pub mod report;
+pub mod rules;
 
 /// Identificador estável do núcleo, usado em metadados e mensagens.
 pub const CORE_NAME: &str = "auditor-core";

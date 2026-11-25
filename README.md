@@ -2,7 +2,7 @@
 
 Ferramenta local para comparar a arquitetura pretendida de um projeto com a arquitetura realmente implementada. Cada achado deve apontar a regra violada, os arquivos envolvidos e, quando possível, as linhas relevantes. O contrato arquitetural (`auditor.toml`) pertence ao usuário e é versionado junto ao projeto auditado.
 
-**Status atual:** Etapa 4 — análise inicial de dependências Rust concluída. A CLI já cria um modelo de `auditor.toml`, inventaria arquivos e imprime o grafo de módulos com arestas permitidas, proibidas e não resolvidas. Ainda não há motor de regras nem relatórios de auditoria.
+**Status atual:** Etapa 5 — motor de regras e relatórios concluído. A CLI cria um modelo de `auditor.toml`, inventaria arquivos, imprime o grafo de dependências e aplica regras determinísticas, gerando saída em texto, JSON ou Markdown. Ainda não há histórico em SQLite nem interface desktop.
 
 ## Documentação
 
@@ -35,6 +35,9 @@ cargo run -p auditor-cli -- --version
 cargo run -p auditor-cli -- init <diretorio>
 cargo run -p auditor-cli -- scan <raiz>
 cargo run -p auditor-cli -- analyze <raiz>
+cargo run -p auditor-cli -- audit <raiz>
+cargo run -p auditor-cli -- audit <raiz> --format json
+cargo run -p auditor-cli -- audit <raiz> --format markdown --output relatorio.md
 ```
 
 No Windows, com a pasta do projeto sincronizada pelo OneDrive, o Cargo pode emitir avisos `Acesso negado` ao finalizar sessões de compilação incremental. Para uma execução limpa do Clippy nesse ambiente:
@@ -70,8 +73,27 @@ As arestas são classificadas assim:
 
 A origem de cada aresta guarda arquivo relativo, linha e a linha de código encontrada. Declarações `mod` também são registradas com arquivo e linha; o conteúdo de `mod` inline é percorrido. `use` de `std`, `core`, `alloc`, `test`, `self`, `super` e dependências do próprio módulo não geram arestas arquiteturais.
 
-Limitações explícitas desta primeira versão: são analisados apenas arquivos `.rs` que entraram no inventário; imports dentro de corpos de funções, macros complexos, código gerado e nomes resolvidos dinamicamente não são classificados. Arquivos que não fazem parse viram limitação e não interrompem a análise. Quando a linha de uma declaração não pode ser localizada no texto, a evidência fica vazia e a limitação é registrada. Módulos declarados no contrato sem arquivos correspondentes ainda não são avaliados; isso pertence ao motor de regras da Etapa 5.
+Limitações explícitas desta primeira versão: são analisados apenas arquivos `.rs` que entraram no inventário; imports dentro de corpos de funções, macros complexos, código gerado e nomes resolvidos dinamicamente não são classificados. Arquivos que não fazem parse viram limitação e não interrompem a análise. Quando a linha de uma declaração não pode ser localizada no texto, a evidência fica vazia e a limitação é registrada.
+
+## Motor de regras e relatórios
+
+O comando `audit <raiz>` reutiliza o mesmo pipeline do núcleo e aplica estas regras com identificadores estáveis:
+
+| Regra | Severidade | Situação |
+|---|---|---|
+| `dep.not_allowed` | `error` | Destino é módulo declarado, mas ausente de `allowed_dependencies`. |
+| `dep.unresolved` | `needs_review` | Destino não corresponde a nenhum módulo do contrato. |
+| `file.unmapped` | `needs_review` | Arquivo Rust incluído não corresponde a nenhum módulo. |
+| `file.ambiguous_module` | `needs_review` | Arquivo corresponde a mais de um módulo do contrato. |
+| `dep.cycle` | `warning` | Grafo contém ciclo simples entre módulos, incluindo autoimportação. |
+| `module.no_files` | `warning` | Módulo declarado sem arquivo Rust correspondente. |
+
+Cada achado contém `id`, `rule_id`, `severity`, `title`, `message`, `path`, `line_start`, `line_end`, `evidence`, `expected`, `suggestion` e `confidence`. Todas as regras são determinísticas, então `confidence` é sempre nulo; o auditor não inventa precisão numérica nem aplica sugestões automaticamente. Dependências não resolvidas e arquivos não mapeados são sinais para decisão humana, não violações comprovadas.
+
+Os formatos disponíveis são `text` (padrão), `json` e `markdown`. Sem `--output`, o relatório vai para o terminal; com `--output <arquivo>`, o arquivo indicado é gravado e sobrescrito se já existir. O projeto auditado nunca é modificado.
 
 ## Execução
 
-O executável `vibe-coding-auditor` responde a `--help`, `--version`, `init <diretorio>`, `scan <raiz>` e `analyze <raiz>`. `init` cria `auditor.toml` sem sobrescrever arquivo existente; `scan` e `analyze` são somente leitura. `analyze` imprime o grafo para inspeção — ainda não produz achados, exportações nem códigos de saída de auditoria.
+O executável `vibe-coding-auditor` responde a `--help`, `--version`, `init <diretorio>`, `scan <raiz>`, `analyze <raiz>` e `audit <raiz>`. `init` cria `auditor.toml` sem sobrescrever arquivo existente; `scan` e `analyze` são somente leitura e servem para inspeção. `audit` produz achados e relatórios no formato escolhido.
+
+Códigos de saída: `0` quando a auditoria não gera achados, `1` quando há pelo menos um achado e `2` para falha operacional ou argumento inválido. Esses códigos valem para todos os subcomandos; `init`, `scan` e `analyze` retornam `0` em sucesso e `2` em falha.

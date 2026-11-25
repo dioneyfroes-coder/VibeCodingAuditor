@@ -198,3 +198,32 @@ Não foram criados `Cargo.toml`, `auditor.example.toml`, `.gitignore`, diretóri
 - **Documentação:** campos públicos de `Contract`, `Project`, `Scan`, `Architecture`, `Module`, `ContractError`, `SkippedEntry`, `SkipReason`, `DiscoveryError`, `WorkspaceInfo`, `WorkspacePackage`, `DependencyEdge`, `ReviewItem`, `ModuleDeclaration` e `AnalysisError` passaram a ter comentários explícitos. Helpers privados também receberam comentários curtos.
 - **Testes:** adicionados testes diretos para `require_non_empty`, `validate_pattern`, `relative_path`, `is_excluded_path`, `matches_path_parts`, `matches_pattern_component`, `locate_source_line`, `is_use_declaration_line`, `is_mod_declaration_line`, `collect_use_path_leaves`, `AnalysisError`, `dependency_kind_label` e `ReviewReason::AmbiguousModule`. Helpers de teste também receberam nomes e comentários descritivos.
 - **Impacto:** nenhuma regra ou funcionalidade nova; apenas qualidade interna e rastreabilidade. Dois testes criados nesta revisão falharam inicialmente por expectativa incorreta e foram corrigidos antes da execução final; nenhum comportamento de produção foi alterado por essas correções.
+
+## D5.1 — Dependência `serde_json` para exportação
+
+- **Decisão:** declarar `serde_json = "1.0.154"` no workspace e no `auditor-core`, sem adicioná-la à CLI.
+- **Motivo:** os tipos de achado e relatório já derivam `Serialize`; serializar com `serde_json` evita gerador manual de JSON e garante escape correto de texto oriundo de código-fonte. Renderizadores de texto e Markdown vivem no núcleo para que CLI e futura interface compartilhem a mesma saída.
+- **Alternativa rejeitada:** concatenar JSON manualmente na CLI, que exigiria replicar regras de escape e deixaria a saída dependente do frontend.
+- **Verificação oficial:** <https://docs.rs/serde_json/latest/serde_json/> e <https://crates.io/api/v1/crates/serde_json/1.0.154> confirmam 1.0.154, não yanked, licença `MIT OR Apache-2.0`, publicada em 11/10/2026.
+- **Impacto:** `Cargo.lock` passou a incluir `serde_json 1.0.154` e os transitivos `itoa 1.0.19`, `memchr 2.8.3` e `zmij 1.0.23`. As versões e checksums foram confirmados em <https://crates.io/api/v1/crates/itoa/1.0.19>, <https://crates.io/api/v1/crates/memchr/2.8.3> e <https://crates.io/api/v1/crates/zmij/1.0.23>; nenhum está yanked. Nenhuma ferramenta do sistema foi instalada ou alterada.
+
+## D5.2 — Regras e severidades da Etapa 5
+
+- **Decisão:** implementar seis regras estáveis: `dep.not_allowed` (`error`), `dep.unresolved` (`needs_review`), `file.unmapped` (`needs_review`), `file.ambiguous_module` (`needs_review`), `dep.cycle` (`warning`) e `module.no_files` (`warning`).
+- **Motivo:** separar violação determinística de revisão humana e sinal de atenção, conforme a seção 6 do plano. Dependências não resolvidas e arquivos não mapeados já eram itens de revisão na Etapa 4; transformá-los em erros inventaria uma conclusão que a análise não tem. Ciclos são sinais estruturais, mantidos como aviso para preservar a decisão final do usuário.
+- **Rejeição explícita:** a regra de limite de tamanho configurável da Etapa 5 foi adiada porque o schema v1 não possui campo para ele; inventar um limite silencioso violaria a regra de não alterar o contrato sem decisão registrada.
+- **Impacto:** cada achado contém os doze campos do modelo, arquivo e linha quando disponíveis, evidência verificável e sugestão nunca aplicada. `confidence` é sempre nulo porque nenhuma regra é heurística.
+
+## D5.3 — Relatório e código de saída
+
+- **Decisão:** `audit <raiz>` aceita `--format text|json|markdown` e `--output <arquivo>`. Sem `--output`, imprime no terminal; com ele, grava o arquivo indicado, sobrescrito se existir. Códigos: `0` sem achados, `1` com pelo menos um achado e `2` para falha operacional ou argumento inválido.
+- **Motivo:** o plano exige saída legível, exportação estruturada e códigos distintos para sucesso, achados e falha. A escrita permanece explícita fora da raiz auditada por padrão; nenhum comando modifica fontes ou contratos.
+- **Impacto:** os códigos passaram a valer para todos os subcomandos. `init`, `scan` e `analyze` retornam `0` em sucesso e `2` em falha, antes retornavam `1`. A mudança foi registrada no `README.md`.
+
+## D5.4 — Orquestração no núcleo e revisão de qualidade
+
+- **Decisão:** criar `audit::audit_project` para encadear contrato, descoberta, análise, regras e relatório. A CLI apenas despacha o comando, renderiza e escolhe o destino da saída.
+- **Motivo:** manter o limite "a interface não implementa regras de auditoria" e permitir que a futura aplicação desktop reutilize o mesmo pipeline.
+- **Revisão:** nomes como `run` foram trocados por `dispatch_command`; campos, helpers e tipos públicos foram documentados; testes diretos cobrem regras, formatação de local, escape Markdown, serialização JSON, mapeamento de formatos e códigos de saída. Um teste tautológico sobre `ArchitectureStyle` foi removido e substituído por teste de autoimportação.
+- **Limitações conhecidas:** ciclos são enumerados como caminhos simples canônicos; a fixture produz três ciclos, não um. A detecção depende das arestas já classificadas na Etapa 4 e herda suas limitações (imports em corpos de funções, macros complexos, código gerado e nomes dinâmicos). Arquivos que não fazem parse continuam apenas em `limitations`, sem virar achado de erro.
+- **Impacto:** 60 testes no total (51 no núcleo e 9 na CLI), todos passando. Nenhuma persistência SQLite, interface desktop, extensão VS Code ou uso de IA foi adicionado.

@@ -9,7 +9,7 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 | 2 | Criar o modelo do contrato arquitetural | Concluída em 25/11/2026 — 10 testes passaram; `init` validado |
 | 3 | Descobrir e inventariar o projeto | Concluída em 25/11/2026 — 16 testes passaram; `scan` validado em fixture |
 | 4 | Implementar a primeira análise de dependências Rust | Concluída em 25/11/2026 — 36 testes passaram; `analyze` validado em fixture |
-| 5 | Criar o motor de regras e os relatórios | Não iniciada |
+| 5 | Criar o motor de regras e os relatórios | Concluída em 25/11/2026 — 60 testes passaram; `audit` validado em três formatos |
 | 6 | Registrar histórico local em SQLite | Não iniciada |
 | 7 | Provar o núcleo antes da interface gráfica | Não iniciada |
 | 8 | Criar a aplicação desktop com Tauri | Não iniciada |
@@ -67,3 +67,15 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 - [x] Adicionar o subcomando `analyze <raiz>` somente para inspeção do grafo
 - [x] Revisar paradigma, nomes descritivos, documentação de código e testes diretos dos helpers
 - [x] `cargo check`, `cargo test` (36 testes), `cargo fmt --check` e `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` passaram
+
+## Critérios da Etapa 5
+
+- [x] Separar descoberta, análise, avaliação de regras e geração de relatórios em módulos do núcleo
+- [x] Atribuir identificadores estáveis às seis regras implementadas
+- [x] Produzir achados com todos os campos do modelo da seção 6 do plano
+- [x] Classificar dependência proibida, dependência não resolvida, arquivo fora de módulo, arquivo ambíguo, ciclo entre módulos e módulo sem arquivos
+- [x] Gerar saída legível no terminal e exportar JSON e Markdown
+- [x] Definir códigos de saída `0` (sem achados), `1` (com achados) e `2` (falha operacional)
+- [x] Garantir que os mesmos dados gerem relatórios idênticos e que cada achado traga arquivo, linha e evidência quando disponíveis
+- [x] Revisar paradigma, nomes descritivos, documentação de código e testes dos helpers
+- [x] `cargo check`, `cargo test` (60 testes: 51 no núcleo e 9 na CLI), `cargo fmt --check` e `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` passaram

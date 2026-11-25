@@ -1,0 +1,74 @@
+//! Modelo estruturado de achados da auditoria.
+//!
+//! CLI, futura interface desktop e extensão devem mostrar os mesmos campos.
+//! Nenhum achado modifica o projeto auditado: sugestões são apenas texto.
+
+use serde::Serialize;
+
+/// Severidade de um achado, conforme o modelo do plano.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Severity {
+    /// Violação determinística de uma regra do contrato.
+    Error,
+    /// Situação suspeita que ainda não foi classificada como violação.
+    Warning,
+    /// Informação útil sobre a execução.
+    Info,
+    /// O auditor não tem informação suficiente para decidir.
+    NeedsReview,
+}
+
+impl Severity {
+    /// Rótulo curto usado na saída legível.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Error => "erro",
+            Self::Warning => "aviso",
+            Self::Info => "informação",
+            Self::NeedsReview => "revisão necessária",
+        }
+    }
+}
+
+/// Achado estruturado com regra, evidência e sugestão rastreáveis.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Finding {
+    /// Identificador estável desta ocorrência específica.
+    pub id: String,
+    /// Identificador estável da regra que produziu o achado.
+    pub rule_id: String,
+    /// Classificação de severidade.
+    pub severity: Severity,
+    /// Descrição curta do problema.
+    pub title: String,
+    /// Explicação objetiva do que foi observado.
+    pub message: String,
+    /// Arquivo ou caminho envolvido, relativo à raiz quando aplicável.
+    pub path: String,
+    /// Primeira linha envolvida, quando conhecida.
+    pub line_start: Option<usize>,
+    /// Última linha envolvida, quando conhecida.
+    pub line_end: Option<usize>,
+    /// Trecho ou descrição do que foi efetivamente observado.
+    pub evidence: Option<String>,
+    /// O que o contrato ou a regra exige.
+    pub expected: String,
+    /// Possível correção, nunca aplicada automaticamente.
+    pub suggestion: String,
+    /// Confiança declarada apenas para análises heurísticas; nulo nas regras determinísticas.
+    pub confidence: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn severity_labels_are_stable() {
+        assert_eq!(Severity::Error.label(), "erro");
+        assert_eq!(Severity::Warning.label(), "aviso");
+        assert_eq!(Severity::Info.label(), "informação");
+        assert_eq!(Severity::NeedsReview.label(), "revisão necessária");
+    }
+}

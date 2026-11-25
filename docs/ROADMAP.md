@@ -180,3 +180,13 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 - [x] Limitações registradas: somente repetição exata de linha, sem semântica ou blocos
 - [x] `cargo check`, `cargo test` (92 testes: 79 no núcleo, 10 na CLI e 3 no desktop), `cargo fmt --check`, `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` e `git diff --check` passaram
 - [x] Smoke na CLI: `duplication` = 1 aresta, 1 revisão, 0 limitações, saída `1`; conversão CLI→JSON→extensão gerou 1 diagnóstico `warning`
+
+## Critérios de código sem referências (após a Etapa 10)
+
+- [x] Regra `module.unreferenced` no núcleo, sem nova dependência e sem campo novo no contrato
+- [x] Aplicação somente a módulos com arquivos incluídos e zero arestas resolvidas incidentes
+- [x] Fixture `tests/fixtures/projects/unreferenced` e teste de integração
+- [x] Limitações registradas: proxy por módulo, não prova de código morto; módulos sem arquivos continuam com `module.no_files`
+- [x] Contagem da fixture `partial` atualizada de 4 para 5 achados pela inclusão legítima de `module.unreferenced:shared`; demais fixtures inalteradas
+- [x] `cargo check`, `cargo test` (93 testes: 80 no núcleo, 10 na CLI e 3 no desktop), `cargo fmt --check`, `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` e `git diff --check` passaram
+- [x] Smoke na CLI: `unreferenced` = 1 aresta, 1 revisão, 0 limitações, saída `1`; conversão CLI→JSON→extensão gerou 1 diagnóstico `warning`; `npm test` da extensão e `npm run build` da desktop passaram

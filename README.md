@@ -85,6 +85,8 @@ A regra `module.concentration` usa apenas arestas resolvidas entre módulos decl
 
 A regra `code.duplicated` compara linhas já lidas pela análise, ignorando comentários e declarações de import/export/use. Somente linhas com 40 ou mais caracteres e repetidas em mais de um arquivo viram revisão; o identificador usa um hash FNV-1a estável do trecho, sem dependência externa. O custo é linear no total de linhas incluídas. Não há detecção semântica, normalização de variáveis nem comparação de blocos: apenas repetição exata de uma linha.
 
+A regra `module.unreferenced` usa o mesmo grafo resolvido: módulos com arquivos incluídos, mas sem aresta de entrada ou saída, viram revisão. É um proxy conservador para código isolado, não uma prova de código morto: o grafo não registra o arquivo de destino, apenas o módulo de destino. Módulos sem arquivos continuam sendo tratados somente por `module.no_files`. O custo é `O(M + E)`.
+
 ## Motor de regras e relatórios
 
 O comando `audit <raiz>` reutiliza o mesmo pipeline do núcleo e aplica estas regras com identificadores estáveis:
@@ -99,6 +101,7 @@ O comando `audit <raiz>` reutiliza o mesmo pipeline do núcleo e aplica estas re
 | `module.no_files` | `warning` | Módulo declarado sem arquivo de código correspondente. |
 | `module.concentration` | `needs_review` | Módulo com 3 ou mais origens ou destinos distintos no grafo resolvido. |
 | `code.duplicated` | `needs_review` | Linha idêntica com 40 ou mais caracteres em dois ou mais arquivos. |
+| `module.unreferenced` | `needs_review` | Módulo com arquivos incluídos e zero arestas resolvidas incidentes. |
 
 Cada achado contém `id`, `rule_id`, `severity`, `title`, `message`, `path`, `line_start`, `line_end`, `evidence`, `expected`, `suggestion` e `confidence`. Todas as regras são determinísticas, então `confidence` é sempre nulo; o auditor não inventa precisão numérica nem aplica sugestões automaticamente. Dependências não resolvidas e arquivos não mapeados são sinais para decisão humana, não violações comprovadas.
 

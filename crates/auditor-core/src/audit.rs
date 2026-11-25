@@ -150,10 +150,10 @@ mod tests {
 
         assert_eq!(report, audit_project(&root).expect("audit must succeed"));
         assert_eq!(report.project, "projeto-parcial");
-        assert_eq!(report.summary.findings, 4);
+        assert_eq!(report.summary.findings, 5);
         assert_eq!(report.summary.errors, 0);
         assert_eq!(report.summary.warnings, 1);
-        assert_eq!(report.summary.needs_review, 3);
+        assert_eq!(report.summary.needs_review, 4);
 
         let rule_ids: Vec<&str> = report
             .findings
@@ -164,6 +164,7 @@ mod tests {
         assert!(rule_ids.contains(&RULE_FILE_AMBIGUOUS_MODULE));
         assert!(rule_ids.contains(&RULE_FILE_UNMAPPED));
         assert!(rule_ids.contains(&RULE_MODULE_WITHOUT_FILES));
+        assert!(rule_ids.contains(&"module.unreferenced"));
 
         let has_id = |id: &str| report.findings.iter().any(|finding| finding.id == id);
         assert!(has_id(
@@ -363,6 +364,37 @@ mod tests {
                 .as_deref()
                 .is_some_and(|evidence| evidence.contains("crates/domain/src/lib.rs")
                     && evidence.contains("calcular_total_com_desconto_e_imposto"))
+        );
+        assert!(finding.confidence.is_none());
+    }
+
+    /// Módulo com arquivos, mas fora do grafo, vira revisão explícita.
+    #[test]
+    fn unreferenced_fixture_flags_isolated_module_without_removing_it() {
+        let root = project_fixture("unreferenced");
+        let report = audit_project(&root).expect("audit must succeed");
+
+        assert_eq!(report, audit_project(&root).expect("audit must succeed"));
+        assert_eq!(report.project, "projeto-sem-referencias");
+        assert_eq!(report.summary.modules, 3);
+        assert_eq!(report.summary.edges, 1);
+        assert_eq!(report.summary.findings, 1);
+        assert_eq!(report.summary.errors, 0);
+        assert_eq!(report.summary.warnings, 0);
+        assert_eq!(report.summary.needs_review, 1);
+        assert!(report.limitations.is_empty());
+
+        let finding = report
+            .findings
+            .first()
+            .expect("unreferenced finding must exist");
+        assert_eq!(finding.id, "module.unreferenced:orphan");
+        assert_eq!(finding.rule_id, "module.unreferenced");
+        assert_eq!(finding.severity, Severity::NeedsReview);
+        assert_eq!(finding.path, "crates/orphan/**");
+        assert_eq!(
+            finding.evidence.as_deref(),
+            Some("0 arestas resolvidas incidentes")
         );
         assert!(finding.confidence.is_none());
     }

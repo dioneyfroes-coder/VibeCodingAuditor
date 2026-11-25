@@ -27,6 +27,8 @@ pub const RULE_MODULE_WITHOUT_FILES: &str = "module.no_files";
 pub const RULE_MODULE_CONCENTRATION: &str = "module.concentration";
 /// Identificador estável da regra de linha de código duplicada.
 pub const RULE_CODE_DUPLICATED: &str = "code.duplicated";
+/// Identificador estável da regra de módulo sem arestas resolvidas.
+pub const RULE_MODULE_UNREFERENCED: &str = "module.unreferenced";
 
 /// Número de módulos distintos que caracteriza concentração de dependências.
 const CONCENTRATION_THRESHOLD: usize = 3;
@@ -40,6 +42,7 @@ pub fn evaluate(contract: &Contract, inventory: &Inventory, analysis: &Analysis)
     findings.extend(cycle_findings(analysis));
     findings.extend(module_concentration_findings(contract, analysis));
     findings.extend(duplicated_line_findings(analysis));
+    findings.extend(unreferenced_module_findings(contract, inventory, analysis));
     findings.extend(module_without_files_findings(contract, inventory));
     findings.sort_by(|left, right| left.id.cmp(&right.id));
     findings
@@ -337,6 +340,62 @@ fn duplicated_line_findings(analysis: &Analysis) -> Vec<Finding> {
         .collect()
 }
 
+/// Sinaliza módulos com arquivos, mas sem arestas resolvidas incidentes.
+fn unreferenced_module_findings(
+    contract: &Contract,
+    inventory: &Inventory,
+    analysis: &Analysis,
+) -> Vec<Finding> {
+    let adjacency = build_adjacency(analysis);
+    let mut modules_with_edges: BTreeSet<&str> = BTreeSet::new();
+    for (from, targets) in &adjacency {
+        modules_with_edges.insert(from.as_str());
+        for to in targets {
+            modules_with_edges.insert(to.as_str());
+        }
+    }
+
+    let source_files: Vec<&str> = inventory
+        .files
+        .iter()
+        .filter(|file| crate::analysis::is_source_file(file.extension.as_deref()))
+        .map(|file| file.path.as_str())
+        .collect();
+
+    contract
+        .architecture
+        .modules
+        .iter()
+        .filter(|module| {
+            !modules_with_edges.contains(module.name.as_str())
+                && source_files
+                    .iter()
+                    .any(|path| matches_pattern(&module.path, path))
+        })
+        .map(|module| Finding {
+            id: format!("{}:{}", RULE_MODULE_UNREFERENCED, module.name),
+            rule_id: RULE_MODULE_UNREFERENCED.to_owned(),
+            severity: Severity::NeedsReview,
+            title: format!("Módulo sem referências no grafo: {}", module.name),
+            message: format!(
+                "O módulo {} possui arquivos incluídos, mas nenhuma aresta resolvida começa ou termina nele.",
+                module.name
+            ),
+            path: module.path.clone(),
+            line_start: None,
+            line_end: None,
+            evidence: Some("0 arestas resolvidas incidentes".to_owned()),
+            expected: "Módulos com arquivos devem participar do grafo ou ter sua exclusão decidida explicitamente."
+                .to_owned(),
+            suggestion: format!(
+                "Revise se {} deve ser integrado ao grafo, removido ou documentado como exceção.",
+                module.name
+            ),
+            confidence: None,
+        })
+        .collect()
+}
+
 /// Identifica módulos declarados sem arquivos de código correspondentes.
 fn module_without_files_findings(contract: &Contract, inventory: &Inventory) -> Vec<Finding> {
     let source_files: Vec<&str> = inventory
@@ -509,6 +568,7 @@ mod tests {
         assert_eq!(RULE_MODULE_WITHOUT_FILES, "module.no_files");
         assert_eq!(RULE_MODULE_CONCENTRATION, "module.concentration");
         assert_eq!(RULE_CODE_DUPLICATED, "code.duplicated");
+        assert_eq!(RULE_MODULE_UNREFERENCED, "module.unreferenced");
     }
 
     #[test]
@@ -529,6 +589,7 @@ mod tests {
         assert_eq!(count(RULE_MODULE_WITHOUT_FILES), 0);
         assert_eq!(count(RULE_MODULE_CONCENTRATION), 0);
         assert_eq!(count(RULE_CODE_DUPLICATED), 0);
+        assert_eq!(count(RULE_MODULE_UNREFERENCED), 0);
     }
 
     #[test]

@@ -356,3 +356,10 @@ Não foram criados `Cargo.toml`, `auditor.example.toml`, `.gitignore`, diretóri
 - **Motivo:** o plano exige caso de uso, testes e impacto conhecidos por recurso. O projeto já tem frontend em TypeScript; os outros itens não têm necessidade demonstrada e alguns (IA no núcleo) contrariam regra explícita do plano.
 - **Alternativa rejeitada:** implementar vários recursos da Etapa 10 de uma vez — violaria “uma etapa por solicitação” e impediria avaliar regressões de cada mudança.
 - **Impacto:** a fixture `typescript` produziu 8 arestas, 4 achados (2 `dep.not_allowed`, 1 `dep.unresolved`, 1 `file.unmapped`) e 1 limitação, com saída `1`. A conversão da extensão gerou 4 diagnósticos (2 `error`, 2 `warning`). `cargo check`, `cargo test` (84 testes: 71 no núcleo, 10 na CLI e 3 no desktop), `cargo fmt --check`, `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `npm test` da extensão e `npm run build` da desktop passaram. As contagens das fixtures `clean`, `dependencies` e `partial` permaneceram inalteradas.
+
+## R1 — Revisão final do plano
+
+- **Decisão:** antes de qualquer recurso adicional, conferir o estado final das Etapas 0–10 sem alterar código. O usuário autorizou explicitamente cinco trabalhos seguintes, um por vez: revisão, Python, complexidade/concentração, duplicação/referências e Git diff.
+- **Motivo:** o plano termina na Etapa 10; cada item seguinte precisa de caso de uso, impacto conhecido e verificação própria. A revisão estabelece a linha de base e evita atribuir regressões a mudanças futuras.
+- **Alternativa rejeitada:** iniciar vários recursos em paralelo — dificultaria atribuir falhas e contrariaria a regra de uma mudança por vez.
+- **Impacto:** `--help` e `--version` retornaram `0`; `init` criou o modelo e recusou sobrescrever com `2`; `scan`, `analyze` e `audit clean` retornaram `0`; `audit dependencies` e `audit partial` retornaram `1` pela presença de achados; `history record/list/show/compare` retornaram `0` com banco temporário. Nenhuma ferramenta global foi instalada e nenhum arquivo do repositório foi alterado nesta revisão.

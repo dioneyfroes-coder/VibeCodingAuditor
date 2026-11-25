@@ -5,6 +5,7 @@
 //! futuro, pelo adaptador desktop.
 
 pub mod contract;
+pub mod discovery;
 
 /// Identificador estável do núcleo, usado em metadados e mensagens.
 pub const CORE_NAME: &str = "auditor-core";

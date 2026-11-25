@@ -19,17 +19,31 @@ enum Commands {
         /// Diretório onde o modelo será criado (padrão: diretório atual).
         path: Option<PathBuf>,
     },
+    /// Inventaria arquivos de um projeto a partir do `auditor.toml` da raiz.
+    Scan {
+        /// Diretório raiz do projeto a ser auditado.
+        root: PathBuf,
+    },
 }
 
 fn main() {
     let args = Args::parse();
 
-    if let Some(Commands::Init { path }) = args.command {
-        let directory = path.unwrap_or_else(|| PathBuf::from("."));
-        if let Err(error) = init_contract(&directory) {
-            eprintln!("Falha ao criar modelo de contrato: {error}");
-            std::process::exit(1);
+    match args.command {
+        Some(Commands::Init { path }) => {
+            let directory = path.unwrap_or_else(|| PathBuf::from("."));
+            if let Err(error) = init_contract(&directory) {
+                eprintln!("Falha ao criar modelo de contrato: {error}");
+                std::process::exit(1);
+            }
         }
+        Some(Commands::Scan { root }) => {
+            if let Err(error) = scan_project(&root) {
+                eprintln!("Falha na descoberta: {error}");
+                std::process::exit(1);
+            }
+        }
+        None => {}
     }
 }
 
@@ -47,6 +61,23 @@ fn init_contract(directory: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Carrega o contrato da raiz e apresenta o inventário resultante.
+fn scan_project(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let contract = auditor_core::contract::load_contract(&root.join("auditor.toml"))?;
+    let inventory = auditor_core::discovery::discover(root, &contract)?;
+
+    println!("Raiz: {}", inventory.root.display());
+    println!("Arquivos incluídos: {}", inventory.files.len());
+    for file in &inventory.files {
+        println!(
+            "  {} ({} bytes, ext: {:?})",
+            file.path, file.size, file.extension
+        );
+    }
+    println!("Entradas não incluídas: {}", inventory.skipped.len());
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use clap::Parser;
@@ -54,6 +85,7 @@ mod tests {
 
     use super::Args;
     use super::Commands;
+    use super::Path;
 
     #[test]
     fn help_flag_is_recognized() {
@@ -74,5 +106,18 @@ mod tests {
         let args = Args::try_parse_from(["vibe-coding-auditor", "init", "projeto"])
             .expect("init must parse");
         assert!(matches!(args.command, Some(Commands::Init { .. })));
+    }
+
+    #[test]
+    fn scan_subcommand_requires_explicit_root() {
+        let args = Args::try_parse_from(["vibe-coding-auditor", "scan", "projeto"])
+            .expect("scan must parse");
+        assert!(
+            matches!(args.command, Some(Commands::Scan { root }) if root.as_path() == Path::new("projeto"))
+        );
+
+        let error = Args::try_parse_from(["vibe-coding-auditor", "scan"])
+            .expect_err("scan must require a root");
+        assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument);
     }
 }

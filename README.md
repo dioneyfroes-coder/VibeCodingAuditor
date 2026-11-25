@@ -2,7 +2,7 @@
 
 Ferramenta local para comparar a arquitetura pretendida de um projeto com a arquitetura realmente implementada. Cada achado deve apontar a regra violada, os arquivos envolvidos e, quando possível, as linhas relevantes. O contrato arquitetural (`auditor.toml`) pertence ao usuário e é versionado junto ao projeto auditado.
 
-**Status atual:** Etapa 2 — modelo do contrato arquitetural concluído. A CLI já cria um modelo de `auditor.toml`; ainda não há varredura de arquivos nem regras de auditoria.
+**Status atual:** Etapa 3 — descoberta e inventário concluídos. A CLI já cria um modelo de `auditor.toml` e inventaria arquivos da raiz informada; ainda não há análise de dependências nem regras de auditoria.
 
 ## Documentação
 
@@ -33,6 +33,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo run -p auditor-cli -- --help
 cargo run -p auditor-cli -- --version
 cargo run -p auditor-cli -- init <diretorio>
+cargo run -p auditor-cli -- scan <raiz>
 ```
 
 No Windows, com a pasta do projeto sincronizada pelo OneDrive, o Cargo pode emitir avisos `Acesso negado` ao finalizar sessões de compilação incremental. Para uma execução limpa do Clippy nesse ambiente:
@@ -52,6 +53,10 @@ O contrato de um projeto auditado usa `schema_version = 1` e contém:
 
 Campos desconhecidos, nomes ou caminhos duplicados, referências a módulos inexistentes, caminhos absolutos e versões de schema não suportadas são rejeitados com mensagem explicativa. O modelo gerado por `auditor init` está em [`auditor.example.toml`](auditor.example.toml) e **precisa ser revisado e confirmado pelo usuário** antes de ser considerado aprovado.
 
+## Descoberta
+
+O comando `scan <raiz>` lê `<raiz>/auditor.toml`, percorre a árvore sem executar arquivos e imprime o inventário. Os padrões suportados são `**` como componente inteiro e `*` dentro de um componente; `?`, classes e chaves não são interpretados. Diretórios `.git`, `target`, `node_modules`, `dist`, `build`, `.venv` e `venv` são ignorados em qualquer profundidade, além de `scan.exclude`. Links simbólicos nunca são seguidos, e entradas inacessíveis são registradas sem interromper a varredura. Cada arquivo incluído registra caminho relativo, extensão e tamanho em bytes.
+
 ## Execução
 
-O executável `vibe-coding-auditor` responde a `--help`, `--version` e `init <diretorio>`. O comando `init` cria `auditor.toml` no diretório informado e nunca sobrescreve um arquivo existente. Nenhum comando de auditoria foi implementado ainda.
+O executável `vibe-coding-auditor` responde a `--help`, `--version`, `init <diretorio>` e `scan <raiz>`. `init` cria `auditor.toml` sem sobrescrever arquivo existente; `scan` é somente leitura. Ainda não há análise de dependências nem regras de auditoria.

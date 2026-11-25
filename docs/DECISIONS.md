@@ -125,3 +125,32 @@ Não foram criados `Cargo.toml`, `auditor.example.toml`, `.gitignore`, diretóri
 ## D2.6 — Fixtures e testes
 - **Decisão:** um contrato válido e sete contratos inválidos em `tests/fixtures/contracts/`, com testes no núcleo para carregamento, rejeição de campos desconhecidos, versão não suportada, style não suportado, dependência desconhecida, duplicidade, caminho absoluto, nome vazio e arquivo ausente. A CLI testa o parsing do subcomando `init`.
 - **Impacto:** 10 testes unitários no total (7 no núcleo, 3 na CLI), todos reproduzíveis sem rede.
+
+## D3.1 — Varredura sem novas dependências
+- **Decisão:** usar apenas a biblioteca padrão (`fs::read_dir`, `fs::symlink_metadata` e `fs::canonicalize`). Nenhum crate de glob ou caminho foi adicionado.
+- **Motivo:** o contrato usa um subconjunto pequeno e determinístico de padrões; uma dependência externa não traria benefício proporcional nesta etapa.
+- **Impacto:** `Cargo.lock` permanece inalterado em relação à Etapa 2; o núcleo continua independente de CLI, Tauri, React e SQLite.
+
+## D3.2 — Subconjunto de padrões suportado
+- **Decisão:** `**` é aceito somente como componente inteiro e corresponde a zero ou mais componentes; `*` é aceito dentro de um componente. `?`, classes `[...]` e chaves `{...}` são tratados como caracteres literais.
+- **Motivo:** cobrir `crates/**/*.rs` e os exemplos do plano sem implementar um motor de glob completo.
+- **Impacto:** padrões com sintaxe não suportada não são fingidos como válidos: eles simplesmente não correspondem. Essa limitação é explícita e será revisitada apenas se uma regra futura exigir mais sintaxe.
+
+## D3.3 — Diretórios ignorados por padrão
+- **Decisão:** `.git`, `target`, `node_modules`, `dist`, `build`, `.venv` e `venv` são ignorados em qualquer profundidade, além dos padrões de `scan.exclude`.
+- **Motivo:** atender ao plano sem duplicar no schema o que é comportamento da descoberta (D2.2).
+- **Impacto:** um diretório podado aparece uma única vez em `skipped`, com o motivo; seus descendentes não são listados individualmente.
+
+## D3.4 — Links simbólicos
+- **Decisão:** toda entrada é inspecionada com `symlink_metadata`; qualquer link simbólico vira `SkipReason::Symlink` e nunca é seguido, mesmo quando aponta para dentro da raiz. Não existe opção para seguir links nesta etapa.
+- **Motivo:** reforçar a regra de segurança do projeto e evitar loops ou travessia para fora da raiz.
+- **Impacto:** atalhos legítimos ficam fora do inventário, com motivo registrado. Não há teste automatizado de link simbólico porque a criação depende de privilégio no Windows.
+
+## D3.5 — Metadados e falhas parciais
+- **Decisão:** cada arquivo incluído registra `path` relativo com `/`, `extension` e `size` em bytes. Interpretação de "metadados úteis" foi mantida no mínimo determinístico: sem conteúdo, hash ou timestamp. Falha ao ler uma entrada vira `SkipReason::Inaccessible` e a varredura continua; apenas uma raiz não canonicalizável gera `DiscoveryError::Root`.
+- **Motivo:** evitar leitura de conteúdo e atributos voláteis, preservando a auditoria somente leitura.
+- **Impacto:** não há teste automatizado de permissão negada, pois depende de ACL do sistema. No Windows, a raiz canonicalizada aparece com o prefixo `\\?\` na saída da CLI.
+
+## D3.6 — Comando `scan` e fixtures
+- **Decisão:** `scan <RAIZ>` lê `<RAIZ>/auditor.toml`, chama o núcleo e imprime o inventário. A fixture `tests/fixtures/projects/simple` contém três arquivos incluídos, um arquivo excluído pelo contrato, diretórios ignorados por padrão e arquivos fora do `include`.
+- **Impacto:** 16 testes no total (12 no núcleo e 4 na CLI). Nenhuma associação de arquivo a módulo ou regra de dependência é executada; isso pertence à Etapa 4.

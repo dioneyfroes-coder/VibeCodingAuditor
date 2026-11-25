@@ -7,7 +7,7 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 | 0 | Verificar o ambiente e preparar o repositório | Concluída em 25/11/2026 — documentação criada e repositório Git inicializado |
 | 1 | Criar o workspace Rust e a CLI mínima | Concluída em 25/11/2026 — `cargo check`, `test`, `fmt --check` e `clippy` passaram |
 | 2 | Criar o modelo do contrato arquitetural | Concluída em 25/11/2026 — 10 testes passaram; `init` validado |
-| 3 | Descobrir e inventariar o projeto | Não iniciada |
+| 3 | Descobrir e inventariar o projeto | Concluída em 25/11/2026 — 16 testes passaram; `scan` validado em fixture |
 | 4 | Implementar a primeira análise de dependências Rust | Não iniciada |
 | 5 | Criar o motor de regras e os relatórios | Não iniciada |
 | 6 | Registrar histórico local em SQLite | Não iniciada |
@@ -41,4 +41,15 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 - [x] Validar campos obrigatórios, caminhos e referências; rejeitar propriedades desconhecidas
 - [x] Criar `auditor init` com modelo que exige revisão e sem sobrescrever contrato existente
 - [x] Criar fixtures válidas e inválidas com testes reproduzíveis
+- [x] `cargo check`, `cargo test`, `cargo fmt --check` e `cargo clippy --workspace --all-targets -- -D warnings` passaram
+
+## Critérios da Etapa 3
+
+- [x] Receber a raiz do projeto como argumento explícito (`scan <raiz>`)
+- [x] Respeitar `include` e `exclude` do contrato
+- [x] Ignorar por padrão diretórios gerados e de controle de versão
+- [x] Não seguir links simbólicos
+- [x] Registrar caminho relativo, extensão, tamanho e motivo das entradas ignoradas
+- [x] Lidar com entradas inacessíveis sem interromper a varredura
+- [x] Criar árvore de diretórios controlada em `tests/fixtures/projects/simple`
 - [x] `cargo check`, `cargo test`, `cargo fmt --check` e `cargo clippy --workspace --all-targets -- -D warnings` passaram

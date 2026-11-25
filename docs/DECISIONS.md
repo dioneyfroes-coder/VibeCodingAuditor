@@ -286,3 +286,31 @@ Não foram criados `Cargo.toml`, `auditor.example.toml`, `.gitignore`, diretóri
 - **Motivo:** o critério da Etapa 7 é provar que o motor é útil sem interface. Os três cenários foram expressos com os campos já implementados; o path sobreposto de `partial` foi detectado como ambiguidade, sem precisar de nova opção de configuração.
 - **Alternativa rejeitada:** adicionar campos para marcar áreas “conhecidas” ou “desconhecidas” no contrato — seria antecipação de funcionalidade sem implementação e exigiria nova versão de schema sem necessidade demonstrada.
 - **Impacto:** códigos observados: `clean` = `0`, `dependencies` = `1`, `partial` = `1`, `compare` = `0`; a comparação entre `clean` e `partial` listou quatro achados novos e nenhum resolvido. `README.md` registra os cenários e os comandos. 75 testes no total (65 no núcleo e 10 na CLI), todos passando. Nenhuma interface desktop, extensão VS Code ou IA foi adicionada.
+
+## D8.1 — Adaptador Tauri e limites do núcleo
+
+- **Decisão:** criar `apps/desktop/src-tauri` como adaptador fino. Os comandos `audit_project`, `analyze_project`, `read_contract`, `history_list` e `history_record` chamam funções públicas de `auditor-core` e devolvem os modelos já serializados pelo núcleo.
+- **Motivo:** o critério da Etapa 8 é oferecer a mesma auditoria da CLI; qualquer regra reimplementada no frontend criaria divergência. A serialização de `Analysis` e dos modelos de histórico foi adicionada ao núcleo apenas para transporte, sem alterar regras nem o schema v1 do contrato.
+- **Alternativa rejeitada:** implementar filtros de severidade e classificação de arestas em TypeScript — isso duplicaria a semântica das regras e exigiria testes paralelos sem benefício.
+- **Impacto:** `auditor-core` passou a derivar `Serialize` para os tipos de análise/histórico. Nenhuma função de regra foi exportada a mais. Os testes do adaptador comparam seus resultados diretamente com o núcleo.
+
+## D8.2 — Dependências, permissões e ícone
+
+- **Decisão:** usar Tauri `2.12.7`, `tauri-build` `2.7.6`, `tauri-plugin-dialog` `2.8.4`, `@tauri-apps/api` `2.12.5`, `@tauri-apps/cli` `2.12.6`, `@tauri-apps/plugin-dialog` `2.8.4`, React/React DOM `19.3.1`, TypeScript `7.0.2` e Vite `8.3.8`. A janela recebe somente `core:default` e `dialog:allow-open`, com CSP explícito.
+- **Motivo:** o plano fixa Tauri 2 + React/TypeScript; o seletor nativo atende “selecionar e abrir um projeto”. O plugin de diálogo é a menor dependência que evita digitar o caminho manualmente. Não foi concedido acesso de filesystem à interface: arquivos e banco são lidos exclusivamente pelos comandos Rust.
+- **Alternativa rejeitada:** conceder `core:allow-*` irrestrito ou plugin de filesystem — ampliaria a superfície de ataque sem necessidade. Também não foi instalada ferramenta global: `npm install` e o build ocorreram dentro de `apps/desktop`.
+- **Impacto:** `Cargo.lock` e `package-lock.json` passaram a existir/ser atualizados. Um ícone ICO mínimo foi criado localmente com `System.Drawing` porque `tauri-build` exige `icons/icon.ico` no Windows; nenhuma imagem foi baixada ou gerada por serviço externo.
+
+## D8.3 — Telas e modelo de dados da interface
+
+- **Decisão:** implementar seleção de pasta, auditoria com resumo e filtros, grafo SVG, visualizador do contrato, histórico com registro e configuração do banco. O contrato permanece somente leitura e não há execução em segundo plano.
+- **Motivo:** são as telas iniciais do plano que podem ser entregues sem nova funcionalidade de escrita. Um editor de contrato exigiria confirmação explícita e cálculo de diffs, fora do critério mínimo; visualizar já satisfaz “editor ou visualizador”.
+- **Alternativa rejeitada:** adicionar biblioteca de gráficos ou editor de texto — dependências sem necessidade, além de deslocarem responsabilidade da interface para bibliotecas externas.
+- **Impacto:** a UI consome apenas `snake_case` já usado pela CLI. Nós tracejados no grafo indicam destinos fora do contrato. A comparação de histórico ficou apenas na CLI, onde já era testada.
+
+## D8.4 — Verificação e limitações permanentes
+
+- **Decisão:** encerrar a Etapa 8 com build de release e smoke de inicialização, sem instalar ferramentas e sem antecipar a Etapa 9.
+- **Motivo:** a etapa deve provar que a aplicação abre e usa o mesmo motor, não que gera um instalador de distribuição.
+- **Alternativa rejeitada:** marcar a etapa como concluída apenas com `cargo check` — não provaria que o frontend e o contexto Tauri funcionam juntos.
+- **Impacto:** `cargo check`, `cargo test` (78 testes: 65 no núcleo, 10 na CLI e 3 no desktop), `cargo fmt --check`, `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `npm install`, `npm run build` e `npm run tauri build` passaram. `target/release/auditor-desktop.exe` foi gerado e iniciou. Limitações registradas no `README.md`: banco relativo ao cwd, bundle desativado, ícone técnico e ausência de comparação na interface. Extensão VS Code não foi iniciada.

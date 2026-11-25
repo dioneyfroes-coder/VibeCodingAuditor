@@ -1,0 +1,13 @@
+[package]
+name = "auditor-desktop"
+version.workspace = true
+edition.workspace = true
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+# Adaptador fino: toda regra e persistência vem do núcleo.
+auditor-core = { path = "../../../crates/auditor-core" }
+tauri = { workspace = true }
+tauri-plugin-dialog = { workspace = true }

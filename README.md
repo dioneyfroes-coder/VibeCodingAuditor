@@ -2,7 +2,7 @@
 
 Ferramenta local para comparar a arquitetura pretendida de um projeto com a arquitetura realmente implementada. Cada achado deve apontar a regra violada, os arquivos envolvidos e, quando possível, as linhas relevantes. O contrato arquitetural (`auditor.toml`) pertence ao usuário e é versionado junto ao projeto auditado.
 
-**Status atual:** Etapa 7 — núcleo validado pela CLI antes da interface gráfica. A CLI cria um modelo de `auditor.toml`, inventaria arquivos, imprime o grafo de dependências, aplica regras determinísticas, gera relatórios em texto, JSON ou Markdown e registra execuções em SQLite para consulta e comparação. Ainda não há aplicação desktop.
+**Status atual:** Etapa 8 — aplicação desktop local concluída. A CLI cria um modelo de `auditor.toml`, inventaria arquivos, imprime o grafo de dependências, aplica regras determinísticas, gera relatórios em texto, JSON ou Markdown e registra execuções em SQLite. A aplicação desktop reutiliza o mesmo núcleo para abrir um projeto, auditar, filtrar achados, visualizar o grafo e consultar o histórico. A extensão VS Code ainda não foi iniciada.
 
 ## Documentação
 
@@ -14,7 +14,7 @@ Ferramenta local para comparar a arquitetura pretendida de um projeto com a arqu
 ## Direção técnica definida no plano
 
 - Núcleo de auditoria em Rust, reutilizado pela CLI e pela futura aplicação desktop.
-- Interface desktop planejada com Tauri 2, React e TypeScript.
+- Interface desktop implementada com Tauri 2, React e TypeScript.
 - Histórico local em SQLite; contrato dos projetos auditados em TOML.
 - Processamento local e auditoria somente leitura por padrão.
 - Regras determinísticas, sem dependência de IA ou de internet para o funcionamento básico.
@@ -133,6 +133,27 @@ cargo run -p auditor-cli -- history compare 1 2 --database /caminho/temporario.d
 ```
 
 A avaliação não encontrou falso positivo no projeto correto. Os três ciclos de `dependencies` são caminhos fechados reais no grafo, embora se sobreponham; essa enumeração já era uma limitação conhecida da Etapa 5. Em `partial`, o que não pôde ser decidido foi classificado como revisão necessária, e o arquivo com sintaxe inválida aparece somente em `Limitações`, sem virar erro inventado. Mensagens e evidências foram revisadas: todo achado traz `id`, quando há linha ela é apontada, e a evidência é a linha de código observada ou uma explicação explícita para achados de arquivo. O formato do contrato v1 foi suficiente para os três cenários; nenhum campo novo foi introduzido.
+
+## Aplicação desktop (Etapa 8)
+
+A aplicação está em `apps/desktop`: Tauri 2, React 19, TypeScript 7 e Vite 8. O crate `apps/desktop/src-tauri` é um adaptador fino — ele traduz chamadas da interface para `auditor-core` e devolve modelos serializados (`AuditReport`, `Analysis` e `RunSummary`). A interface apenas filtra e renderiza; nenhuma regra de auditoria foi movida para o frontend.
+
+Pré-requisitos verificados no ambiente: WebView2 `158.0.4370.33`, MSVC `14.44.35207` (Visual Studio 2022 Community), Node `24.19.0`, npm `11.17.0` e Rust `1.98.1`. Nenhuma ferramenta do sistema foi instalada, atualizada ou removida.
+
+```sh
+cd apps/desktop
+npm install
+npm run tauri dev
+npm run tauri build
+```
+
+Telas disponíveis: seleção nativa da pasta do projeto, auditoria com resumo e filtros por severidade/regra, grafo de dependências em SVG com as classificações feitas pelo núcleo, visualizador somente leitura do `auditor.toml`, histórico local com registro explícito e painel de configurações do caminho do banco.
+
+Segurança: apenas `core:default` e `dialog:allow-open` foram concedidos à janela principal; não há plugin de filesystem, CSP foi definido explicitamente e não há execução automática em segundo plano. O contrato nunca é editado pela interface — uma futura edição exigiria confirmação explícita.
+
+Limitações conhecidas: o caminho do banco é relativo ao diretório de execução do aplicativo (use um caminho absoluto no painel para fixá-lo); o empacotamento de instaladores está desativado (`bundle.active = false`), então `tauri build` gera somente o executável; o ícone incluído é técnico e substituível. A comparação de execuções continua disponível pela CLI, não pela interface.
+
+O critério de conclusão foi verificado por testes de adaptação: o comando `audit_project` devolve exatamente o mesmo `AuditReport` produzido por `auditor-core`, e o binário de release foi gerado e iniciado com sucesso.
 
 ## Execução
 

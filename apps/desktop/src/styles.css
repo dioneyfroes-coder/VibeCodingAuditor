@@ -1,0 +1,104 @@
+:root {
+  color-scheme: light;
+  font-family: 'Segoe UI', sans-serif;
+  font-size: 14px;
+  color: #1c2430;
+  background: #f4f6f9;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+h1 {
+  margin-bottom: 4px;
+}
+
+.subtitle,
+.detail,
+footer {
+  color: #586273;
+}
+
+.panel {
+  background: #ffffff;
+  border: 1px solid #d9dee6;
+  border-radius: 8px;
+  margin: 16px 0;
+  padding: 16px;
+}
+
+label {
+  display: block;
+  margin: 10px 0;
+}
+
+input,
+select {
+  display: block;
+  margin-top: 4px;
+  padding: 6px 8px;
+  width: 100%;
+  max-width: 640px;
+  box-sizing: border-box;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+button {
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.summary {
+  font-weight: 600;
+}
+
+.error {
+  color: #a13232;
+}
+
+.filters {
+  display: flex;
+  gap: 16px;
+}
+
+.findings {
+  padding-left: 20px;
+}
+
+.findings li {
+  margin-bottom: 12px;
+}
+
+.graph {
+  background: #ffffff;
+  border: 1px solid #d9dee6;
+  border-radius: 6px;
+  display: block;
+  max-width: 100%;
+}
+
+pre {
+  background: #f4f6f9;
+  border: 1px solid #d9dee6;
+  border-radius: 6px;
+  overflow: auto;
+  padding: 12px;
+}

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/auditor-core", "crates/auditor-cli"]
+members = ["crates/auditor-core", "crates/auditor-cli", "apps/desktop/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,4 +12,7 @@ rusqlite = { version = "0.43.0", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 syn = { version = "3.0.10", default-features = false, features = ["full", "parsing"] }
+tauri = "2.12.7"
+tauri-build = "2.7.6"
+tauri-plugin-dialog = "2.8.4"
 toml = "1.2.3"

@@ -11,6 +11,7 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use serde::Serialize;
 use syn::{Item, UseTree};
 
 use crate::contract::{Contract, Module};
@@ -20,7 +21,7 @@ use crate::discovery::{Inventory, matches_pattern};
 const IGNORED_ROOTS: &[&str] = &["std", "core", "alloc", "test"];
 
 /// Resultado da análise do projeto auditado.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Analysis {
     /// Nomes dos módulos declarados no contrato, na ordem do contrato.
     pub modules: Vec<String>,
@@ -37,14 +38,14 @@ pub struct Analysis {
 }
 
 /// Pacotes descobertos no workspace Cargo.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct WorkspaceInfo {
     /// Pacotes ordenados por nome e caminho de manifesto.
     pub packages: Vec<WorkspacePackage>,
 }
 
 /// Pacote identificado em um `Cargo.toml`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct WorkspacePackage {
     /// Nome declarado em `[package].name`.
     pub name: String,
@@ -53,7 +54,8 @@ pub struct WorkspacePackage {
 }
 
 /// Classificação de uma aresta de dependência.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DependencyKind {
     /// O destino está em `allowed_dependencies`.
     Allowed,
@@ -64,7 +66,7 @@ pub enum DependencyKind {
 }
 
 /// Aresta direcional entre dois módulos.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DependencyEdge {
     /// Módulo de origem, conforme o contrato.
     pub from: String,
@@ -83,7 +85,7 @@ pub struct DependencyEdge {
 }
 
 /// Item que o auditor não consegue classificar sozinho.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ReviewItem {
     /// Arquivo que exige decisão humana.
     pub path: String,
@@ -96,7 +98,8 @@ pub struct ReviewItem {
 }
 
 /// Motivo da revisão necessária.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ReviewReason {
     /// Arquivo incluído na varredura, mas fora de todos os módulos do contrato.
     UnmappedFile,
@@ -107,7 +110,7 @@ pub enum ReviewReason {
 }
 
 /// Declaração `mod` localizada em um arquivo Rust.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ModuleDeclaration {
     /// Módulo do contrato ao qual o arquivo de origem pertence, quando mapeado.
     pub module_name: Option<String>,

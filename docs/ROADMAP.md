@@ -12,7 +12,7 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 | 5 | Criar o motor de regras e os relatórios | Concluída em 25/11/2026 — 60 testes passaram; `audit` validado em três formatos |
 | 6 | Registrar histórico local em SQLite | Concluída em 25/11/2026 — 73 testes passaram; `record`, `list`, `show` e `compare` validados |
 | 7 | Provar o núcleo antes da interface gráfica | Concluída em 25/11/2026 — três projetos fictícios auditados pela CLI; 75 testes passaram |
-| 8 | Criar a aplicação desktop com Tauri | Não iniciada |
+| 8 | Criar a aplicação desktop com Tauri | Concluída em 25/11/2026 — Tauri/React compilados e iniciados; 78 testes passaram |
 | 9 | Criar a extensão VS Code | Não iniciada |
 | 10 | Expandir linguagens e recursos | Não iniciada (após MVP estável) |
 
@@ -102,3 +102,18 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 - [x] Manter o schema v1 do contrato, sem campos sem implementação
 - [x] Revisar paradigma, nomes descritivos, documentação de código e testes dos helpers
 - [x] `cargo check`, `cargo test` (75 testes: 65 no núcleo e 10 na CLI), `cargo fmt --check` e `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` passaram
+
+## Critérios da Etapa 8
+
+- [x] Criar `apps/desktop` com Tauri 2, React 19, TypeScript 7 e Vite 8
+- [x] Manter o backend como adaptador fino que chama somente funções de `auditor-core`
+- [x] Selecionar e abrir projeto pelo diálogo nativo
+- [x] Executar a auditoria e apresentar resumo e achados filtráveis por severidade e regra
+- [x] Visualizar o grafo de dependências classificado pelo núcleo
+- [x] Visualizar o contrato somente leitura e operar o histórico local com registro explícito
+- [x] Incluir configuração local do caminho do banco
+- [x] Restringir permissões a `core:default` e `dialog:allow-open`, com CSP definido e sem plugin de filesystem
+- [x] Não implementar execução automática em segundo plano nem alteração silenciosa de contrato
+- [x] `cargo check`, `cargo test` (78 testes: 65 no núcleo, 10 na CLI e 3 no desktop), `cargo fmt --check` e `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` passaram
+- [x] `npm install`, `npm run build` e `npm run tauri build` passaram; `auditor-desktop.exe` foi gerado e iniciado
+- [x] Não antecipar a extensão VS Code da Etapa 9

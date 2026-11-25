@@ -14,6 +14,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::types::Type;
 use rusqlite::{Connection, OptionalExtension, Row, params};
+use serde::Serialize;
 
 use crate::findings::{Finding, Severity};
 use crate::report::{AuditReport, ReportSummary, finding_location};
@@ -157,7 +158,7 @@ impl Error for HistoryError {
 }
 
 /// Resumo de uma execução gravada no histórico.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RunSummary {
     /// Identificador local da execução.
     pub id: i64,
@@ -176,7 +177,7 @@ pub struct RunSummary {
 }
 
 /// Execução gravada com seus achados e limitações.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RunDetail {
     /// Cabeçalho da execução.
     pub run: RunSummary,
@@ -187,7 +188,7 @@ pub struct RunDetail {
 }
 
 /// Diferença entre duas execuções, calculada pelo `id` dos achados.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ExecutionComparison {
     /// Execução usada como linha de base.
     pub before_id: i64,

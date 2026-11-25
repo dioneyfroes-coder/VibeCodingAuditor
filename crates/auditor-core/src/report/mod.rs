@@ -121,22 +121,7 @@ impl AuditReport {
         analysis: &Analysis,
         findings: Vec<Finding>,
     ) -> Self {
-        let errors = findings
-            .iter()
-            .filter(|finding| finding.severity == Severity::Error)
-            .count();
-        let warnings = findings
-            .iter()
-            .filter(|finding| finding.severity == Severity::Warning)
-            .count();
-        let infos = findings
-            .iter()
-            .filter(|finding| finding.severity == Severity::Info)
-            .count();
-        let needs_review = findings
-            .iter()
-            .filter(|finding| finding.severity == Severity::NeedsReview)
-            .count();
+        let (errors, warnings, infos, needs_review) = severity_counts(&findings);
 
         Self {
             project: contract.project.name.clone(),
@@ -158,6 +143,35 @@ impl AuditReport {
             },
             findings,
             limitations: analysis.limitations.clone(),
+        }
+    }
+
+    /// Cria um relatório com um subconjunto de achados e contagens coerentes.
+    ///
+    /// As contagens de escopo da execução são preservadas; a limitação informa
+    /// que o relatório foi recortado.
+    pub fn scoped_to(&self, findings: Vec<Finding>, limitation: String) -> Self {
+        let (errors, warnings, infos, needs_review) = severity_counts(&findings);
+        let mut limitations = self.limitations.clone();
+        limitations.push(limitation);
+
+        Self {
+            project: self.project.clone(),
+            schema_version: self.schema_version,
+            summary: ReportSummary {
+                files_included: self.summary.files_included,
+                files_skipped: self.summary.files_skipped,
+                modules: self.summary.modules,
+                packages: self.summary.packages,
+                edges: self.summary.edges,
+                findings: findings.len(),
+                errors,
+                warnings,
+                infos,
+                needs_review,
+            },
+            findings,
+            limitations,
         }
     }
 
@@ -306,6 +320,27 @@ impl AuditReport {
 
         format!("{}\n", lines.join("\n"))
     }
+}
+
+/// Conta achados por severidade, usada em relatórios completos e recortados.
+fn severity_counts(findings: &[Finding]) -> (usize, usize, usize, usize) {
+    let errors = findings
+        .iter()
+        .filter(|finding| finding.severity == Severity::Error)
+        .count();
+    let warnings = findings
+        .iter()
+        .filter(|finding| finding.severity == Severity::Warning)
+        .count();
+    let infos = findings
+        .iter()
+        .filter(|finding| finding.severity == Severity::Info)
+        .count();
+    let needs_review = findings
+        .iter()
+        .filter(|finding| finding.severity == Severity::NeedsReview)
+        .count();
+    (errors, warnings, infos, needs_review)
 }
 
 /// Formata o caminho e as linhas de um achado para saída legível.

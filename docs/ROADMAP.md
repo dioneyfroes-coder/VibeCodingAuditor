@@ -190,3 +190,15 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 - [x] Contagem da fixture `partial` atualizada de 4 para 5 achados pela inclusão legítima de `module.unreferenced:shared`; demais fixtures inalteradas
 - [x] `cargo check`, `cargo test` (93 testes: 80 no núcleo, 10 na CLI e 3 no desktop), `cargo fmt --check`, `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` e `git diff --check` passaram
 - [x] Smoke na CLI: `unreferenced` = 1 aresta, 1 revisão, 0 limitações, saída `1`; conversão CLI→JSON→extensão gerou 1 diagnóstico `warning`; `npm test` da extensão e `npm run build` da desktop passaram
+
+## Critérios de integração com Git diff (após a Etapa 10)
+
+- [x] Opção `audit <raiz> --diff <arquivo>` consome patch unificado salvo de `git diff`, sem executar o Git
+- [x] Parser de diffs no núcleo, sem nova dependência, com linhas adicionadas fundidas por arquivo
+- [x] Recorte de achados por arquivo e linha alterada, incluindo achados sem linha e caminhos de módulo
+- [x] Resumo recalculado e limitação explícita sobre achados omitidos fora do diff
+- [x] Esquema JSON inalterado; desktop e extensão continuam consumindo o mesmo relatório
+- [x] Limitações registradas: diffs combinados, caminhos citados com escapes, renomeações puras e linhas removidas
+- [x] `cargo check`, `cargo test` (99 testes: 86 no núcleo, 10 na CLI e 3 no desktop), `cargo fmt --check`, `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` e `git diff --check` passaram
+- [x] `cargo run -p auditor-cli -- audit --help` mostrou `--diff <ARQUIVO>`; `npm test` da extensão e `npm run build` da desktop passaram
+- [x] Smoke com `git diff` real: `dependencies` caiu de 7 para 3 achados no arquivo alterado; CLI→JSON→extensão gerou 3 diagnósticos (1 `error` e 2 `warning`)

@@ -39,6 +39,8 @@ cargo run -p auditor-cli -- analyze <raiz>
 cargo run -p auditor-cli -- audit <raiz>
 cargo run -p auditor-cli -- audit <raiz> --format json
 cargo run -p auditor-cli -- audit <raiz> --format markdown --output relatorio.md
+git diff > alteracoes.patch
+cargo run -p auditor-cli -- audit <raiz> --diff alteracoes.patch
 cargo run -p auditor-cli -- history record <raiz>
 cargo run -p auditor-cli -- history list
 cargo run -p auditor-cli -- history show <id>
@@ -106,6 +108,12 @@ O comando `audit <raiz>` reutiliza o mesmo pipeline do núcleo e aplica estas re
 Cada achado contém `id`, `rule_id`, `severity`, `title`, `message`, `path`, `line_start`, `line_end`, `evidence`, `expected`, `suggestion` e `confidence`. Todas as regras são determinísticas, então `confidence` é sempre nulo; o auditor não inventa precisão numérica nem aplica sugestões automaticamente. Dependências não resolvidas e arquivos não mapeados são sinais para decisão humana, não violações comprovadas.
 
 Os formatos disponíveis são `text` (padrão), `json` e `markdown`. Sem `--output`, o relatório vai para o terminal; com `--output <arquivo>`, o arquivo indicado é gravado e sobrescrito se já existir. O projeto auditado nunca é modificado.
+
+## Auditoria incremental com `git diff`
+
+`audit <raiz> --diff <arquivo>` lê um patch unificado salvo de `git diff`, sem executar o Git e sem alterar arquivos. O núcleo converte cada bloco `@@ ... @@` em intervalos de linhas adicionadas e mantém somente os achados cujo caminho corresponde a um arquivo alterado. Achados com linha conhecida entram apenas se a linha estiver em um desses intervalos; achados sem linha e achados de módulo com padrão `path` entram quando o arquivo alterado corresponde ao caminho. As contagens do resumo são recalculadas, e uma limitação diz explicitamente que achados fora do diff foram omitidos.
+
+O filtro é uma visão parcial do relatório, não uma nova regra: ele não muda severidades, identificadores nem o esquema JSON. O relatório completo continua sendo `audit <raiz>` sem `--diff`. Limitações conhecidas: diffs combinados (`@@@`) e caminhos citados com escapes não são interpretados; renomeações puro sem blocos são tratadas como mudança do caminho de destino; linhas removidas não têm linha correspondente na versão atual.
 
 ## TypeScript e JavaScript (Etapa 10)
 

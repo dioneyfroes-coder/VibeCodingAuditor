@@ -40,6 +40,9 @@ enum Commands {
         /// Arquivo onde gravar o relatório; sem este argumento, imprime no terminal.
         #[arg(long)]
         output: Option<PathBuf>,
+        /// Arquivo com saída de `git diff`; limita achados a arquivos e linhas alterados.
+        #[arg(long, value_name = "ARQUIVO")]
+        diff: Option<PathBuf>,
     },
     /// Registra, consulta e compara auditorias no banco local.
     History {
@@ -135,7 +138,8 @@ fn dispatch_command(args: Args) -> Result<u8, Box<dyn std::error::Error>> {
             root,
             format,
             output,
-        }) => audit_command(&root, format, output.as_deref()),
+            diff,
+        }) => audit_command(&root, format, output.as_deref(), diff.as_deref()),
         Some(Commands::History { database, action }) => history_command(&database, action),
         None => Ok(0),
     }
@@ -234,8 +238,17 @@ fn audit_command(
     root: &Path,
     format: OutputFormat,
     output: Option<&Path>,
+    diff: Option<&Path>,
 ) -> Result<u8, Box<dyn std::error::Error>> {
     let report = auditor_core::audit::audit_project(root)?;
+    let report = match diff {
+        Some(path) => {
+            let patch = fs::read_to_string(path)?;
+            let changes = auditor_core::diff::parse_unified_diff(&patch)?;
+            auditor_core::diff::scope_report(&report, &changes)
+        }
+        None => report,
+    };
     let content = report.render(format.into())?;
 
     match output {
@@ -374,6 +387,8 @@ mod tests {
             "json",
             "--output",
             "relatorio.json",
+            "--diff",
+            "alteracoes.patch",
         ])
         .expect("audit must parse");
         match args.command {
@@ -381,10 +396,12 @@ mod tests {
                 root,
                 format,
                 output,
+                diff,
             }) => {
                 assert_eq!(root.as_path(), Path::new("projeto"));
                 assert_eq!(format, OutputFormat::Json);
                 assert_eq!(output.as_deref(), Some(Path::new("relatorio.json")));
+                assert_eq!(diff.as_deref(), Some(Path::new("alteracoes.patch")));
             }
             _ => panic!("audit command must be selected"),
         }

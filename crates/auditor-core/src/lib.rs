@@ -8,6 +8,7 @@
 pub mod analysis;
 pub mod audit;
 pub mod contract;
+pub mod diff;
 pub mod discovery;
 pub mod findings;
 pub mod history;

@@ -6,7 +6,7 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 |---|---|---|
 | 0 | Verificar o ambiente e preparar o repositório | Concluída em 25/11/2026 — documentação criada e repositório Git inicializado |
 | 1 | Criar o workspace Rust e a CLI mínima | Concluída em 25/11/2026 — `cargo check`, `test`, `fmt --check` e `clippy` passaram |
-| 2 | Criar o modelo do contrato arquitetural | Não iniciada |
+| 2 | Criar o modelo do contrato arquitetural | Concluída em 25/11/2026 — 10 testes passaram; `init` validado |
 | 3 | Descobrir e inventariar o projeto | Não iniciada |
 | 4 | Implementar a primeira análise de dependências Rust | Não iniciada |
 | 5 | Criar o motor de regras e os relatórios | Não iniciada |
@@ -32,4 +32,13 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 - [x] Configurar `cargo fmt` e `cargo clippy`
 - [x] Criar testes unitários mínimos (2 na CLI, 1 no núcleo)
 - [x] Documentar os comandos de desenvolvimento no `README.md` e no `AGENTS.md`
+- [x] `cargo check`, `cargo test`, `cargo fmt --check` e `cargo clippy --workspace --all-targets -- -D warnings` passaram
+
+## Critérios da Etapa 2
+
+- [x] Definir o schema v1 e rejeitar versões não suportadas com mensagem clara
+- [x] Criar modelos Rust para projeto, módulos, estilo e exclusões
+- [x] Validar campos obrigatórios, caminhos e referências; rejeitar propriedades desconhecidas
+- [x] Criar `auditor init` com modelo que exige revisão e sem sobrescrever contrato existente
+- [x] Criar fixtures válidas e inválidas com testes reproduzíveis
 - [x] `cargo check`, `cargo test`, `cargo fmt --check` e `cargo clippy --workspace --all-targets -- -D warnings` passaram

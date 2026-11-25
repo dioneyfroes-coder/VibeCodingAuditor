@@ -1,0 +1,12 @@
+schema_version = 1
+
+[project]
+name = "x"
+
+[scan]
+include = ["**/*.rs"]
+exclude = []
+
+[architecture]
+style = "microservices"
+modules = []

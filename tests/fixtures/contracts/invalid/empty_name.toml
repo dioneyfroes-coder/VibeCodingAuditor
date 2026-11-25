@@ -1,0 +1,17 @@
+schema_version = 1
+
+[project]
+name = "x"
+
+[scan]
+include = ["**/*.rs"]
+exclude = []
+
+[architecture]
+style = "modular_monolith"
+
+[[architecture.modules]]
+name = "   "
+path = "src/domain/**"
+responsibility = "Dominio"
+allowed_dependencies = []

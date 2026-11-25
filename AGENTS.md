@@ -49,6 +49,7 @@ Construir uma aplicação desktop local para comparar a arquitetura pretendida d
 - `cargo fmt --check`
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - `cargo run -p auditor-cli -- --help` e `cargo run -p auditor-cli -- --version`
+- `cargo run -p auditor-cli -- init <diretorio>` (cria modelo de contrato; nunca sobrescreve `auditor.toml`)
 - Se o OneDrive causar avisos de sessão incremental: `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`
 
 ## Referências

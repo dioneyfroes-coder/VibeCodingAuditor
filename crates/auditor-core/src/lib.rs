@@ -4,6 +4,8 @@
 //! ele apenas estabelece a biblioteca que será reutilizada pela CLI e, no
 //! futuro, pelo adaptador desktop.
 
+pub mod contract;
+
 /// Identificador estável do núcleo, usado em metadados e mensagens.
 pub const CORE_NAME: &str = "auditor-core";
 

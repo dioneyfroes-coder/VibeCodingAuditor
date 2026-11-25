@@ -81,6 +81,8 @@ A origem de cada aresta guarda arquivo relativo, linha e a linha de código enco
 
 Limitações explícitas: em Rust, imports dentro de corpos de funções, macros complexos, código gerado e nomes resolvidos dinamicamente não são classificados; arquivos que não fazem parse viram limitação. Em TS/JS, não há suporte a `tsconfig.paths`, workspaces npm, resolução de pacotes, template literals ou imports construídos dinamicamente; `import type` é contado como acoplamento. Em Python, apenas `import` e `from ... import` em uma linha são reconhecidos; nomes absolutos sem sufixo de arquivo, imports relativos fora da raiz, `import *` e resolução dinâmica não geram arestas. O contador `packages` continua se referindo somente a pacotes Cargo, com limitation explícita quando há arquivos TS/JS ou Python.
 
+A regra `module.concentration` usa apenas arestas resolvidas entre módulos declarados, deduplicadas por par origem/destino. Ela conta origens e destinos distintos e sinaliza revisão quando um deles chega a 3; o limite é fixo para manter a regra determinística e não vira parâmetro do contrato. O custo é `O(M + E)` por auditoria, sem leitura adicional de arquivos; a decisão sobre refatorar permanece com o usuário.
+
 ## Motor de regras e relatórios
 
 O comando `audit <raiz>` reutiliza o mesmo pipeline do núcleo e aplica estas regras com identificadores estáveis:
@@ -93,6 +95,7 @@ O comando `audit <raiz>` reutiliza o mesmo pipeline do núcleo e aplica estas re
 | `file.ambiguous_module` | `needs_review` | Arquivo corresponde a mais de um módulo do contrato. |
 | `dep.cycle` | `warning` | Grafo contém ciclo simples entre módulos, incluindo autoimportação. |
 | `module.no_files` | `warning` | Módulo declarado sem arquivo de código correspondente. |
+| `module.concentration` | `needs_review` | Módulo com 3 ou mais origens ou destinos distintos no grafo resolvido. |
 
 Cada achado contém `id`, `rule_id`, `severity`, `title`, `message`, `path`, `line_start`, `line_end`, `evidence`, `expected`, `suggestion` e `confidence`. Todas as regras são determinísticas, então `confidence` é sempre nulo; o auditor não inventa precisão numérica nem aplica sugestões automaticamente. Dependências não resolvidas e arquivos não mapeados são sinais para decisão humana, não violações comprovadas.
 

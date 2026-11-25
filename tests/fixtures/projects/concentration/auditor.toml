@@ -1,0 +1,35 @@
+schema_version = 1
+
+[project]
+name = "projeto-concentracao"
+
+[scan]
+include = ["crates/**/*.rs"]
+exclude = []
+
+[architecture]
+style = "modular_monolith"
+
+[[architecture.modules]]
+name = "domain"
+path = "crates/domain/**"
+responsibility = "Modelos e regras centrais"
+allowed_dependencies = []
+
+[[architecture.modules]]
+name = "application"
+path = "crates/application/**"
+responsibility = "Casos de uso e coordenacao"
+allowed_dependencies = ["domain", "infrastructure", "presentation"]
+
+[[architecture.modules]]
+name = "infrastructure"
+path = "crates/infrastructure/**"
+responsibility = "Adaptadores de entrada e saida"
+allowed_dependencies = []
+
+[[architecture.modules]]
+name = "presentation"
+path = "crates/presentation/**"
+responsibility = "Interface com o usuario"
+allowed_dependencies = []

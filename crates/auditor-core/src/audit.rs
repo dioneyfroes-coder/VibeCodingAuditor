@@ -304,6 +304,37 @@ mod tests {
         );
     }
 
+    /// Concentração de dependências é revisão, não violação comprovada.
+    #[test]
+    fn concentration_fixture_flags_hub_as_needs_review() {
+        let root = project_fixture("concentration");
+        let report = audit_project(&root).expect("audit must succeed");
+
+        assert_eq!(report, audit_project(&root).expect("audit must succeed"));
+        assert_eq!(report.project, "projeto-concentracao");
+        assert_eq!(report.summary.modules, 4);
+        assert_eq!(report.summary.edges, 3);
+        assert_eq!(report.summary.findings, 1);
+        assert_eq!(report.summary.errors, 0);
+        assert_eq!(report.summary.warnings, 0);
+        assert_eq!(report.summary.needs_review, 1);
+        assert!(report.limitations.is_empty());
+
+        let finding = report
+            .findings
+            .first()
+            .expect("concentration finding must exist");
+        assert_eq!(finding.id, "module.concentration:application");
+        assert_eq!(finding.rule_id, "module.concentration");
+        assert_eq!(finding.severity, Severity::NeedsReview);
+        assert_eq!(finding.path, "crates/application/**");
+        assert_eq!(
+            finding.evidence.as_deref(),
+            Some("destinos (3): domain, infrastructure, presentation")
+        );
+        assert!(finding.confidence.is_none());
+    }
+
     #[test]
     fn missing_root_is_an_audit_error() {
         let missing = project_root().join("nao-existe");

@@ -23,6 +23,11 @@ pub const RULE_FILE_AMBIGUOUS_MODULE: &str = "file.ambiguous_module";
 pub const RULE_DEPENDENCY_CYCLE: &str = "dep.cycle";
 /// Identificador estável da regra de módulo sem arquivos correspondentes.
 pub const RULE_MODULE_WITHOUT_FILES: &str = "module.no_files";
+/// Identificador estável da regra de concentração de dependências.
+pub const RULE_MODULE_CONCENTRATION: &str = "module.concentration";
+
+/// Número de módulos distintos que caracteriza concentração de dependências.
+const CONCENTRATION_THRESHOLD: usize = 3;
 
 /// Avalia as regras implementadas e devolve achados ordenados por identificador.
 pub fn evaluate(contract: &Contract, inventory: &Inventory, analysis: &Analysis) -> Vec<Finding> {
@@ -31,6 +36,7 @@ pub fn evaluate(contract: &Contract, inventory: &Inventory, analysis: &Analysis)
     findings.extend(unresolved_dependency_findings(analysis));
     findings.extend(review_findings(analysis));
     findings.extend(cycle_findings(analysis));
+    findings.extend(module_concentration_findings(contract, analysis));
     findings.extend(module_without_files_findings(contract, inventory));
     findings.sort_by(|left, right| left.id.cmp(&right.id));
     findings
@@ -212,6 +218,76 @@ fn cycle_findings(analysis: &Analysis) -> Vec<Finding> {
         .collect()
 }
 
+/// Sinaliza módulos com três ou mais origens ou destinos distintos no grafo.
+fn module_concentration_findings(contract: &Contract, analysis: &Analysis) -> Vec<Finding> {
+    let adjacency = build_adjacency(analysis);
+    let mut incoming: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for (from, targets) in &adjacency {
+        for to in targets {
+            incoming
+                .entry(to.as_str())
+                .or_default()
+                .insert(from.as_str());
+        }
+    }
+
+    contract
+        .architecture
+        .modules
+        .iter()
+        .filter_map(|module| {
+            let targets = adjacency.get(&module.name);
+            let sources = incoming.get(module.name.as_str());
+            let outgoing_count = targets.map_or(0, BTreeSet::len);
+            let incoming_count = sources.map_or(0, BTreeSet::len);
+            if outgoing_count < CONCENTRATION_THRESHOLD
+                && incoming_count < CONCENTRATION_THRESHOLD
+            {
+                return None;
+            }
+
+            let mut parts = Vec::new();
+            if incoming_count > 0 {
+                let names: Vec<&str> = sources
+                    .expect("non-zero incoming count must have sources")
+                    .iter()
+                    .copied()
+                    .collect();
+                parts.push(format!("origens ({incoming_count}): {}", names.join(", ")));
+            }
+            if outgoing_count > 0 {
+                let names: Vec<&str> = targets
+                    .expect("non-zero outgoing count must have targets")
+                    .iter()
+                    .map(String::as_str)
+                    .collect();
+                parts.push(format!("destinos ({outgoing_count}): {}", names.join(", ")));
+            }
+
+            Some(Finding {
+                id: format!("{}:{}", RULE_MODULE_CONCENTRATION, module.name),
+                rule_id: RULE_MODULE_CONCENTRATION.to_owned(),
+                severity: Severity::NeedsReview,
+                title: format!("Concentração de dependências em {}", module.name),
+                message: format!(
+                    "O módulo {} se relaciona com {} origens e {} destinos distintos no grafo.",
+                    module.name, incoming_count, outgoing_count
+                ),
+                path: module.path.clone(),
+                line_start: None,
+                line_end: None,
+                evidence: Some(parts.join("; ")),
+                expected: format!(
+                    "Nenhum módulo deve concentrar {CONCENTRATION_THRESHOLD} ou mais dependências diretas distintas."
+                ),
+                suggestion: "Revise se parte das responsabilidades pode ser movida para outro módulo antes de aceitar esse acoplamento."
+                    .to_owned(),
+                confidence: None,
+            })
+        })
+        .collect()
+}
+
 /// Identifica módulos declarados sem arquivos de código correspondentes.
 fn module_without_files_findings(contract: &Contract, inventory: &Inventory) -> Vec<Finding> {
     let source_files: Vec<&str> = inventory
@@ -382,6 +458,7 @@ mod tests {
         assert_eq!(RULE_FILE_AMBIGUOUS_MODULE, "file.ambiguous_module");
         assert_eq!(RULE_DEPENDENCY_CYCLE, "dep.cycle");
         assert_eq!(RULE_MODULE_WITHOUT_FILES, "module.no_files");
+        assert_eq!(RULE_MODULE_CONCENTRATION, "module.concentration");
     }
 
     #[test]
@@ -400,6 +477,7 @@ mod tests {
         assert_eq!(count(RULE_FILE_UNMAPPED), 1);
         assert_eq!(count(RULE_DEPENDENCY_CYCLE), 3);
         assert_eq!(count(RULE_MODULE_WITHOUT_FILES), 0);
+        assert_eq!(count(RULE_MODULE_CONCENTRATION), 0);
     }
 
     #[test]

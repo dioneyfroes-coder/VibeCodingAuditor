@@ -159,3 +159,14 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 - [x] Registrar limitações: pacotes pip não enumerados, `import *`, nomes absolutos sem sufixo, imports relativos fora da raiz e resolução dinâmica
 - [x] Verificação completa: `cargo check`, `cargo test` (89 testes: 76 no núcleo, 10 na CLI e 3 no desktop), `cargo fmt --check`, `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` e `git diff --check` passaram
 - [x] Smoke na CLI: `python` = 4 arestas, 3 achados (2 erros e 1 revisão), 1 limitação, saída `1`; fixtures anteriores mantiveram as contagens
+
+## Critérios de complexidade e concentração (após a Etapa 10)
+
+- [x] Regra `module.concentration` no núcleo, usando arestas resolvidas e deduplicadas por par origem/destino
+- [x] Limite explícito de 3 origens ou destinos distintos, sem parâmetro novo no contrato
+- [x] Severidade `needs_review`: concentração é sinal para decisão humana, não violação comprovada
+- [x] Custo `O(M + E)` documentado, sem leitura adicional de arquivos
+- [x] Criar a fixture `tests/fixtures/projects/concentration` e teste de integração
+- [x] `cargo check`, `cargo test` (90 testes: 77 no núcleo, 10 na CLI e 3 no desktop), `cargo fmt --check`, `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` e `git diff --check` passaram
+- [x] Smoke na CLI: `concentration` = 3 arestas, 1 revisão, 0 limitações, saída `1`; conversão CLI→JSON→extensão gerou 1 diagnóstico `warning`; `npm test` da extensão passou
+- [x] Fixtures `clean`, `dependencies`, `partial`, `typescript` e `python` mantiveram as contagens anteriores

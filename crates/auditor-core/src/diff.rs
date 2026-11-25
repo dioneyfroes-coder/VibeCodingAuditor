@@ -67,7 +67,7 @@ impl ChangedFiles {
             let Some(start) = finding.line_start else {
                 return true;
             };
-            changed.lines.is_empty() || changed.lines.iter().any(|range| range.contains(start))
+            changed.lines.iter().any(|range| range.contains(start))
         })
     }
 }
@@ -105,6 +105,8 @@ impl Error for DiffError {}
 struct HunkState {
     file_index: usize,
     new_cursor: usize,
+    /// Linhas da nova versão que ainda pertencem a este bloco.
+    new_remaining: usize,
 }
 
 /// Interpreta um patch unificado e reúne os arquivos e linhas alteradas.
@@ -122,29 +124,6 @@ pub fn parse_unified_diff(text: &str) -> Result<ChangedFiles, DiffError> {
             hunk = None;
             current_index = None;
             old_path = None;
-            continue;
-        }
-
-        if let Some(source) = line.strip_prefix("--- ") {
-            hunk = None;
-            old_path = Some(normalize_path(source));
-            continue;
-        }
-
-        if let Some(target) = line.strip_prefix("+++ ") {
-            hunk = None;
-            let candidate = normalize_path(target);
-            let path = if candidate == "/dev/null" {
-                old_path.take().ok_or_else(|| {
-                    DiffError::new(line_number, "+++ /dev/null sem cabeçalho --- anterior")
-                })?
-            } else {
-                candidate
-            };
-            if path.is_empty() {
-                return Err(DiffError::new(line_number, "caminho de arquivo vazio"));
-            }
-            current_index = Some(ensure_file(&mut files, path));
             continue;
         }
 
@@ -166,7 +145,7 @@ pub fn parse_unified_diff(text: &str) -> Result<ChangedFiles, DiffError> {
                 )
             })?;
             let header = rest.split(" @@").next().unwrap_or(rest);
-            hunk = Some(parse_hunk_header(header, line_number, file_index)?);
+            hunk = parse_hunk_header(header, line_number, file_index)?;
             continue;
         }
 
@@ -177,8 +156,39 @@ pub fn parse_unified_diff(text: &str) -> Result<ChangedFiles, DiffError> {
             ));
         }
 
-        if let Some(state) = hunk.as_mut() {
+        // `--- ` e `+++ ` só são cabeçalhos fora de um bloco: dentro dele podem
+        // ser linhas de código removidas ou adicionadas começando com `-`/`+`.
+        if hunk.is_none() {
+            if let Some(source) = line.strip_prefix("--- ") {
+                old_path = Some(normalize_path(source));
+                continue;
+            }
+
+            if let Some(target) = line.strip_prefix("+++ ") {
+                let candidate = normalize_path(target);
+                let path = if candidate == "/dev/null" {
+                    old_path.take().ok_or_else(|| {
+                        DiffError::new(line_number, "+++ /dev/null sem cabeçalho --- anterior")
+                    })?
+                } else {
+                    candidate
+                };
+                if path.is_empty() {
+                    return Err(DiffError::new(line_number, "caminho de arquivo vazio"));
+                }
+                current_index = Some(ensure_file(&mut files, path));
+                continue;
+            }
+        }
+
+        let hunk_finished = if let Some(state) = hunk.as_mut() {
             consume_hunk_line(&mut files[state.file_index], state, line);
+            state.new_remaining == 0
+        } else {
+            false
+        };
+        if hunk_finished {
+            hunk = None;
         }
     }
 
@@ -239,7 +249,7 @@ fn parse_hunk_header(
     header: &str,
     line_number: usize,
     file_index: usize,
-) -> Result<HunkState, DiffError> {
+) -> Result<Option<HunkState>, DiffError> {
     let mut parts = header.split_whitespace();
     let old_range = parts
         .next()
@@ -248,15 +258,20 @@ fn parse_hunk_header(
         .next()
         .ok_or_else(|| DiffError::new(line_number, "bloco sem intervalo novo"))?;
     parse_range(old_range, line_number)?;
-    let (new_start, _) = parse_range(new_range, line_number)?;
+    let (new_start, new_count) = parse_range(new_range, line_number)?;
 
-    Ok(HunkState {
+    if new_count == 0 {
+        return Ok(None);
+    }
+
+    Ok(Some(HunkState {
         file_index,
         new_cursor: new_start,
-    })
+        new_remaining: new_count,
+    }))
 }
 
-/// Converte `-1,3` ou `+1,3` em início e fim inclusivos.
+/// Converte `-1,3` ou `+1,3` em início e contagem de linhas.
 fn parse_range(value: &str, line_number: usize) -> Result<(usize, usize), DiffError> {
     let value = value
         .strip_prefix('-')
@@ -278,8 +293,7 @@ fn parse_range(value: &str, line_number: usize) -> Result<(usize, usize), DiffEr
             "bloco começa na linha zero com linhas preservadas",
         ));
     }
-    let end = start.saturating_add(count.saturating_sub(1));
-    Ok((start, end))
+    Ok((start, count))
 }
 
 /// Avança o cursor da nova versão e registra linhas adicionadas.
@@ -291,9 +305,11 @@ fn consume_hunk_line(file: &mut ChangedFile, state: &mut HunkState, line: &str) 
                 end: state.new_cursor,
             });
             state.new_cursor = state.new_cursor.saturating_add(1);
+            state.new_remaining = state.new_remaining.saturating_sub(1);
         }
         Some(b' ') => {
             state.new_cursor = state.new_cursor.saturating_add(1);
+            state.new_remaining = state.new_remaining.saturating_sub(1);
         }
         Some(b'-') | Some(b'\\') | None => {}
         Some(_) => {}
@@ -327,7 +343,7 @@ mod tests {
         "diff --git a/src/lib.rs b/src/lib.rs\n",
         "--- a/src/lib.rs\n",
         "+++ b/src/lib.rs\n",
-        "@@ -1,2 +1,3 @@\n",
+        "@@ -1,2 +1,4 @@\n",
         " contexto\n",
         "+novo\n",
         "+outro\n",
@@ -340,6 +356,23 @@ mod tests {
         assert_eq!(changes.len(), 1);
         assert_eq!(changes.files[0].path, "src/lib.rs");
         assert_eq!(changes.files[0].lines, vec![LineRange { start: 2, end: 3 }]);
+    }
+
+    #[test]
+    fn header_like_code_inside_a_hunk_is_not_a_file_header() {
+        let patch = concat!(
+            "diff --git a/src/lib.rs b/src/lib.rs\n",
+            "--- a/src/lib.rs\n",
+            "+++ b/src/lib.rs\n",
+            "@@ -1,2 +1,2 @@\n",
+            " contexto\n",
+            "--- valor\n",
+            "+++ valor\n",
+        );
+        let changes = parse_unified_diff(patch).expect("patch must parse");
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes.files[0].path, "src/lib.rs");
+        assert_eq!(changes.files[0].lines, vec![LineRange { start: 2, end: 2 }]);
     }
 
     #[test]
@@ -430,6 +463,45 @@ rename to src/new.rs\n";
         assert_eq!(scoped.summary.files_included, 3);
         assert_eq!(scoped.limitations.len(), 1);
         assert!(scoped.limitations[0].contains("1 arquivo(s) alterado(s)"));
+    }
+
+    #[test]
+    fn deletion_only_diff_keeps_only_findings_without_a_line() {
+        let report = AuditReport {
+            project: "projeto".to_owned(),
+            schema_version: 1,
+            summary: ReportSummary {
+                files_included: 1,
+                files_skipped: 0,
+                modules: 1,
+                packages: 0,
+                edges: 0,
+                findings: 2,
+                errors: 1,
+                warnings: 0,
+                infos: 0,
+                needs_review: 1,
+            },
+            findings: vec![
+                finding("linha-1", "src/old.rs", Some(1), Severity::Error),
+                finding("sem-linha", "src/old.rs", None, Severity::NeedsReview),
+            ],
+            limitations: Vec::new(),
+        };
+        let changes =
+            parse_unified_diff("--- a/src/old.rs\n+++ /dev/null\n@@ -1 +0,0 @@\n-conteudo\n")
+                .expect("patch must parse");
+
+        let scoped = scope_report(&report, &changes);
+        let ids: Vec<&str> = scoped
+            .findings
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["sem-linha"]);
+        assert_eq!(scoped.summary.findings, 1);
+        assert_eq!(scoped.summary.errors, 0);
+        assert_eq!(scoped.summary.needs_review, 1);
     }
 
     #[test]

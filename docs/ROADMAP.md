@@ -199,6 +199,7 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 - [x] Resumo recalculado e limitação explícita sobre achados omitidos fora do diff
 - [x] Esquema JSON inalterado; desktop e extensão continuam consumindo o mesmo relatório
 - [x] Limitações registradas: diffs combinados, caminhos citados com escapes, renomeações puras e linhas removidas
-- [x] `cargo check`, `cargo test` (99 testes: 86 no núcleo, 10 na CLI e 3 no desktop), `cargo fmt --check`, `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` e `git diff --check` passaram
+- [x] Correções de revisão: `--- `/`+++ ` dentro de hunk não são confundidos com cabeçalhos; arquivos sem linhas adicionadas não incluem achados com linha
+- [x] `cargo check`, `cargo test` (101 testes: 88 no núcleo, 10 na CLI e 3 no desktop), `cargo fmt --check`, `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` e `git diff --check` passaram
 - [x] `cargo run -p auditor-cli -- audit --help` mostrou `--diff <ARQUIVO>`; `npm test` da extensão e `npm run build` da desktop passaram
 - [x] Smoke com `git diff` real: `dependencies` caiu de 7 para 3 achados no arquivo alterado; CLI→JSON→extensão gerou 3 diagnósticos (1 `error` e 2 `warning`)

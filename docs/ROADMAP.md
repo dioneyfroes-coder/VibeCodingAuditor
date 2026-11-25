@@ -22,7 +22,7 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 - [x] Verificar pré-requisitos oficiais do Tauri para Windows sem instalar nada
 - [x] Consultar documentação oficial das versões estáveis disponíveis
 - [x] Criar o repositório Git (`git init`, autorizado; branch `main`)
-- [x] Criar os arquivos mínimos de documentação (`AGENTS.md`, `README.md`, `docs/DECISIONS.md`)
+- [x] Criar os arquivos mínimos de documentação (`AGENTS.md`, `README.md`, `docs/DECISIONS.md`, `docs/ROADMAP.md`)
 - [x] Preservar o plano e não criar código de funcionalidade
 
 ## Critérios da Etapa 1

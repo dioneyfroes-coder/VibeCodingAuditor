@@ -50,4 +50,6 @@ Construir uma aplicação desktop local para comparar a arquitetura pretendida d
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - `cargo run -p auditor-cli -- --help` e `cargo run -p auditor-cli -- --version`
 - Se o OneDrive causar avisos de sessão incremental: `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`
+
+## Referências
 - O plano integral está em `PLANO_VIBE_CODING_AUDITOR.md` e deve ser preservado.

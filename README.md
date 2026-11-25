@@ -21,7 +21,7 @@ Ferramenta local para comparar a arquitetura pretendida de um projeto com a arqu
 
 ## Ambiente
 
-O resumo das versões encontradas e das referências oficiais consultadas está em [docs/DECISIONS.md](docs/DECISIONS.md). Nenhuma ferramenta foi instalada, atualizada ou removida.
+O resumo das versões encontradas e das referências oficiais consultadas está em [docs/DECISIONS.md](docs/DECISIONS.md). Nenhuma ferramenta do sistema foi instalada, atualizada ou removida; as dependências Rust do projeto passaram a ser resolvidas pelo Cargo a partir da Etapa 1.
 
 ## Comandos de desenvolvimento
 

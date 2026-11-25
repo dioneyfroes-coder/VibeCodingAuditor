@@ -5,6 +5,7 @@
 //! de dependências nem persistência; será reutilizado pela CLI e, no futuro,
 //! pelo adaptador desktop.
 
+pub mod analysis;
 pub mod contract;
 pub mod discovery;
 

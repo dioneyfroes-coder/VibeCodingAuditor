@@ -154,3 +154,39 @@ Não foram criados `Cargo.toml`, `auditor.example.toml`, `.gitignore`, diretóri
 ## D3.6 — Comando `scan` e fixtures
 - **Decisão:** `scan <RAIZ>` lê `<RAIZ>/auditor.toml`, chama o núcleo e imprime o inventário. A fixture `tests/fixtures/projects/simple` contém três arquivos incluídos, um arquivo excluído pelo contrato, diretórios ignorados por padrão e arquivos fora do `include`.
 - **Impacto:** 16 testes no total (12 no núcleo e 4 na CLI). Nenhuma associação de arquivo a módulo ou regra de dependência é executada; isso pertence à Etapa 4.
+
+## D4.1 — Parser Rust para `mod` e `use`
+
+- **Decisão:** `syn = { version = "3.0.10", default-features = false, features = ["full", "parsing"] }` no workspace, consumida somente por `auditor-core`.
+- **Alternativas:** um scanner textual próprio evitaria dependência, mas poderia contar comentários e strings como código; `cargo_metadata` exigiria subprocess do Cargo. A escolha foi `syn` por analisar a sintaxe Rust sem executar o projeto.
+- **Verificação oficial:** <https://docs.rs/syn/latest/syn/> (3.0.10, 09/11/2026) e <https://crates.io/api/v1/crates/syn/3.0.10> (não yanked, MIT OR Apache-2.0), consultados em 25/11/2026.
+- **Impacto:** nenhum pacote novo entrou no `Cargo.lock` — `proc-macro2`, `quote` e `unicode-ident` já vinham de `serde_derive`; apenas `auditor-core` passou a declarar `syn`. O núcleo continua independente de CLI, Tauri, React, SQLite e IA.
+
+## D4.2 — Metadados do workspace
+
+- **Decisão:** ler `<raiz>/Cargo.toml` e o `[package].name` dos membros de `[workspace].members` diretamente com o `toml` já existente. Não executar `cargo metadata`.
+- **Motivo:** manter a análise local, previsível e somente leitura, sem depender de subprocess, rede ou cache do Cargo.
+- **Impacto:** os nomes aparecem em `WorkspaceInfo`. Um manifest de membro ausente ou inválido é erro operacional. Padrões de membro com glob não são suportados nesta versão.
+
+## D4.3 — Relação arquivo → módulo
+
+- **Decisão:** reutilizar `matches_pattern` da descoberta. O arquivo é associado ao primeiro módulo cujo `path` corresponde; zero correspondências gera `UnmappedFile` e mais de uma gera `AmbiguousModule`, ambos como revisão necessária.
+- **Motivo:** manter uma única semântica de caminho entre `include`/`exclude` e o contrato arquitetural.
+- **Impacto:** módulos declarados no contrato sem arquivo correspondente ainda não são avaliados; essa regra pertence à Etapa 5.
+
+## D4.4 — Classificação das arestas
+
+- **Decisão:** `allowed_dependencies` continua sendo lista fechada. Destino presente nela gera aresta `Allowed`; destino declarado no contrato, mas ausente dela, gera `Forbidden`; qualquer outro destino gera `Unresolved` e item de revisão. `use crate::X` é mapeado para `X`; `self`, `super`, o próprio módulo e `std`, `core`, `alloc`, `test` não geram arestas.
+- **Motivo:** cumprir a Etapa 4 sem inventar regras de achado, que ficam para a Etapa 5.
+- **Impacto:** `Analysis.edges` são dados estruturados para inspeção; a CLI apenas os imprime. Ainda não há identificador de regra, relatório nem código de saída de auditoria.
+
+## D4.5 — Evidência e limitações da análise
+
+- **Decisão:** `syn` fornece a estrutura das declarações; arquivo, linha e texto da evidência são localizados por varredura textual do mesmo arquivo, em ordem de aparição. O conteúdo de `mod` inline é percorrido. Arquivo que não faz parse ou linha que não pode ser localizada vira item em `Analysis.limitations`, sem interromper a auditoria.
+- **Motivo:** preservar rastreabilidade verificável sem gravar conteúdo integral de arquivos do usuário.
+- **Impacto:** imports dentro de corpos de funções, macros complexos, dependências geradas e nomes resolvidos dinamicamente não são classificados. A limitação é registrada explicitamente quando detectável; nenhuma conclusão é inventada para esses casos.
+
+## D4.6 — Comando `analyze` e fixture
+
+- **Decisão:** `analyze <RAIZ>` imprime módulos, pacotes Cargo, arestas com origem, revisões necessárias, declarações `mod` e limitações. A fixture `tests/fixtures/projects/dependencies` contém `application -> domain` permitida, `application -> infrastructure` proibida, `infrastructure -> application` e `infrastructure -> domain` permitidas, `infrastructure -> unknown_crate` não resolvida, `domain -> application` proibida dentro de `mod` inline, `tools/helper.rs` não mapeado e `broken.rs` com erro de parse.
+- **Impacto:** 25 testes no total (20 no núcleo e 5 na CLI), todos passando. Nenhum relatório JSON/Markdown, achado formal ou código de saída por auditoria foi adicionado; isso pertence à Etapa 5.

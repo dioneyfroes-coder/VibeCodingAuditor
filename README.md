@@ -2,7 +2,7 @@
 
 Ferramenta local para comparar a arquitetura pretendida de um projeto com a arquitetura realmente implementada. Cada achado deve apontar a regra violada, os arquivos envolvidos e, quando possível, as linhas relevantes. O contrato arquitetural (`auditor.toml`) pertence ao usuário e é versionado junto ao projeto auditado.
 
-**Status atual:** Etapa 3 — descoberta e inventário concluídos. A CLI já cria um modelo de `auditor.toml` e inventaria arquivos da raiz informada; ainda não há análise de dependências nem regras de auditoria.
+**Status atual:** Etapa 4 — análise inicial de dependências Rust concluída. A CLI já cria um modelo de `auditor.toml`, inventaria arquivos e imprime o grafo de módulos com arestas permitidas, proibidas e não resolvidas. Ainda não há motor de regras nem relatórios de auditoria.
 
 ## Documentação
 
@@ -34,6 +34,7 @@ cargo run -p auditor-cli -- --help
 cargo run -p auditor-cli -- --version
 cargo run -p auditor-cli -- init <diretorio>
 cargo run -p auditor-cli -- scan <raiz>
+cargo run -p auditor-cli -- analyze <raiz>
 ```
 
 No Windows, com a pasta do projeto sincronizada pelo OneDrive, o Cargo pode emitir avisos `Acesso negado` ao finalizar sessões de compilação incremental. Para uma execução limpa do Clippy nesse ambiente:
@@ -57,6 +58,20 @@ Campos desconhecidos, nomes ou caminhos duplicados, referências a módulos inex
 
 O comando `scan <raiz>` lê `<raiz>/auditor.toml`, percorre a árvore sem executar arquivos e imprime o inventário. Os padrões suportados são `**` como componente inteiro e `*` dentro de um componente; `?`, classes e chaves não são interpretados. Diretórios `.git`, `target`, `node_modules`, `dist`, `build`, `.venv` e `venv` são ignorados em qualquer profundidade, além de `scan.exclude`. Links simbólicos nunca são seguidos, e entradas inacessíveis são registradas sem interromper a varredura. Cada arquivo incluído registra caminho relativo, extensão e tamanho em bytes.
 
+## Análise de dependências
+
+O comando `analyze <raiz>` lê o contrato e o inventário, lê os manifests `Cargo.toml` do workspace e usa `syn` para interpretar declarações `mod` e importações `use` dos arquivos `.rs` incluídos. Cada arquivo é associado ao primeiro módulo do contrato cujo `path` corresponde ao caminho relativo; múltiplas correspondências e arquivos sem correspondência viram itens de revisão.
+
+As arestas são classificadas assim:
+
+- `permitida`: o destino está em `allowed_dependencies` do módulo de origem.
+- `proibida`: o destino é um módulo declarado no contrato, mas não está em `allowed_dependencies`.
+- `não resolvida`: o destino não corresponde a nenhum módulo declarado; também gera item de revisão.
+
+A origem de cada aresta guarda arquivo relativo, linha e a linha de código encontrada. Declarações `mod` também são registradas com arquivo e linha; o conteúdo de `mod` inline é percorrido. `use` de `std`, `core`, `alloc`, `test`, `self`, `super` e dependências do próprio módulo não geram arestas arquiteturais.
+
+Limitações explícitas desta primeira versão: são analisados apenas arquivos `.rs` que entraram no inventário; imports dentro de corpos de funções, macros complexos, código gerado e nomes resolvidos dinamicamente não são classificados. Arquivos que não fazem parse viram limitação e não interrompem a análise. Quando a linha de uma declaração não pode ser localizada no texto, a evidência fica vazia e a limitação é registrada. Módulos declarados no contrato sem arquivos correspondentes ainda não são avaliados; isso pertence ao motor de regras da Etapa 5.
+
 ## Execução
 
-O executável `vibe-coding-auditor` responde a `--help`, `--version`, `init <diretorio>` e `scan <raiz>`. `init` cria `auditor.toml` sem sobrescrever arquivo existente; `scan` é somente leitura. Ainda não há análise de dependências nem regras de auditoria.
+O executável `vibe-coding-auditor` responde a `--help`, `--version`, `init <diretorio>`, `scan <raiz>` e `analyze <raiz>`. `init` cria `auditor.toml` sem sobrescrever arquivo existente; `scan` e `analyze` são somente leitura. `analyze` imprime o grafo para inspeção — ainda não produz achados, exportações nem códigos de saída de auditoria.

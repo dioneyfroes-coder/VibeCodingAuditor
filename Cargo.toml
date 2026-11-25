@@ -9,4 +9,5 @@ edition = "2024"
 [workspace.dependencies]
 clap = { version = "4.6.10", features = ["derive"] }
 serde = { version = "1.0.229", features = ["derive"] }
+syn = { version = "3.0.10", default-features = false, features = ["full", "parsing"] }
 toml = "1.2.3"

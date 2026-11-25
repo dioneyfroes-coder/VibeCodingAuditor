@@ -241,7 +241,7 @@ fn is_excluded(path: &str, contract: &Contract) -> bool {
 /// Corresponde ao subconjunto de glob usado pelo contrato: `**` como
 /// componente inteiro e `*` dentro de um componente. Outros curingas são
 /// tratados literalmente.
-fn matches_pattern(pattern: &str, path: &str) -> bool {
+pub(crate) fn matches_pattern(pattern: &str, path: &str) -> bool {
     let pattern_parts: Vec<&str> = pattern.split('/').filter(|part| !part.is_empty()).collect();
     let path_parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
     matches_parts(&pattern_parts, &path_parts)

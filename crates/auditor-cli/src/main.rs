@@ -24,6 +24,11 @@ enum Commands {
         /// Diretório raiz do projeto a ser auditado.
         root: PathBuf,
     },
+    /// Analisa dependências Rust e mostra o grafo de módulos do contrato.
+    Analyze {
+        /// Diretório raiz do projeto a ser auditado.
+        root: PathBuf,
+    },
 }
 
 fn main() {
@@ -40,6 +45,12 @@ fn main() {
         Some(Commands::Scan { root }) => {
             if let Err(error) = scan_project(&root) {
                 eprintln!("Falha na descoberta: {error}");
+                std::process::exit(1);
+            }
+        }
+        Some(Commands::Analyze { root }) => {
+            if let Err(error) = analyze_project(&root) {
+                eprintln!("Falha na análise: {error}");
                 std::process::exit(1);
             }
         }
@@ -76,6 +87,71 @@ fn scan_project(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("Entradas não incluídas: {}", inventory.skipped.len());
     Ok(())
+}
+
+/// Carrega o contrato, o inventário e apresenta o grafo de dependências.
+fn analyze_project(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let contract = auditor_core::contract::load_contract(&root.join("auditor.toml"))?;
+    let inventory = auditor_core::discovery::discover(root, &contract)?;
+    let analysis = auditor_core::analysis::analyze(root, &contract, &inventory)?;
+
+    println!("Módulos: {}", analysis.modules.join(", "));
+    if let Some(workspace) = &analysis.workspace {
+        let packages: Vec<&str> = workspace
+            .packages
+            .iter()
+            .map(|package| package.name.as_str())
+            .collect();
+        println!("Pacotes Cargo: {}", packages.join(", "));
+    }
+
+    println!("Arestas: {}", analysis.edges.len());
+    for edge in &analysis.edges {
+        match edge.line {
+            Some(line) => println!(
+                "  {} -> {} [{}] {}:{}",
+                edge.from,
+                edge.to,
+                kind_label(edge.kind),
+                edge.path,
+                line
+            ),
+            None => println!(
+                "  {} -> {} [{}] {}",
+                edge.from,
+                edge.to,
+                kind_label(edge.kind),
+                edge.path
+            ),
+        }
+        if let Some(evidence) = &edge.evidence {
+            println!("      evidência: {evidence}");
+        }
+    }
+
+    println!("Revisão necessária: {}", analysis.reviews.len());
+    for review in &analysis.reviews {
+        match review.line {
+            Some(line) => println!("  {}:{} — {}", review.path, line, review.detail),
+            None => println!("  {} — {}", review.path, review.detail),
+        }
+    }
+
+    println!("Declarações mod: {}", analysis.module_declarations.len());
+    println!("Limitações: {}", analysis.limitations.len());
+    for limitation in &analysis.limitations {
+        println!("  - {limitation}");
+    }
+
+    Ok(())
+}
+
+fn kind_label(kind: auditor_core::analysis::DependencyKind) -> &'static str {
+    match kind {
+        auditor_core::analysis::DependencyKind::Allowed => "permitida",
+        auditor_core::analysis::DependencyKind::Forbidden => "proibida",
+        auditor_core::analysis::DependencyKind::Unresolved => "não resolvida",
+    }
 }
 
 #[cfg(test)]
@@ -118,6 +194,19 @@ mod tests {
 
         let error = Args::try_parse_from(["vibe-coding-auditor", "scan"])
             .expect_err("scan must require a root");
+        assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn analyze_subcommand_requires_explicit_root() {
+        let args = Args::try_parse_from(["vibe-coding-auditor", "analyze", "projeto"])
+            .expect("analyze must parse");
+        assert!(
+            matches!(args.command, Some(Commands::Analyze { root }) if root.as_path() == Path::new("projeto"))
+        );
+
+        let error = Args::try_parse_from(["vibe-coding-auditor", "analyze"])
+            .expect_err("analyze must require a root");
         assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument);
     }
 }

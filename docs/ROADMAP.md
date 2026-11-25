@@ -8,7 +8,7 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 | 1 | Criar o workspace Rust e a CLI mínima | Concluída em 25/11/2026 — `cargo check`, `test`, `fmt --check` e `clippy` passaram |
 | 2 | Criar o modelo do contrato arquitetural | Concluída em 25/11/2026 — 10 testes passaram; `init` validado |
 | 3 | Descobrir e inventariar o projeto | Concluída em 25/11/2026 — 16 testes passaram; `scan` validado em fixture |
-| 4 | Implementar a primeira análise de dependências Rust | Não iniciada |
+| 4 | Implementar a primeira análise de dependências Rust | Concluída em 25/11/2026 — 25 testes passaram; `analyze` validado em fixture |
 | 5 | Criar o motor de regras e os relatórios | Não iniciada |
 | 6 | Registrar histórico local em SQLite | Não iniciada |
 | 7 | Provar o núcleo antes da interface gráfica | Não iniciada |
@@ -53,3 +53,16 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 - [x] Lidar com entradas inacessíveis sem interromper a varredura
 - [x] Criar árvore de diretórios controlada em `tests/fixtures/projects/simple`
 - [x] `cargo check`, `cargo test`, `cargo fmt --check` e `cargo clippy --workspace --all-targets -- -D warnings` passaram
+
+## Critérios da Etapa 4
+
+- [x] Ler os manifests `Cargo.toml` do workspace e dos membros declarados, sem executar o Cargo
+- [x] Analisar declarações `mod` e importações `use` com `syn`, incluindo módulos inline
+- [x] Relacionar arquivos `.rs` aos módulos do contrato pelo mesmo matcher da descoberta
+- [x] Construir um grafo direcionado entre módulos
+- [x] Classificar arestas permitidas, proibidas e não resolvidas
+- [x] Registrar dependências não resolvidas e arquivos não mapeados como revisão necessária
+- [x] Guardar arquivo, linha e texto de evidência de cada aresta
+- [x] Criar a fixture `tests/fixtures/projects/dependencies` com os três tipos de aresta
+- [x] Adicionar o subcomando `analyze <raiz>` somente para inspeção do grafo
+- [x] `cargo check`, `cargo test` (25 testes), `cargo fmt --check` e `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` passaram

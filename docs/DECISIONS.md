@@ -59,7 +59,37 @@ Não foram criados `Cargo.toml`, `auditor.example.toml`, `.gitignore`, diretóri
 | Decisão | Situação | Impacto |
 |---|---|---|
 | Inicializar o repositório Git nesta pasta (`git init`) | Concluído em 25/11/2026, após autorização; branch inicial `main` | Repositório local criado; nenhum commit realizado. |
-| Atualizar Rust de 1.98.1 para 1.100.0 | Não autorizado | Sem necessidade imediata; avaliar antes da Etapa 1 se houver exigência de versão. |
+| Atualizar Rust de 1.98.1 para 1.100.0 | Não atualizado; reavaliado na Etapa 1 (D1.3) | 1.98.1 atende ao workspace e ao `clap` 4.6.10. |
 | Atualizar Node.js da linha 24 para a LTS 26 | Não autorizado | Só relevante quando a interface desktop for implementada (Etapa 8). |
 | Fixar versão do Tauri CLI e do bundle @tauri-apps/cli | Não autorizado | Nada a instalar nesta etapa; avaliar na Etapa 8. |
-| Criar `.gitignore` | Não criado | Avaliar junto com o workspace da Etapa 1; nada a ignorar enquanto não há build. |
+| Criar `.gitignore` | Criado na Etapa 1 (D1.4) | Ignora `/target/` e `data/`. |
+
+## D1.1 — Workspace Rust com dois crates
+- **Decisão:** `Cargo.toml` virtual na raiz, `resolver = "2"`, membros `crates/auditor-core` (biblioteca) e `crates/auditor-cli` (binário `vibe-coding-auditor`), com `version = "0.1.0"` e `edition = "2024"` herdados do workspace.
+- **Motivo:** estabelece a separação exigida pelo plano sem criar crates adicionais, Tauri ou plugins.
+- **Impacto:** `Cargo.lock` passa a fazer parte do repositório, como recomendado para projetos com executável.
+
+## D1.2 — Única dependência externa: `clap` 4.6.10
+- **Decisão:** usar `clap = { version = "4.6.10", features = ["derive"] }` somente em `auditor-cli`.
+- **Justificativa:** o plano define Clap como tecnologia da CLI; ele fornece `--help`, `--version`, mensagens de erro e sugestões padronizadas. A biblioteca padrão resolveria as duas flags atuais, mas exigiria parser manual quando os subcomandos das etapas seguintes existirem.
+- **Verificação oficial:** <https://docs.rs/clap/latest/clap/> (4.6.10, publicado em 24/11/2026; MSRV declarado 1.74) e <https://github.com/clap-rs/clap>.
+- **Impacto:** 21 pacotes resolvidos no `Cargo.lock`; nenhuma dependência adicionada ao `auditor-core`.
+
+## D1.3 — Toolchain Rust mantida
+- **Decisão:** continuar com rustc/cargo 1.98.1; não atualizar para 1.100.0 nesta etapa.
+- **Motivo:** o workspace e o `clap` 4.6.10 compilam sem exigência de versão superior; a atualização permanece sem autorização (D0.5).
+- **Impacto:** nenhuma mudança no ambiente.
+
+## D1.4 — `.gitignore` mínimo
+- **Decisão:** criar `.gitignore` com `/target/` e `data/`.
+- **Motivo:** resolve a pendência registrada em D0.5 agora que existe build; evita versionar artefatos e dados locais futuros, conforme a estrutura de referência do plano.
+
+## D1.5 — Fronteira núcleo/CLI
+- **Decisão:** `auditor-cli` declara dependência de caminho para `auditor-core`, mas ainda não a utiliza; o núcleo expõe apenas `CORE_NAME` e um teste.
+- **Motivo:** fixar o limite arquitetural desde já sem inventar funções de negócio. O uso efetivo começa quando houver comandos de auditoria (Etapa 2).
+- **Impacto:** nenhuma regra ou analisador implementado; `--help` e `--version` são fornecidos pelo Clap.
+
+## D1.6 — Limitação ambiental do Cargo no OneDrive
+- **Observação:** com o repositório dentro de `OneDrive`, o Cargo emite `note: did not finalize incremental compilation session directory ... Acesso negado (os error 5)` quando a compilação incremental está ativa.
+- **Decisão:** registrar como limitação do ambiente, não do código. Para verificação limpa, executar `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`.
+- **Impacto:** todos os comandos de verificação terminam com sucesso; o aviso não altera os resultados.

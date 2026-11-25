@@ -43,6 +43,11 @@ Construir uma aplicação desktop local para comparar a arquitetura pretendida d
 - Não seguir links simbólicos para fora da raiz sem autorização explícita.
 - Não armazenar conteúdo integral dos arquivos no histórico.
 
-## Estado atual da documentação
+## Comandos de desenvolvimento
+- `cargo check`
+- `cargo test`
+- `cargo fmt --check`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo run -p auditor-cli -- --help` e `cargo run -p auditor-cli -- --version`
+- Se o OneDrive causar avisos de sessão incremental: `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`
 - O plano integral está em `PLANO_VIBE_CODING_AUDITOR.md` e deve ser preservado.
-- Os comandos concretos de desenvolvimento serão acrescentados quando o workspace Rust existir.

@@ -1,0 +1,14 @@
+[package]
+name = "auditor-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "vibe-coding-auditor"
+path = "src/main.rs"
+
+[dependencies]
+# Limite arquitetural explícito: a CLI depende do núcleo e não implementa regras.
+# O uso efetivo do núcleo começa quando houver comandos de auditoria (Etapa 2).
+auditor-core = { path = "../auditor-core" }
+clap = { workspace = true }

@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = ["crates/auditor-core", "crates/auditor-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+clap = { version = "4.6.10", features = ["derive"] }

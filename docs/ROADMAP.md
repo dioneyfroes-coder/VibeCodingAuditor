@@ -5,7 +5,7 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 | Etapa | Nome | Status |
 |---|---|---|
 | 0 | Verificar o ambiente e preparar o repositório | Concluída em 25/11/2026 — documentação criada e repositório Git inicializado |
-| 1 | Criar o workspace Rust e a CLI mínima | Não iniciada |
+| 1 | Criar o workspace Rust e a CLI mínima | Concluída em 25/11/2026 — `cargo check`, `test`, `fmt --check` e `clippy` passaram |
 | 2 | Criar o modelo do contrato arquitetural | Não iniciada |
 | 3 | Descobrir e inventariar o projeto | Não iniciada |
 | 4 | Implementar a primeira análise de dependências Rust | Não iniciada |
@@ -24,3 +24,12 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 - [x] Criar o repositório Git (`git init`, autorizado; branch `main`)
 - [x] Criar os arquivos mínimos de documentação (`AGENTS.md`, `README.md`, `docs/DECISIONS.md`)
 - [x] Preservar o plano e não criar código de funcionalidade
+
+## Critérios da Etapa 1
+
+- [x] Criar um Cargo workspace com `auditor-core` e `auditor-cli`
+- [x] Fazer o executável responder a `--help` e `--version`
+- [x] Configurar `cargo fmt` e `cargo clippy`
+- [x] Criar testes unitários mínimos (2 na CLI, 1 no núcleo)
+- [x] Documentar os comandos de desenvolvimento no `README.md` e no `AGENTS.md`
+- [x] `cargo check`, `cargo test`, `cargo fmt --check` e `cargo clippy --workspace --all-targets -- -D warnings` passaram

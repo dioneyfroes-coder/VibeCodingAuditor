@@ -77,12 +77,22 @@ pub fn audit_project(root: &Path) -> Result<AuditReport, AuditError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rules::{RULE_DEPENDENCY_CYCLE, RULE_DEPENDENCY_NOT_ALLOWED};
+    use crate::findings::Severity;
+    use crate::rules::{
+        RULE_DEPENDENCY_CYCLE, RULE_DEPENDENCY_NOT_ALLOWED, RULE_DEPENDENCY_UNRESOLVED,
+        RULE_FILE_AMBIGUOUS_MODULE, RULE_FILE_UNMAPPED, RULE_MODULE_WITHOUT_FILES,
+    };
+
+    /// Raiz de uma fixture de projeto, relativa ao crate.
+    fn project_fixture(name: &str) -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/projects")
+            .join(name)
+    }
 
     /// Raiz da fixture de dependências, relativa ao crate.
     fn project_root() -> std::path::PathBuf {
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../tests/fixtures/projects/dependencies")
+        project_fixture("dependencies")
     }
 
     #[test]
@@ -113,6 +123,69 @@ mod tests {
 
         assert!(rule_ids.contains(&RULE_DEPENDENCY_NOT_ALLOWED));
         assert!(rule_ids.contains(&RULE_DEPENDENCY_CYCLE));
+    }
+
+    /// Projeto sem violações, sem revisões pendentes e sem limitações.
+    #[test]
+    fn clean_fixture_has_no_findings_or_limitations() {
+        let root = project_fixture("clean");
+        let report = audit_project(&root).expect("audit must succeed");
+
+        assert_eq!(report, audit_project(&root).expect("audit must succeed"));
+        assert_eq!(report.project, "projeto-correto");
+        assert_eq!(report.schema_version, 1);
+        assert_eq!(report.summary.modules, 3);
+        assert_eq!(report.summary.packages, 3);
+        assert_eq!(report.summary.edges, 3);
+        assert_eq!(report.summary.findings, 0);
+        assert!(!report.has_findings());
+        assert!(report.limitations.is_empty());
+    }
+
+    /// Estrutura parcialmente desconhecida gera revisões, nunca conclusões inventadas.
+    #[test]
+    fn partial_fixture_reports_unknown_structure_without_inventing_conclusions() {
+        let root = project_fixture("partial");
+        let report = audit_project(&root).expect("audit must succeed");
+
+        assert_eq!(report, audit_project(&root).expect("audit must succeed"));
+        assert_eq!(report.project, "projeto-parcial");
+        assert_eq!(report.summary.findings, 4);
+        assert_eq!(report.summary.errors, 0);
+        assert_eq!(report.summary.warnings, 1);
+        assert_eq!(report.summary.needs_review, 3);
+
+        let rule_ids: Vec<&str> = report
+            .findings
+            .iter()
+            .map(|finding| finding.rule_id.as_str())
+            .collect();
+        assert!(rule_ids.contains(&RULE_DEPENDENCY_UNRESOLVED));
+        assert!(rule_ids.contains(&RULE_FILE_AMBIGUOUS_MODULE));
+        assert!(rule_ids.contains(&RULE_FILE_UNMAPPED));
+        assert!(rule_ids.contains(&RULE_MODULE_WITHOUT_FILES));
+
+        let has_id = |id: &str| report.findings.iter().any(|finding| finding.id == id);
+        assert!(has_id(
+            "dep.unresolved:external_sdk:src/application/lib.rs:4"
+        ));
+        assert!(has_id("file.ambiguous_module:src/domain/overlap.rs"));
+        assert!(has_id("file.unmapped:src/stray.rs"));
+        assert!(has_id("module.no_files:infrastructure"));
+
+        let unresolved = report
+            .findings
+            .iter()
+            .find(|finding| finding.rule_id == RULE_DEPENDENCY_UNRESOLVED)
+            .expect("unresolved dependency must be reported");
+        assert_eq!(unresolved.severity, Severity::NeedsReview);
+        assert_eq!(
+            unresolved.evidence.as_deref(),
+            Some("use external_sdk::Client;")
+        );
+
+        assert_eq!(report.limitations.len(), 1);
+        assert!(report.limitations[0].contains("src/domain/broken.rs"));
     }
 
     #[test]

@@ -2,7 +2,7 @@
 
 Ferramenta local para comparar a arquitetura pretendida de um projeto com a arquitetura realmente implementada. Cada achado deve apontar a regra violada, os arquivos envolvidos e, quando possível, as linhas relevantes. O contrato arquitetural (`auditor.toml`) pertence ao usuário e é versionado junto ao projeto auditado.
 
-**Status atual:** Etapa 6 — histórico local em SQLite concluído. A CLI cria um modelo de `auditor.toml`, inventaria arquivos, imprime o grafo de dependências, aplica regras determinísticas, gera relatórios em texto, JSON ou Markdown e registra execuções em SQLite para consulta e comparação. Ainda não há aplicação desktop.
+**Status atual:** Etapa 7 — núcleo validado pela CLI antes da interface gráfica. A CLI cria um modelo de `auditor.toml`, inventaria arquivos, imprime o grafo de dependências, aplica regras determinísticas, gera relatórios em texto, JSON ou Markdown e registra execuções em SQLite para consulta e comparação. Ainda não há aplicação desktop.
 
 ## Documentação
 
@@ -112,6 +112,27 @@ O banco padrão é `data/auditor.db`, relativo ao diretório de execução da CL
 São gravados data/hora em UTC, raiz canonicalizada do projeto, nome e versão do schema do contrato, resumo da execução, achados e limitações. **O conteúdo integral dos arquivos auditados nunca é gravado**: de cada achado ficam apenas metadados e a linha de evidência já apresentada no relatório. A comparação usa o `id` estável de cada achado, não texto livre, e preserva a ordem dos achados gravados.
 
 Política de migração: a tabela `schema_migrations` registra a versão do schema do histórico. A versão atual é `1`; aberturas em bancos já migrados não alteram dados, e um banco com versão superior à suportada é rejeitado com mensagem explícita, sem downgrade ou exclusão automática. Não há comando de limpeza nesta etapa: o banco cresce com novas execuções e deve ser gerenciado pelo usuário.
+
+## Validação do núcleo (Etapa 7)
+
+Três projetos fictícios em `tests/fixtures/projects/` exercitam o pipeline completo sem interface gráfica. A fixture `simple` continua servindo apenas à descoberta de arquivos.
+
+| Fixture | Cenário | Resultado observado |
+|---|---|---|
+| `clean` | arquitetura correta, dependências permitidas e workspace Cargo coerente | 0 achados, 0 limitações, saída `0` |
+| `dependencies` | dependência proibida, ciclos, destino não resolvido e arquivo não mapeado | 7 achados (2 erros, 3 avisos, 2 revisões), 1 limitação, saída `1` |
+| `partial` | estrutura parcialmente desconhecida: dependência externa, path sobreposto, arquivo fora de módulo, módulo sem arquivos e arquivo com erro de parse | 4 achados (1 aviso, 3 revisões), 1 limitação, saída `1` |
+
+```sh
+cargo run -p auditor-cli -- audit tests/fixtures/projects/clean
+cargo run -p auditor-cli -- audit tests/fixtures/projects/dependencies --format json
+cargo run -p auditor-cli -- audit tests/fixtures/projects/partial --format markdown
+cargo run -p auditor-cli -- history record tests/fixtures/projects/clean --database /caminho/temporario.db
+cargo run -p auditor-cli -- history record tests/fixtures/projects/partial --database /caminho/temporario.db
+cargo run -p auditor-cli -- history compare 1 2 --database /caminho/temporario.db
+```
+
+A avaliação não encontrou falso positivo no projeto correto. Os três ciclos de `dependencies` são caminhos fechados reais no grafo, embora se sobreponham; essa enumeração já era uma limitação conhecida da Etapa 5. Em `partial`, o que não pôde ser decidido foi classificado como revisão necessária, e o arquivo com sintaxe inválida aparece somente em `Limitações`, sem virar erro inventado. Mensagens e evidências foram revisadas: todo achado traz `id`, quando há linha ela é apontada, e a evidência é a linha de código observada ou uma explicação explícita para achados de arquivo. O formato do contrato v1 foi suficiente para os três cenários; nenhum campo novo foi introduzido.
 
 ## Execução
 

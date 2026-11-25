@@ -1,0 +1,35 @@
+schema_version = 1
+
+[project]
+name = "projeto-parcial"
+
+[scan]
+include = ["src/**/*.rs"]
+exclude = []
+
+[architecture]
+style = "modular_monolith"
+
+[[architecture.modules]]
+name = "domain"
+path = "src/domain/**"
+responsibility = "Modelos conhecidos do domínio"
+allowed_dependencies = []
+
+[[architecture.modules]]
+name = "application"
+path = "src/application/**"
+responsibility = "Casos de uso parcialmente conhecidos"
+allowed_dependencies = ["domain"]
+
+[[architecture.modules]]
+name = "infrastructure"
+path = "src/infrastructure/**"
+responsibility = "Integrações ainda não mapeadas"
+allowed_dependencies = ["domain", "application"]
+
+[[architecture.modules]]
+name = "shared"
+path = "src/**/overlap.rs"
+responsibility = "Path sobreposto usado para testar ambiguidade"
+allowed_dependencies = []

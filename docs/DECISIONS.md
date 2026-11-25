@@ -265,3 +265,24 @@ Não foram criados `Cargo.toml`, `auditor.example.toml`, `.gitignore`, diretóri
 - **Correções durante a implementação:** `rusqlite::Type` passou a ser importado de `rusqlite::types`; a união de `source()` com tipos diferentes foi separada; colunas opcionais de linha passaram por `read_optional_usize`; transações usam uma cópia do caminho para evitar conflito de empréstimo; o Clippy apontou dois closures redundantes, corrigidos antes da verificação final.
 - **Limitações conhecidas:** não há interface para apagar ou exportar o banco, nem compressão de histórico. A data é gravada em segundos, sem fuso horário configurável; a exibição converte para UTC. Comparações consideram apenas o `id` do achado: mudanças de severidade ou mensagem com o mesmo `id` são tratadas como persistentes, usando os dados da execução posterior.
 - **Impacto:** 73 testes no total (63 no núcleo e 10 na CLI), todos passando. Nenhuma interface desktop, extensão VS Code ou uso de IA foi adicionado.
+
+## D7.1 — Projetos fictícios de aceitação do núcleo
+
+- **Decisão:** manter `tests/fixtures/projects/simple` (descoberta) e `tests/fixtures/projects/dependencies` (violações intencionais) e criar `tests/fixtures/projects/clean` (arquitetura correta) e `tests/fixtures/projects/partial` (estrutura parcialmente desconhecida). A Etapa 7 passa a ter três projetos para os três cenários exigidos pelo plano, além da fixture antiga de descoberta.
+- **Motivo:** `simple` inclui `crates/root.rs` fora dos módulos declarados e, portanto, produz `file.unmapped`; usá-lo como exemplo de “arquitetura correta” seria um falso positivo documentado como sucesso.
+- **Alternativa rejeitada:** reescrever `simple` para eliminar o arquivo fora de módulo — isso apagaria o cenário usado pelos testes da Etapa 3 e esconderia uma limitação real da descoberta.
+- **Impacto:** `clean` tem três módulos, três pacotes Cargo e três arestas permitidas, sem achados e sem limitações. `partial` tem dependência não resolvida, path sobreposto, arquivo fora de módulo, módulo sem arquivos e um arquivo com erro de parse. Dois testes novos em `audit.rs` verificam as contagens, os identificadores e o determinismo. Nenhuma dependência foi adicionada.
+
+## D7.2 — Avaliação de falsos positivos, mensagens e evidências
+
+- **Decisão:** não alterar regras, severidades, mensagens nem evidências. Registrar o resultado da revisão: zero achados em `clean`; em `dependencies`, os três ciclos são caminhos fechados reais no grafo; em `partial`, o indecidível vira `needs_review` e o arquivo inválido vira apenas limitação.
+- **Motivo:** a auditoria deve separar fatos, heurísticas e sugestões. Transformar um arquivo que não faz parse em erro, ou deduplicar ciclos sobrepostos sem mudar o algoritmo, faria o relatório parecer mais limpo sem novo evidência.
+- **Alternativa rejeitada:** silenciar ciclos que se sobrepõem ou inventar uma linha de evidência para achados de arquivo — o primeiro esconderia arestas verificáveis e o segundo criaria informação não observada.
+- **Impacto:** a sobreposição de ciclos permanece como limitação conhecida da Etapa 5 (D5.4), sem duplicação aqui. Achados de arquivo continuam sem linha, com evidência descritiva explícita. `confidence` segue nulo porque todas as regras são determinísticas. Nenhuma correção de código foi necessária nesta etapa.
+
+## D7.3 — Pipeline pela CLI e formato do contrato
+
+- **Decisão:** executar `audit` nos três projetos em texto, JSON e Markdown, além de `history record` e `history compare`, mantendo o schema v1 do contrato sem campos novos.
+- **Motivo:** o critério da Etapa 7 é provar que o motor é útil sem interface. Os três cenários foram expressos com os campos já implementados; o path sobreposto de `partial` foi detectado como ambiguidade, sem precisar de nova opção de configuração.
+- **Alternativa rejeitada:** adicionar campos para marcar áreas “conhecidas” ou “desconhecidas” no contrato — seria antecipação de funcionalidade sem implementação e exigiria nova versão de schema sem necessidade demonstrada.
+- **Impacto:** códigos observados: `clean` = `0`, `dependencies` = `1`, `partial` = `1`, `compare` = `0`; a comparação entre `clean` e `partial` listou quatro achados novos e nenhum resolvido. `README.md` registra os cenários e os comandos. 75 testes no total (65 no núcleo e 10 na CLI), todos passando. Nenhuma interface desktop, extensão VS Code ou IA foi adicionada.

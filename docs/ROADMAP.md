@@ -11,7 +11,7 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 | 4 | Implementar a primeira análise de dependências Rust | Concluída em 25/11/2026 — 36 testes passaram; `analyze` validado em fixture |
 | 5 | Criar o motor de regras e os relatórios | Concluída em 25/11/2026 — 60 testes passaram; `audit` validado em três formatos |
 | 6 | Registrar histórico local em SQLite | Concluída em 25/11/2026 — 73 testes passaram; `record`, `list`, `show` e `compare` validados |
-| 7 | Provar o núcleo antes da interface gráfica | Não iniciada |
+| 7 | Provar o núcleo antes da interface gráfica | Concluída em 25/11/2026 — três projetos fictícios auditados pela CLI; 75 testes passaram |
 | 8 | Criar a aplicação desktop com Tauri | Não iniciada |
 | 9 | Criar a extensão VS Code | Não iniciada |
 | 10 | Expandir linguagens e recursos | Não iniciada (após MVP estável) |
@@ -91,3 +91,14 @@ Fonte integral: [PLANO_VIBE_CODING_AUDITOR.md](../PLANO_VIBE_CODING_AUDITOR.md).
 - [x] Manter a renderização de texto do histórico no núcleo; a CLI apenas imprime
 - [x] Revisar paradigma, nomes descritivos, documentação de código e testes dos helpers
 - [x] `cargo check`, `cargo test` (73 testes: 63 no núcleo e 10 na CLI), `cargo fmt --check` e `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` passaram
+
+## Critérios da Etapa 7
+
+- [x] Criar pelo menos três projetos fictícios: `clean` (arquitetura correta), `dependencies` (violações intencionais) e `partial` (estrutura parcialmente desconhecida)
+- [x] Executar a auditoria completa pela CLI nos três projetos, em texto, JSON e Markdown
+- [x] Verificar o pipeline com `history record` e `history compare` entre um projeto correto e um parcial
+- [x] Avaliar falsos positivos: nenhum no projeto correto; ciclos sobrepostos documentados como limitação conhecida
+- [x] Revisar mensagens e evidências, mantendo revisões e limitações explícitas quando a análise não decide
+- [x] Manter o schema v1 do contrato, sem campos sem implementação
+- [x] Revisar paradigma, nomes descritivos, documentação de código e testes dos helpers
+- [x] `cargo check`, `cargo test` (75 testes: 65 no núcleo e 10 na CLI), `cargo fmt --check` e `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` passaram

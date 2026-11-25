@@ -85,7 +85,7 @@ Não foram criados `Cargo.toml`, `auditor.example.toml`, `.gitignore`, diretóri
 - **Motivo:** resolve a pendência registrada em D0.5 agora que existe build; evita versionar artefatos e dados locais futuros, conforme a estrutura de referência do plano.
 
 ## D1.5 — Fronteira núcleo/CLI
-- **Decisão:** `auditor-cli` declara dependência de caminho para `auditor-core`, mas ainda não a utiliza; o núcleo expõe apenas `CORE_NAME` e um teste.
+- **Decisão:** na Etapa 1, `auditor-cli` declara dependência de caminho para `auditor-core`, mas ainda não a utiliza; o núcleo expõe apenas `CORE_NAME` e um teste.
 - **Motivo:** fixar o limite arquitetural desde já sem inventar funções de negócio. O uso efetivo começa com o comando `init` da Etapa 2, que compartilha o modelo de contrato do núcleo.
 - **Impacto:** nenhuma regra ou analisador implementado; `--help` e `--version` são fornecidos pelo Clap.
 
@@ -134,7 +134,7 @@ Não foram criados `Cargo.toml`, `auditor.example.toml`, `.gitignore`, diretóri
 ## D3.2 — Subconjunto de padrões suportado
 - **Decisão:** `**` é aceito somente como componente inteiro e corresponde a zero ou mais componentes; `*` é aceito dentro de um componente. `?`, classes `[...]` e chaves `{...}` são tratados como caracteres literais.
 - **Motivo:** cobrir `crates/**/*.rs` e os exemplos do plano sem implementar um motor de glob completo.
-- **Impacto:** padrões com sintaxe não suportada não são fingidos como válidos: eles simplesmente não correspondem. Essa limitação é explícita e será revisitada apenas se uma regra futura exigir mais sintaxe.
+- **Impacto:** padrões com sintaxe não suportada não são fingidos como curingas: seus caracteres são comparados literalmente e, portanto, não produzem a correspondência esperada. Essa limitação é explícita e será revisitada apenas se uma regra futura exigir mais sintaxe.
 
 ## D3.3 — Diretórios ignorados por padrão
 - **Decisão:** `.git`, `target`, `node_modules`, `dist`, `build`, `.venv` e `venv` são ignorados em qualquer profundidade, além dos padrões de `scan.exclude`.

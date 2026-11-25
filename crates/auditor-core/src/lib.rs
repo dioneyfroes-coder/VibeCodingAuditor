@@ -1,8 +1,9 @@
 //! Núcleo de auditoria do Vibe Coding Auditor.
 //!
-//! Nesta etapa o núcleo ainda não contém regras, analisadores nem persistência:
-//! ele apenas estabelece a biblioteca que será reutilizada pela CLI e, no
-//! futuro, pelo adaptador desktop.
+//! O núcleo já contém o modelo e a validação do contrato e a descoberta
+//! somente leitura de arquivos. Ainda não contém regras de arquitetura, grafo
+//! de dependências nem persistência; será reutilizado pela CLI e, no futuro,
+//! pelo adaptador desktop.
 
 pub mod contract;
 pub mod discovery;

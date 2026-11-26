@@ -188,7 +188,7 @@ Pré-requisitos verificados no ambiente: WebView2 `158.0.4370.33`, MSVC `14.44.3
 
 ## Verificação automatizada
 
-O workflow `.github/workflows/ci.yml` roda em `windows-latest` nos pushes para `main` e nos pull requests, com Node `24.19.0` e Rust `1.98.1`. Ele executa `cargo fmt --check`, `cargo check --workspace`, `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `npm test` e `npm run build` da desktop, e `npm test` da extensão — sempre após `npm ci`. Empacotamento Tauri não é executado porque `bundle.active = false`; instaladores seguem fora do escopo. O workflow foi revisado e os mesmos comandos foram executados localmente; a primeira execução remota ocorrerá após o push desta entrega.
+O workflow `.github/workflows/ci.yml` roda em `windows-latest` nos pushes para `main` e nos pull requests, com Node `24.19.0` e Rust `1.98.1`. Ele executa `cargo fmt --check`, `cargo check --workspace`, `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `npm test` e `npm run build` da desktop, e `npm test` da extensão — sempre após `npm ci`. Empacotamento Tauri não é executado porque `bundle.active = false`; instaladores seguem fora do escopo. O workflow foi revisado e os mesmos comandos foram executados localmente. A primeira execução remota — `CI Windows` #1, commit `7a07286` — terminou com sucesso em 26/11/2026 em `windows-latest`, com todas as etapas do job `verify` aprovadas ([execução](https://github.com/dioneyfroes-coder/VibeCodingAuditor/actions/runs/45811082223)).
 
 ```sh
 cd apps/desktop

@@ -16,7 +16,7 @@ Estado consolidado das Etapas 0–10 e dos trabalhos posteriores. Decisões e es
 | 9 | Criar a extensão VS Code | Concluída em 25/11/2026 — `.vsix` gerado; diagnósticos conferem com a CLI; 82 testes passaram |
 | 10 | Expandir linguagens e recursos | Concluída em 25/11/2026; extensões adicionais nesta rodada: TypeScript/JavaScript e Python no núcleo. Demais opções avaliadas e diferidas |
 
-Etapa 2 (confiabilidade do motor): concluída em 26/11/2026 — itens 2.1 a 2.8 verificados localmente no Windows e cobertos pelo workflow de CI.
+Etapa 2 (confiabilidade do motor): concluída em 26/11/2026 — itens 2.1 a 2.8 verificados localmente no Windows e cobertos pelo workflow de CI, cuja primeira execução remota (`CI Windows` #1, commit `7a07286`) terminou com sucesso.
 
 ## Critérios da Etapa 0
 
@@ -334,4 +334,4 @@ Ordem e critérios vêm de `RELATORIO_ETAPA_1_E_PLANO_ETAPA_2.md`, seção 8. Um
 - [x] Build TypeScript/React e testes da extensão passaram
 - [x] README, roadmap e decisões refletem somente o que foi efetivamente validado
 
-A cobertura estruturada e o resumo de motivos ainda não são gravados em colunas próprias no histórico; a limitação textual continua sendo persistida. Isso foi reavaliado no item 2.7 e mantido fora do escopo. A validação do desktop foi feita por tipos, build e testes dos helpers; a janela Tauri não foi inspecionada visualmente. Também não há fixture com symlink, permissão negada ou FIFO reais: esses motivos são exercitados com inventário em memória no construtor real do relatório. O empacotamento de instaladores continua desativado e o workflow não executa `tauri build`. A primeira execução do workflow no GitHub Actions ainda não foi observada neste ambiente.
+A cobertura estruturada e o resumo de motivos ainda não são gravados em colunas próprias no histórico; a limitação textual continua sendo persistida. Isso foi reavaliado no item 2.7 e mantido fora do escopo. A validação do desktop foi feita por tipos, build e testes dos helpers; a janela Tauri não foi inspecionada visualmente. Também não há fixture com symlink, permissão negada ou FIFO reais: esses motivos são exercitados com inventário em memória no construtor real do relatório. O empacotamento de instaladores continua desativado e o workflow não executa `tauri build`. A primeira execução do workflow no GitHub Actions foi observada em 26/11/2026: `CI Windows` #1, commit `7a07286`, `status: completed`, `conclusion: success`, com todas as etapas do job `verify` aprovadas em `windows-latest`.

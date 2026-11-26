@@ -193,10 +193,38 @@ fn cycle_findings(analysis: &Analysis) -> Vec<Finding> {
     let adjacency = build_adjacency(analysis);
     let components = find_cyclic_components(&adjacency);
 
+    let mut component_by_node: BTreeMap<String, String> = BTreeMap::new();
+    for component in &components {
+        let key = component[0].clone();
+        for node in component {
+            component_by_node.insert(node.clone(), key.clone());
+        }
+    }
+
+    let mut edges_by_component: BTreeMap<String, Vec<&DependencyEdge>> = BTreeMap::new();
+    for edge in &analysis.edges {
+        if edge.kind == DependencyKind::Unresolved {
+            continue;
+        }
+        let (Some(from), Some(to)) = (
+            component_by_node.get(&edge.from),
+            component_by_node.get(&edge.to),
+        ) else {
+            continue;
+        };
+        if from == to {
+            edges_by_component
+                .entry(from.clone())
+                .or_default()
+                .push(edge);
+        }
+    }
+
     components
         .into_iter()
         .map(|component| {
-            let edges = component_edges(analysis, &component);
+            let mut edges = edges_by_component.remove(&component[0]).unwrap_or_default();
+            sort_component_edges(&mut edges);
             let first = edges.first().copied();
             let names = component.join(", ");
 
@@ -576,19 +604,8 @@ fn find_cyclic_components(adjacency: &BTreeMap<String, BTreeSet<String>>) -> Vec
     components
 }
 
-/// Arestas internas de um componente, ordenadas e sem duplicatas.
-fn component_edges<'a>(analysis: &'a Analysis, component: &[String]) -> Vec<&'a DependencyEdge> {
-    let members: BTreeSet<&str> = component.iter().map(String::as_str).collect();
-    let mut edges: Vec<&DependencyEdge> = analysis
-        .edges
-        .iter()
-        .filter(|edge| {
-            edge.kind != DependencyKind::Unresolved
-                && members.contains(edge.from.as_str())
-                && members.contains(edge.to.as_str())
-        })
-        .collect();
-
+/// Ordena as arestas internas de um componente e remove duplicatas.
+fn sort_component_edges(edges: &mut Vec<&DependencyEdge>) {
     edges.sort_by(|left, right| {
         (
             left.from.as_str(),
@@ -611,7 +628,6 @@ fn component_edges<'a>(analysis: &'a Analysis, component: &[String]) -> Vec<&'a 
             && left.path == right.path
             && left.line == right.line
     });
-    edges
 }
 
 /// Evidência limitada das arestas internas de um componente.
@@ -896,6 +912,29 @@ mod tests {
         );
         let evidence = cycle.evidence.as_deref().expect("cycle must have evidence");
         assert!(evidence.contains("+6392 aresta(s) adicionais no componente"));
+    }
+
+    #[test]
+    fn many_cyclic_components_are_indexed_once() {
+        let (contract, inventory, mut analysis) = fixture_data();
+        analysis.edges.clear();
+        for index in 0..600 {
+            let left = format!("par{index:03}a");
+            let right = format!("par{index:03}b");
+            analysis.edges.push(synthetic_edge(&left, &right));
+            analysis.edges.push(synthetic_edge(&right, &left));
+        }
+
+        let findings = evaluate(&contract, &inventory, &analysis);
+        let cycles: Vec<&str> = findings
+            .iter()
+            .filter(|finding| finding.rule_id == RULE_DEPENDENCY_CYCLE)
+            .map(|finding| finding.id.as_str())
+            .collect();
+
+        assert_eq!(cycles.len(), 600);
+        assert_eq!(cycles.first(), Some(&"dep.cycle:par000a->par000b"));
+        assert_eq!(cycles.last(), Some(&"dep.cycle:par599a->par599b"));
     }
 
     #[test]

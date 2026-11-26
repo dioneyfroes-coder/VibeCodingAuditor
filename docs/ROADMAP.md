@@ -337,7 +337,7 @@ Ordem e critérios vêm de `RELATORIO_ETAPA_1_E_PLANO_ETAPA_2.md`, seção 8. Um
 
 A cobertura estruturada e o resumo de motivos ainda não são gravados em colunas próprias no histórico; a limitação textual continua sendo persistida. Isso foi reavaliado no item 2.7 e mantido fora do escopo. A validação do desktop foi feita por tipos, build e testes dos helpers; a janela Tauri não foi inspecionada visualmente. Também não há fixture com symlink, permissão negada ou FIFO reais: esses motivos são exercitados com inventário em memória no construtor real do relatório. O empacotamento de instaladores continua desativado e o workflow não executa `tauri build`. A primeira execução do workflow no GitHub Actions foi observada em 26/11/2026: `CI Windows` #1, commit `7a07286`, `status: completed`, `conclusion: success`, com todas as etapas do job `verify` aprovadas em `windows-latest`.
 
-## Etapa 3 — Validação arquitetural (em andamento)
+## Etapa 3 — Validação arquitetural (em andamento; 3.0 e 3.1 concluídas)
 
 ### Etapa 3.0 — Baseline reproduzível — Concluída em 26/11/2026
 
@@ -359,7 +359,23 @@ A cobertura estruturada e o resumo de motivos ainda não são gravados em coluna
 - [x] Verificação final: `cargo fmt --check`, `cargo check --workspace`, `cargo test --workspace` (144 testes: 131 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` e `git diff --check` retornaram `0`; o último emitiu apenas o aviso LF/CRLF esperado do OneDrive.
 - [x] Smoke na fixture: `analyze` retornou `0` com `cli -> core [permitida]` em `crates/cli/src/main.rs:1`, `cli -> tools [não resolvida]`, `serde` sem aresta e 2 revisões; `audit` retornou `1` por duas revisões (`dep.unresolved:tools` e `file.unmapped`), sem erros ou avisos.
 
-### Etapa 3.1.2 e 3.1.3 — Pendentes
+### Etapa 3.1.2 — Contrato de autoauditoria — Concluída em 26/11/2026
 
-- [ ] Criar e revisar `auditor.toml` de autoauditoria a partir da árvore real.
-- [ ] Executar `scan`, `analyze`, `audit` e exportações em JSON/Markdown na raiz do projeto e registrar em `docs/validation/etapa-3/self-audit.md`.
+- [x] Contrato raiz `auditor.toml` criado a partir da árvore real, com escopo Rust-only: `core` (`crates/auditor-core/src/**`), `cli` (`crates/auditor-cli/src/**`) e `desktop-backend` (`apps/desktop/src-tauri/src/**`).
+- [x] `core` tem `allowed_dependencies = []`; `cli` e `desktop-backend` permitem somente `core`, refletindo os manifests e `AGENTS.md`. Cada módulo tem `responsibility` descritiva, sem valor semântico verificável.
+- [x] `scan.include` cobre apenas os três diretórios de código Rust de produção; exclusões documentadas no próprio TOML removem fixtures, UI React, extensão, `target` e `node_modules`. A comunicação TypeScript ↔ Tauri e CLI ↔ extensão fica fora do grafo e não é declarada como verificada.
+- [x] Contrato submetido como `0a1eac4` antes da correção de `crate::`.
+
+### Etapa 3.1.3 — Autoauditoria e resolução de `crate::` — Concluída em 26/11/2026
+
+- [x] Primeira autoauditoria com o contrato Rust-only expôs 54 achados `dep.unresolved`, dos quais 46 vinham de `use crate::analysis`, `crate::contract` etc. dentro do próprio `core`: o analisador usava apenas o primeiro segmento e confundia submódulos internos com fronteiras arquiteturais.
+- [x] Criada a fixture `tests/fixtures/projects/crate_module_resolution` com um módulo que cobre o crate inteiro, imports `crate::analysis::...` internos e um `crate::unknown` que deve continuar não resolvido. Testes de regressão escritos antes da mudança: o teste interno falhou com `exit code 101`; o fallback e os testes de `super::`, `crate::self` e dependência `path` passaram.
+- [x] Implementada a resolução de `crate::` pela raiz de fontes inferida do componente `src`, tentando os prefixos mais longos no inventário e associando o arquivo ao contrato. Destino interno não gera aresta; destino de outro módulo gera `permitida`/`proibida`; ambiguidade vira revisão; sem arquivo correspondente, o comportamento anterior do primeiro segmento é preservado. Nenhum `rule_id`, `auditor.toml` v1, SQLite ou JSON de `findings` mudou.
+- [x] Reexecução: `analyze .` passou a mostrar 17 arestas (9 `permitidas`, 0 `proibidas`, 8 `não resolvidas`), com `cli -> core` e `desktop-backend -> core` presentes e nenhum `use crate::*` não resolvido. `audit .` terminou com 62 revisões (54 `code.duplicated` e 8 `dep.unresolved`), 0 erros, 0 avisos e 0 limitações; saída `1` é o comportamento normal quando há achados.
+- [x] Limitações mantidas e documentadas: 8 `super::` em módulos de teste continuam sem associação; a evidência de alguns `use` agrupados aparece deslocada em uma linha; `code.duplicated` é heurística de linha exata, não prova de dívida. Esses sinais não foram transformados em erro ou em aresta inventada.
+- [x] Relatório completo em [docs/validation/etapa-3/self-audit.md](validation/etapa-3/self-audit.md), com inventário, cobertura, arestas, achados, exclusões e avaliação humana dos módulos.
+- [x] Verificação final: `cargo fmt --check`, `cargo check --workspace`, `cargo test --workspace` (147 testes: 134 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `git diff --check`, `npm ci`/`npm test`/`npm run build` da desktop e `npm ci`/`npm test` da extensão retornaram `0`; o `git diff --check` emitiu apenas o aviso LF/CRLF esperado do OneDrive.
+
+### Etapas 3.2 a 3.7 — Pendentes
+
+- [ ] Executar as etapas seguintes do plano na ordem definida, começando pela identidade dos achados e confiabilidade do histórico.

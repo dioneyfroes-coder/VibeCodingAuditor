@@ -1,0 +1,17 @@
+schema_version = 1
+
+[project]
+name = "crate-module-resolution"
+
+[scan]
+include = ["src/**/*.rs"]
+exclude = []
+
+[architecture]
+style = "modular_monolith"
+
+[[architecture.modules]]
+name = "core"
+path = "src/**"
+responsibility = "Módulo único que contém submódulos internos do mesmo crate"
+allowed_dependencies = []

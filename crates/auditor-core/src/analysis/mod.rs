@@ -702,6 +702,23 @@ enum RelativeTarget {
     },
 }
 
+/// Resultado da resolução de um caminho absoluto de crate (`crate::`).
+enum CrateTarget {
+    /// O destino pertence ao próprio módulo e não cruza uma fronteira.
+    Internal,
+    /// O destino foi associado a um módulo do contrato.
+    Module(String),
+    /// O destino existe, mas não pôde ser associado com segurança.
+    Unknown {
+        /// Nome usado como destino na aresta.
+        target: String,
+        /// Explicação da falta de evidência.
+        detail: String,
+    },
+    /// Nenhum arquivo do inventário corresponde ao caminho; vale a regra anterior.
+    NotFound,
+}
+
 /// Classifica uma dependência local do workspace, quando declarada com `path`.
 ///
 /// Retorna `true` quando o destino foi reconhecido como dependência local; nesse
@@ -762,7 +779,25 @@ fn classify_use(
             classify_relative(context, &leaf[1..], line, evidence, module);
             return;
         }
-        leaf[1].clone()
+        match resolve_crate_target(context, &leaf[1..], module) {
+            CrateTarget::Internal => return,
+            CrateTarget::Module(name) => {
+                record_classified_target(
+                    context,
+                    module,
+                    &name,
+                    line,
+                    evidence,
+                    "destino do caminho `crate` associado ao módulo".to_owned(),
+                );
+                return;
+            }
+            CrateTarget::Unknown { target, detail } => {
+                record_classified_target(context, module, &target, line, evidence, detail);
+                return;
+            }
+            CrateTarget::NotFound => leaf[1].clone(),
+        }
     } else if first == "self" || first == "super" {
         classify_relative(context, leaf, line, evidence, module);
         return;
@@ -889,6 +924,85 @@ fn module_file_in(context: &VisitContext<'_>, dir: &Path) -> Option<String> {
         .into_iter()
         .map(|name| join_relative(dir, name))
         .find(|candidate| context.inventory_paths.contains(candidate))
+}
+
+/// Infere a raiz de fontes do crate a partir do componente `src` do caminho auditado.
+fn crate_source_root(path: &str) -> Option<PathBuf> {
+    let mut root = PathBuf::new();
+    for component in Path::new(path).components() {
+        root.push(component.as_os_str());
+        if component.as_os_str().to_str() == Some("src") {
+            return Some(root);
+        }
+    }
+    None
+}
+
+/// Procura um caminho `crate::` no inventário e no contrato.
+///
+/// Testa os prefixos mais longos primeiro para que `crate::a::b::Item` encontre
+/// `src/a/b.rs` antes de `src/a/mod.rs`. Sem arquivo correspondente, o destino
+/// continua sendo classificado pelo primeiro segmento, como antes.
+fn resolve_crate_target(
+    context: &VisitContext<'_>,
+    segments: &[String],
+    module: &Module,
+) -> CrateTarget {
+    let Some(root) = crate_source_root(context.path) else {
+        return CrateTarget::NotFound;
+    };
+
+    let mut modules = BTreeSet::new();
+    let mut matched = false;
+    for count in (1..=segments.len()).rev() {
+        let stem = segments[..count].join("/");
+        let candidates = [
+            join_relative(&root, &format!("{stem}.rs")),
+            join_relative(&root, &format!("{stem}/mod.rs")),
+            join_relative(&root, &format!("{stem}/lib.rs")),
+        ];
+        for candidate in &candidates {
+            if context.inventory_paths.contains(candidate) {
+                matched = true;
+                for found in modules_for_path(context.contract, candidate) {
+                    modules.insert(found.name.clone());
+                }
+            }
+        }
+        if matched {
+            break;
+        }
+    }
+
+    let first = segments
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "crate".to_owned());
+    if modules.len() == 1 {
+        let name = modules.into_iter().next().expect("single module");
+        if name == module.name {
+            CrateTarget::Internal
+        } else {
+            CrateTarget::Module(name)
+        }
+    } else if modules.len() > 1 {
+        let names: Vec<String> = modules.into_iter().collect();
+        let detail = format!(
+            "crate::{first}: corresponde a mais de um módulo do contrato: {}",
+            names.join(", ")
+        );
+        CrateTarget::Unknown {
+            target: first,
+            detail,
+        }
+    } else if matched {
+        CrateTarget::Unknown {
+            detail: format!("crate::{first}: não pôde ser associado a um módulo do contrato"),
+            target: first,
+        }
+    } else {
+        CrateTarget::NotFound
+    }
 }
 
 /// Procura o módulo de destino de um caminho relativo no inventário e no contrato.
@@ -2021,6 +2135,66 @@ mod tests {
                 .iter()
                 .all(|review| !review.detail.contains("Entity"))
         );
+    }
+
+    /// Raiz da fixture de resolução de `crate::`, relativa ao crate.
+    fn crate_module_resolution_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/projects/crate_module_resolution")
+    }
+
+    /// Análise completa da fixture de resolução de `crate::`.
+    fn analyze_crate_module_resolution() -> Analysis {
+        let root = crate_module_resolution_root();
+        let contract =
+            load_contract(&root.join("auditor.toml")).expect("fixture contract must load");
+        let inventory = discover(&root, &contract).expect("discovery must succeed");
+        analyze(&root, &contract, &inventory).expect("analysis must succeed")
+    }
+
+    #[test]
+    fn crate_paths_to_internal_modules_stay_internal() {
+        let analysis = analyze_crate_module_resolution();
+
+        assert!(
+            analysis.edges.iter().all(|edge| edge.to != "analysis"),
+            "internal crate paths must not become architectural edges"
+        );
+        assert!(
+            analysis
+                .reviews
+                .iter()
+                .all(|review| !review.detail.contains("analysis")),
+            "internal crate paths must not require review"
+        );
+    }
+
+    #[test]
+    fn unresolved_crate_paths_still_require_review() {
+        let analysis = analyze_crate_module_resolution();
+
+        let edge = analysis
+            .edges
+            .iter()
+            .find(|edge| edge.to == "unknown")
+            .expect("unknown crate path must remain visible");
+        assert_eq!(edge.kind, DependencyKind::Unresolved);
+        assert_eq!(edge.path, "src/lib.rs");
+        assert_eq!(edge.line, Some(3));
+        assert_eq!(edge.evidence.as_deref(), Some("use crate::unknown::Thing;"));
+        assert!(analysis.reviews.iter().any(|review| {
+            review.reason == ReviewReason::UnresolvedDependency && review.detail.contains("unknown")
+        }));
+    }
+
+    #[test]
+    fn crate_source_root_is_inferred_from_the_src_component() {
+        assert_eq!(
+            crate_source_root("crates/auditor-core/src/analysis/mod.rs"),
+            Some(PathBuf::from("crates/auditor-core/src"))
+        );
+        assert_eq!(crate_source_root("src/lib.rs"), Some(PathBuf::from("src")));
+        assert_eq!(crate_source_root("tools/helper.rs"), None);
     }
 
     /// Raiz da fixture de dependências locais do workspace, relativa ao crate.

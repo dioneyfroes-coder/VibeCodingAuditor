@@ -1,0 +1,9 @@
+[package]
+name = "cli-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+core_api = { package = "core-lib", path = "../core" }
+tools = { workspace = true }
+serde = "1"

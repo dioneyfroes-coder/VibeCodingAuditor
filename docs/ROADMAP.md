@@ -336,3 +336,30 @@ Ordem e critérios vêm de `RELATORIO_ETAPA_1_E_PLANO_ETAPA_2.md`, seção 8. Um
 - [x] README, roadmap e decisões refletem somente o que foi efetivamente validado
 
 A cobertura estruturada e o resumo de motivos ainda não são gravados em colunas próprias no histórico; a limitação textual continua sendo persistida. Isso foi reavaliado no item 2.7 e mantido fora do escopo. A validação do desktop foi feita por tipos, build e testes dos helpers; a janela Tauri não foi inspecionada visualmente. Também não há fixture com symlink, permissão negada ou FIFO reais: esses motivos são exercitados com inventário em memória no construtor real do relatório. O empacotamento de instaladores continua desativado e o workflow não executa `tauri build`. A primeira execução do workflow no GitHub Actions foi observada em 26/11/2026: `CI Windows` #1, commit `7a07286`, `status: completed`, `conclusion: success`, com todas as etapas do job `verify` aprovadas em `windows-latest`.
+
+## Etapa 3 — Validação arquitetural (em andamento)
+
+### Etapa 3.0 — Baseline reproduzível — Concluída em 26/11/2026
+
+- [x] Alterações locais identificadas e submetidas como `fc2dd04` antes de qualquer mudança de código; branch `etapa-3/validacao-arquitetural` criada, sem push.
+- [x] `git pull --ff-only` terminou com `Already up to date.`; versions: `git 2.55.0.windows.4`, `rustc/cargo 1.98.1`, `node v24.19.0` e `npm 11.17.0`.
+- [x] Rust: `cargo fmt --check`, `cargo check --workspace`, `cargo test --workspace` (135 testes: 122 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` e `git diff --check` retornaram `0`.
+- [x] Desktop: `npm ci`, `npm test` (2 testes) e `npm run build` retornaram `0`. Extensão: `npm ci` e `npm test` (4 testes) retornaram `0`; `npm run package` não foi executado no baseline.
+- [x] Resultado integral, incluindo os avisos conhecidos do `npm ci` da extensão, em [docs/validation/etapa-3/baseline.md](validation/etapa-3/baseline.md).
+
+### Etapa 3.1.1 — Dependências `path` do workspace — Concluída em 26/11/2026
+
+- [x] Confirmado por leitura e teste que `collect_manifest_dependencies` incluía dependências `path` em `declared_dependencies`, enquanto `classify_use` descartava toda crate declarada: `auditor-core` da CLI e do backend desktop era ignorado silenciosamente.
+- [x] Criada a fixture `tests/fixtures/projects/workspace_local_dependencies` com `core-lib`, `cli-app` e `tools-lib`, ordem de membros invertida, alias `core_api` e `path` herdado de `[workspace.dependencies]`; `serde` permanece como dependência externa.
+- [x] Testes de regressão escritos antes da implementação: aresta local `cli -> core`, persistência do descarte de externa, revisão para pacote local sem módulo no contrato e independência da ordem dos módulos. Na fase vermelha, dois testes falharam pela lacuna e um por expectativa incorreta sobre `Analysis.modules`, que documentadamente segue a ordem do contrato; esse último foi ajustado para comparar a classificação após ordenar a listagem.
+- [x] Implementada a separação entre dependências externas e `path`: resolução lexical dentro da raiz, sem Cargo, sem links e sem saída da raiz; base do `path` herdado é a raiz do workspace; associação ao contrato somente quando o diretório do pacote corresponde a um único módulo por prefixo literal; conflito de alias, pacote fora do workspace e ambiguidade viram revisão explícita.
+- [x] O caso sem associação segura é representado pela aresta `Unresolved` já existente no modelo, usada para gerar `dep.unresolved`; nenhuma aresta `Allowed`/`Forbidden` é inventada. `declared_dependencies`, `rule_id`, `auditor.toml` v1, SQLite e o JSON de `findings` não mudaram.
+- [x] Smoke revelou que o `path` herdado estava sendo resolvido a partir do manifesto do membro; a base foi corrigida e um teste focado foi adicionado para impedir a regressão.
+- [x] Revisão de helpers: `resolve_dependency_directory`, `inherited_dependency_path`, `literal_path_prefix`, `module_is_inside_package`, `resolve_one_local_dependency`, `insert_local_target` e `resolve_local_dependencies` receberam testes diretos ou cobertura pela fixture; nomes e comentários foram revisados.
+- [x] Verificação final: `cargo fmt --check`, `cargo check --workspace`, `cargo test --workspace` (144 testes: 131 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` e `git diff --check` retornaram `0`; o último emitiu apenas o aviso LF/CRLF esperado do OneDrive.
+- [x] Smoke na fixture: `analyze` retornou `0` com `cli -> core [permitida]` em `crates/cli/src/main.rs:1`, `cli -> tools [não resolvida]`, `serde` sem aresta e 2 revisões; `audit` retornou `1` por duas revisões (`dep.unresolved:tools` e `file.unmapped`), sem erros ou avisos.
+
+### Etapa 3.1.2 e 3.1.3 — Pendentes
+
+- [ ] Criar e revisar `auditor.toml` de autoauditoria a partir da árvore real.
+- [ ] Executar `scan`, `analyze`, `audit` e exportações em JSON/Markdown na raiz do projeto e registrar em `docs/validation/etapa-3/self-audit.md`.

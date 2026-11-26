@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::error::Error;
 use std::fmt;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::Serialize;
 use syn::{Item, UseTree};
@@ -294,6 +294,28 @@ impl Error for AnalysisError {
     }
 }
 
+/// Destino resolvido de uma dependência `path` declarada no Cargo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum LocalDependencyTarget {
+    /// O pacote local foi associado sem ambiguidade a um módulo do contrato.
+    Module(String),
+    /// Não há evidência suficiente; a importação exige revisão explícita.
+    NeedsReview(String),
+}
+
+/// Dependência Cargo declarada com `path`, antes da resolução para o contrato.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DeclaredLocalDependency {
+    /// Nome usado no código, já normalizado como identificador Rust.
+    alias: String,
+    /// Nome canônico do pacote declarado, já normalizado.
+    package: String,
+    /// Diretório do manifesto que declarou o caminho.
+    manifest_dir: PathBuf,
+    /// Caminho relativo informado em `path`.
+    path: String,
+}
+
 /// Estado compartilhado durante a visita de uma única unidade Rust.
 struct VisitContext<'a> {
     path: &'a str,
@@ -305,6 +327,7 @@ struct VisitContext<'a> {
     contract_names: &'a HashSet<String>,
     workspace_names: &'a HashSet<String>,
     declared_dependencies: &'a HashSet<String>,
+    local_dependencies: &'a BTreeMap<String, LocalDependencyTarget>,
     inventory_paths: &'a BTreeSet<String>,
     analysis: &'a mut Analysis,
     seen_edges: &'a mut HashSet<String>,
@@ -317,7 +340,8 @@ pub fn analyze(
     inventory: &Inventory,
 ) -> Result<Analysis, AnalysisError> {
     let mut workspace_limitations = Vec::new();
-    let workspace = read_cargo_workspace(root, &mut workspace_limitations)?;
+    let (workspace, declared_local_dependencies) =
+        read_cargo_workspace(root, &mut workspace_limitations)?;
     let workspace_names: HashSet<String> = workspace
         .as_ref()
         .map(|info| {
@@ -331,6 +355,8 @@ pub fn analyze(
         .as_ref()
         .map(|info| info.declared_dependencies.iter().cloned().collect())
         .unwrap_or_default();
+    let local_dependencies =
+        resolve_local_dependencies(root, contract, &declared_local_dependencies, &workspace);
     let inventory_paths: BTreeSet<String> = inventory
         .files
         .iter()
@@ -426,6 +452,7 @@ pub fn analyze(
                 contract_names: &contract_names,
                 workspace_names: &workspace_names,
                 declared_dependencies: &declared_dependencies,
+                local_dependencies: &local_dependencies,
                 inventory_paths: &inventory_paths,
                 analysis: &mut analysis,
                 seen_edges: &mut seen_edges,
@@ -675,6 +702,44 @@ enum RelativeTarget {
     },
 }
 
+/// Classifica uma dependência local do workspace, quando declarada com `path`.
+///
+/// Retorna `true` quando o destino foi reconhecido como dependência local; nesse
+/// caso a classificação externa habitual não deve ser aplicada.
+fn classify_local_dependency(
+    context: &mut VisitContext<'_>,
+    module: &Module,
+    target: &str,
+    line: Option<usize>,
+    evidence: Option<&str>,
+) -> bool {
+    let Some(resolved) = context.local_dependencies.get(target).cloned() else {
+        return false;
+    };
+    match resolved {
+        LocalDependencyTarget::Module(name) => record_classified_target(
+            context,
+            module,
+            &name,
+            line,
+            evidence,
+            "dependência local do workspace associada ao módulo do contrato".to_owned(),
+        ),
+        LocalDependencyTarget::NeedsReview(detail) => record_dependency(
+            module,
+            target,
+            DependencyKind::Unresolved,
+            detail,
+            line,
+            evidence,
+            context.path,
+            &mut *context.analysis,
+            &mut *context.seen_edges,
+        ),
+    }
+    true
+}
+
 /// Classifica uma folha de caminho de `use` e registra a aresta correspondente.
 fn classify_use(
     context: &mut VisitContext<'_>,
@@ -706,6 +771,9 @@ fn classify_use(
     };
 
     if IGNORED_ROOTS.contains(&target.as_str()) || target == module.name {
+        return;
+    }
+    if classify_local_dependency(context, module, &target, line, evidence) {
         return;
     }
     if context.declared_dependencies.contains(&target) {
@@ -785,6 +853,9 @@ fn classify_relative(
     };
 
     if segment == &module.name || IGNORED_ROOTS.contains(&segment.as_str()) {
+        return;
+    }
+    if classify_local_dependency(context, module, segment, line, evidence) {
         return;
     }
     if context.declared_dependencies.contains(segment) {
@@ -976,16 +1047,13 @@ fn normalize_crate_name(name: &str) -> String {
     name.replace('-', "_")
 }
 
-/// Resolve o nome de crate declarado por uma entrada de dependência.
-///
-/// O alias local e o pacote real são mantidos: um pode aparecer no código e o
-/// outro ser o nome canônico no manifesto.
-fn dependency_names(
+/// Nome canônico do pacote declarado por uma entrada de dependência.
+fn declared_dependency_name(
     key: &str,
     entry: &toml::Value,
     workspace_dependencies: Option<&toml::Value>,
-) -> [String; 2] {
-    let declared = entry
+) -> String {
+    entry
         .get("package")
         .and_then(toml::Value::as_str)
         .or_else(|| {
@@ -998,22 +1066,56 @@ fn dependency_names(
                 None
             }
         })
-        .unwrap_or(key);
-    [normalize_crate_name(key), normalize_crate_name(declared)]
+        .unwrap_or(key)
+        .to_owned()
 }
 
-/// Coleta os nomes declarados em uma tabela de dependências.
+/// Caminho `path` herdado de `[workspace.dependencies]`.
+fn inherited_dependency_path<'a>(
+    key: &str,
+    entry: &'a toml::Value,
+    workspace_dependencies: Option<&'a toml::Value>,
+) -> Option<&'a str> {
+    if entry.get("workspace").and_then(toml::Value::as_bool) != Some(true) {
+        return None;
+    }
+    workspace_dependencies
+        .and_then(|table| table.get(key))
+        .and_then(|inherited| inherited.get("path"))
+        .and_then(toml::Value::as_str)
+}
+
+/// Coleta os nomes e as dependências `path` de uma tabela de dependências.
 fn collect_dependency_table(
     table: Option<&toml::Value>,
     workspace_dependencies: Option<&toml::Value>,
     names: &mut BTreeSet<String>,
+    manifest_dir: &Path,
+    workspace_dir: &Path,
+    local_dependencies: &mut Vec<DeclaredLocalDependency>,
 ) {
     let Some(entries) = table.and_then(toml::Value::as_table) else {
         return;
     };
     for (key, entry) in entries {
-        for name in dependency_names(key, entry, workspace_dependencies) {
+        let declared = declared_dependency_name(key, entry, workspace_dependencies);
+        for name in [normalize_crate_name(key), normalize_crate_name(&declared)] {
             names.insert(name);
+        }
+        let (path, base_dir) = match entry.get("path").and_then(toml::Value::as_str) {
+            Some(path) => (Some(path), manifest_dir),
+            None => (
+                inherited_dependency_path(key, entry, workspace_dependencies),
+                workspace_dir,
+            ),
+        };
+        if let Some(path) = path {
+            local_dependencies.push(DeclaredLocalDependency {
+                alias: normalize_crate_name(key),
+                package: normalize_crate_name(&declared),
+                manifest_dir: base_dir.to_path_buf(),
+                path: path.to_owned(),
+            });
         }
     }
 }
@@ -1023,14 +1125,31 @@ fn collect_manifest_dependencies(
     document: &toml::Value,
     workspace_dependencies: Option<&toml::Value>,
     names: &mut BTreeSet<String>,
+    manifest_dir: &Path,
+    workspace_dir: &Path,
+    local_dependencies: &mut Vec<DeclaredLocalDependency>,
 ) {
     for section in ["dependencies", "dev-dependencies", "build-dependencies"] {
-        collect_dependency_table(document.get(section), workspace_dependencies, names);
+        collect_dependency_table(
+            document.get(section),
+            workspace_dependencies,
+            names,
+            manifest_dir,
+            workspace_dir,
+            local_dependencies,
+        );
     }
     if let Some(targets) = document.get("target").and_then(toml::Value::as_table) {
         for target in targets.values() {
             for section in ["dependencies", "dev-dependencies", "build-dependencies"] {
-                collect_dependency_table(target.get(section), workspace_dependencies, names);
+                collect_dependency_table(
+                    target.get(section),
+                    workspace_dependencies,
+                    names,
+                    manifest_dir,
+                    workspace_dir,
+                    local_dependencies,
+                );
             }
         }
     }
@@ -1141,14 +1260,140 @@ fn expand_member_pattern(
     members
 }
 
+/// Resolve lexicalmente um caminho `path` sem seguir links nem sair da raiz.
+fn resolve_dependency_directory(root: &Path, manifest_dir: &Path, path: &str) -> Option<PathBuf> {
+    let mut resolved = manifest_dir.to_path_buf();
+    for component in Path::new(path).components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !resolved.pop() {
+                    return None;
+                }
+            }
+            Component::Normal(part) => resolved.push(part),
+            Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    resolved.starts_with(root).then_some(resolved)
+}
+
+/// Prefixo literal de um padrão de caminho do contrato.
+fn literal_path_prefix(pattern: &str) -> String {
+    pattern
+        .split('/')
+        .take_while(|part| !part.contains('*') && !part.contains('?') && !part.contains('['))
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Indica se os arquivos de um módulo ficam dentro do diretório do pacote local.
+fn module_is_inside_package(module_path: &str, package_dir: &str) -> bool {
+    let prefix = literal_path_prefix(module_path);
+    prefix == package_dir || prefix.starts_with(&format!("{package_dir}/"))
+}
+
+/// Associa uma dependência `path` a um módulo do contrato, quando possível.
+fn resolve_one_local_dependency(
+    root: &Path,
+    contract: &Contract,
+    dependency: &DeclaredLocalDependency,
+    workspace: &WorkspaceInfo,
+) -> LocalDependencyTarget {
+    let Some(directory) =
+        resolve_dependency_directory(root, &dependency.manifest_dir, &dependency.path)
+    else {
+        return LocalDependencyTarget::NeedsReview(format!(
+            "dependência path '{}' não pôde ser resolvida dentro da raiz",
+            dependency.path
+        ));
+    };
+    let relative = directory
+        .strip_prefix(root)
+        .expect("caminho verificado dentro da raiz")
+        .to_string_lossy()
+        .replace('\\', "/");
+    let manifest_path = format!("{relative}/Cargo.toml");
+    let Some(package) = workspace
+        .packages
+        .iter()
+        .find(|candidate| candidate.manifest_path == manifest_path)
+    else {
+        return LocalDependencyTarget::NeedsReview(format!(
+            "dependência path '{}' não corresponde a um membro do workspace",
+            dependency.path
+        ));
+    };
+
+    let mut candidates: Vec<&str> = contract
+        .architecture
+        .modules
+        .iter()
+        .filter(|module| module_is_inside_package(&module.path, &relative))
+        .map(|module| module.name.as_str())
+        .collect();
+    candidates.sort_unstable();
+    candidates.dedup();
+
+    match candidates.as_slice() {
+        [name] => LocalDependencyTarget::Module((*name).to_owned()),
+        [] => LocalDependencyTarget::NeedsReview(format!(
+            "pacote local '{}' não tem módulo correspondente no contrato",
+            package.name
+        )),
+        names => LocalDependencyTarget::NeedsReview(format!(
+            "pacote local '{}' corresponde a múltiplos módulos do contrato: {}",
+            package.name,
+            names.join(", ")
+        )),
+    }
+}
+
+/// Registra um destino local, transformando conflitos de alias em revisão.
+fn insert_local_target(
+    resolved: &mut BTreeMap<String, LocalDependencyTarget>,
+    alias: String,
+    target: LocalDependencyTarget,
+) {
+    match resolved.get(&alias) {
+        Some(existing) if existing != &target => {
+            let detail = format!("'{alias}' foi declarado com destinos locais diferentes");
+            resolved.insert(alias, LocalDependencyTarget::NeedsReview(detail));
+        }
+        Some(_) => {}
+        None => {
+            resolved.insert(alias, target);
+        }
+    }
+}
+
+/// Resolve todas as dependências `path` declaradas no Cargo.
+fn resolve_local_dependencies(
+    root: &Path,
+    contract: &Contract,
+    declared: &[DeclaredLocalDependency],
+    workspace: &Option<WorkspaceInfo>,
+) -> BTreeMap<String, LocalDependencyTarget> {
+    let mut resolved = BTreeMap::new();
+    let Some(workspace) = workspace else {
+        return resolved;
+    };
+    for dependency in declared {
+        let target = resolve_one_local_dependency(root, contract, dependency, workspace);
+        insert_local_target(&mut resolved, dependency.alias.clone(), target.clone());
+        insert_local_target(&mut resolved, dependency.package.clone(), target);
+    }
+    resolved
+}
+
 /// Lê o manifesto raiz e os manifestos dos membros declarados no workspace.
 fn read_cargo_workspace(
     root: &Path,
     limitations: &mut Vec<String>,
-) -> Result<Option<WorkspaceInfo>, AnalysisError> {
+) -> Result<(Option<WorkspaceInfo>, Vec<DeclaredLocalDependency>), AnalysisError> {
     let manifest = root.join("Cargo.toml");
     if !manifest.exists() {
-        return Ok(None);
+        return Ok((None, Vec::new()));
     }
 
     let text = fs::read_to_string(&manifest).map_err(|source| AnalysisError::Io {
@@ -1163,13 +1408,24 @@ fn read_cargo_workspace(
     let workspace = document.get("workspace");
     let workspace_dependencies = workspace.and_then(|table| table.get("dependencies"));
     let mut declared = BTreeSet::new();
+    let mut local_dependencies = Vec::new();
     collect_dependency_table(
         workspace_dependencies,
         workspace_dependencies,
         &mut declared,
+        root,
+        root,
+        &mut local_dependencies,
     );
     if document.get("package").is_some() {
-        collect_manifest_dependencies(&document, workspace_dependencies, &mut declared);
+        collect_manifest_dependencies(
+            &document,
+            workspace_dependencies,
+            &mut declared,
+            root,
+            root,
+            &mut local_dependencies,
+        );
     }
 
     let mut packages = Vec::new();
@@ -1221,7 +1477,14 @@ fn read_cargo_workspace(
                     path: member_manifest.clone(),
                     source,
                 })?;
-            collect_manifest_dependencies(&member_document, workspace_dependencies, &mut declared);
+            collect_manifest_dependencies(
+                &member_document,
+                workspace_dependencies,
+                &mut declared,
+                &root.join(&member),
+                root,
+                &mut local_dependencies,
+            );
 
             if let Some(name) = member_document
                 .get("package")
@@ -1240,18 +1503,24 @@ fn read_cargo_workspace(
         (&left.name, &left.manifest_path).cmp(&(&right.name, &right.manifest_path))
     });
 
-    Ok(Some(WorkspaceInfo {
-        packages,
-        declared_dependencies: declared.into_iter().collect(),
-    }))
+    Ok((
+        Some(WorkspaceInfo {
+            packages,
+            declared_dependencies: declared.into_iter().collect(),
+        }),
+        local_dependencies,
+    ))
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
 
     use super::*;
-    use crate::contract::{Architecture, ArchitectureStyle, Project, Scan, load_contract};
+    use crate::contract::{
+        Architecture, ArchitectureStyle, Contract, Project, Scan, load_contract,
+    };
     use crate::discovery::discover;
     use syn::Item;
 
@@ -1751,6 +2020,170 @@ mod tests {
                 .reviews
                 .iter()
                 .all(|review| !review.detail.contains("Entity"))
+        );
+    }
+
+    /// Raiz da fixture de dependências locais do workspace, relativa ao crate.
+    fn workspace_local_dependencies_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/projects/workspace_local_dependencies")
+    }
+
+    /// Analisa a fixture de dependências locais com um contrato explícito.
+    fn analyze_workspace_local_dependencies_with(contract: &Contract) -> Analysis {
+        let root = workspace_local_dependencies_root();
+        let inventory = discover(&root, contract).expect("discovery must succeed");
+        analyze(&root, contract, &inventory).expect("analysis must succeed")
+    }
+
+    /// Analisa a fixture de dependências locais com o contrato versionado.
+    fn analyze_workspace_local_dependencies() -> Analysis {
+        let root = workspace_local_dependencies_root();
+        let contract =
+            load_contract(&root.join("auditor.toml")).expect("fixture contract must load");
+        analyze_workspace_local_dependencies_with(&contract)
+    }
+
+    #[test]
+    fn workspace_path_dependency_becomes_an_architectural_edge() {
+        let analysis = analyze_workspace_local_dependencies();
+
+        let edge = analysis
+            .edges
+            .iter()
+            .find(|edge| edge.from == "cli" && edge.to == "core")
+            .expect("local path dependency must become an architectural edge");
+        assert_eq!(edge.kind, DependencyKind::Allowed);
+        assert_eq!(edge.path, "crates/cli/src/main.rs");
+        assert_eq!(edge.line, Some(1));
+        assert_eq!(edge.evidence.as_deref(), Some("use core_api::api;"));
+    }
+
+    #[test]
+    fn external_dependency_declaration_continues_to_be_ignored() {
+        let analysis = analyze_workspace_local_dependencies();
+
+        assert!(analysis.edges.iter().all(|edge| edge.to != "serde"));
+        assert!(
+            analysis
+                .reviews
+                .iter()
+                .all(|review| !review.detail.contains("serde"))
+        );
+        assert_eq!(
+            analysis
+                .workspace
+                .expect("workspace must be read")
+                .declared_dependencies,
+            ["core_api", "core_lib", "serde", "tools", "tools_lib"]
+        );
+    }
+
+    #[test]
+    fn unmapped_local_workspace_dependency_requires_review() {
+        let analysis = analyze_workspace_local_dependencies();
+
+        let edge = analysis
+            .edges
+            .iter()
+            .find(|edge| edge.from == "cli" && edge.to == "tools")
+            .expect("local package without a contract module must remain visible");
+        assert_eq!(edge.kind, DependencyKind::Unresolved);
+        assert!(analysis.reviews.iter().any(|review| {
+            review.reason == ReviewReason::UnresolvedDependency && review.detail.contains("tools")
+        }));
+    }
+
+    #[test]
+    fn inherited_workspace_path_is_resolved_from_the_workspace_root() {
+        let analysis = analyze_workspace_local_dependencies();
+
+        assert!(analysis.reviews.iter().any(|review| {
+            review
+                .detail
+                .contains("pacote local 'tools-lib' não tem módulo correspondente no contrato")
+        }));
+        assert!(
+            analysis
+                .reviews
+                .iter()
+                .all(|review| !review.detail.contains("destinos locais diferentes"))
+        );
+    }
+
+    #[test]
+    fn local_workspace_analysis_ignores_contract_module_order() {
+        let root = workspace_local_dependencies_root();
+        let mut contract =
+            load_contract(&root.join("auditor.toml")).expect("fixture contract must load");
+        let mut first = analyze_workspace_local_dependencies_with(&contract);
+        contract.architecture.modules.reverse();
+        let mut second = analyze_workspace_local_dependencies_with(&contract);
+        // A listagem de módulos segue a ordem do contrato; a classificação não pode seguir.
+        first.modules.sort();
+        second.modules.sort();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn dependency_paths_are_resolved_lexically_inside_the_root() {
+        let root = Path::new("/projeto");
+        let member = root.join("crates/cli");
+
+        assert_eq!(
+            resolve_dependency_directory(root, &member, "../core"),
+            Some(root.join("crates/core"))
+        );
+        assert_eq!(
+            resolve_dependency_directory(root, &member, "./../core/src"),
+            Some(root.join("crates/core/src"))
+        );
+        assert_eq!(
+            resolve_dependency_directory(root, &member, "../../../fora"),
+            None
+        );
+        assert_eq!(
+            resolve_dependency_directory(root, &member, "/absoluto"),
+            None
+        );
+    }
+
+    #[test]
+    fn literal_path_prefix_stops_before_the_first_wildcard() {
+        assert_eq!(literal_path_prefix("crates/core/src/**"), "crates/core/src");
+        assert_eq!(literal_path_prefix("src/**/*.rs"), "src");
+        assert_eq!(literal_path_prefix("crates/*/src/**"), "crates");
+    }
+
+    #[test]
+    fn module_mapping_requires_a_literal_package_directory() {
+        assert!(module_is_inside_package(
+            "crates/core/src/**",
+            "crates/core"
+        ));
+        assert!(!module_is_inside_package("crates/*/src/**", "crates/core"));
+        assert!(!module_is_inside_package("src/domain/**", "crates/core"));
+    }
+
+    #[test]
+    fn conflicting_local_alias_becomes_an_explicit_review() {
+        let mut resolved = BTreeMap::new();
+        insert_local_target(
+            &mut resolved,
+            "api".to_owned(),
+            LocalDependencyTarget::Module("core".to_owned()),
+        );
+        insert_local_target(
+            &mut resolved,
+            "api".to_owned(),
+            LocalDependencyTarget::Module("cli".to_owned()),
+        );
+
+        assert_eq!(
+            resolved["api"],
+            LocalDependencyTarget::NeedsReview(
+                "'api' foi declarado com destinos locais diferentes".to_owned()
+            )
         );
     }
 

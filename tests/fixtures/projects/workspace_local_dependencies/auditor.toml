@@ -1,0 +1,23 @@
+schema_version = 1
+
+[project]
+name = "workspace-local-dependencies"
+
+[scan]
+include = ["crates/**/*.rs"]
+exclude = []
+
+[architecture]
+style = "modular_monolith"
+
+[[architecture.modules]]
+name = "core"
+path = "crates/core/src/**"
+responsibility = "API local reutilizada pela CLI"
+allowed_dependencies = []
+
+[[architecture.modules]]
+name = "cli"
+path = "crates/cli/src/**"
+responsibility = "Comando que consome a API local"
+allowed_dependencies = ["core"]

@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+# Ordem invertida de propósito: o resultado não deve depender dela.
+members = ["crates/cli", "crates/tools", "crates/core"]
+
+[workspace.dependencies]
+tools = { package = "tools-lib", path = "crates/tools" }

@@ -211,7 +211,7 @@ npm run tauri dev
 npm run tauri build
 ```
 
-O `npm test` compila `src/skipSummary.ts` e executa 2 testes Node puros, sem dependência nova, sobre os textos do resumo de exclusões produzidos para os seis motivos do núcleo.
+O `npm test` compila `src/skipSummary.ts` e `src/reportView.ts` e executa 7 testes Node puros, sem dependência nova: 2 sobre os textos do resumo de exclusões e 5 sobre a apresentação do relatório (resumo, filtros, opções, cobertura e arestas), todos com o mesmo JSON real produzido pela CLI.
 
 Telas disponíveis: seleção nativa da pasta do projeto, auditoria com resumo e filtros por severidade/regra, grafo de dependências em SVG com as classificações feitas pelo núcleo, visualizador somente leitura do `auditor.toml`, histórico local com registro explícito e painel de configurações do caminho do banco.
 
@@ -232,7 +232,7 @@ npm test
 npm run package
 ```
 
-O comando `npm test` compila o TypeScript e executa 4 testes puros de conversão; `npm run package` gera `vibe-coding-auditor-0.1.0.vsix`. O executável usado vem de `vibeCodingAuditor.cliPath` (padrão: procurar no `PATH` e depois em `target/release`/`target/debug` da pasta aberta). A extensão aceita os códigos de saída `0` e `1` da CLI; somente códigos maiores que `1` são falha.
+O comando `npm test` compila o TypeScript e executa 7 testes puros de conversão, incluindo 2 de paridade sobre o mesmo JSON real da CLI; `npm run package` gera `vibe-coding-auditor-0.1.0.vsix`. O executável usado vem de `vibeCodingAuditor.cliPath` (padrão: procurar no `PATH` e depois em `target/release`/`target/debug` da pasta aberta). A extensão aceita os códigos de saída `0` e `1` da CLI; somente códigos maiores que `1` são falha.
 
 Mapeamento: `error` → `Error`, `warning` e `needs_review` → `Warning`, `info` → `Information`. O `rule_id` vira código do diagnóstico e a mensagem inclui `id`, evidência, expectativa e sugestão. Nenhuma regra é avaliada na extensão e nenhum daemon é criado.
 

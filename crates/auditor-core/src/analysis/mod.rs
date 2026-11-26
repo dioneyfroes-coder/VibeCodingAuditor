@@ -568,25 +568,35 @@ pub(crate) fn module_for_file<'a>(
         .filter(|module| matches_pattern(&module.path, path))
         .collect();
 
-    if matching_modules.len() > 1 {
-        analysis.reviews.push(ReviewItem {
-            path: path.to_owned(),
-            line: None,
-            reason: ReviewReason::AmbiguousModule,
-            detail: "o arquivo corresponde a mais de um módulo do contrato".to_owned(),
-        });
+    match matching_modules.len() {
+        0 => {
+            analysis.reviews.push(ReviewItem {
+                path: path.to_owned(),
+                line: None,
+                reason: ReviewReason::UnmappedFile,
+                detail: "nenhum path de módulo do contrato corresponde ao arquivo".to_owned(),
+            });
+            None
+        }
+        1 => matching_modules.first().copied(),
+        _ => {
+            let mut candidates: Vec<&str> = matching_modules
+                .iter()
+                .map(|module| module.name.as_str())
+                .collect();
+            candidates.sort_unstable();
+            analysis.reviews.push(ReviewItem {
+                path: path.to_owned(),
+                line: None,
+                reason: ReviewReason::AmbiguousModule,
+                detail: format!(
+                    "o arquivo corresponde a mais de um módulo do contrato: {}",
+                    candidates.join(", ")
+                ),
+            });
+            None
+        }
     }
-
-    let module = matching_modules.first().copied();
-    if module.is_none() {
-        analysis.reviews.push(ReviewItem {
-            path: path.to_owned(),
-            line: None,
-            reason: ReviewReason::UnmappedFile,
-            detail: "nenhum path de módulo do contrato corresponde ao arquivo".to_owned(),
-        });
-    }
-    module
 }
 
 /// Registra uma aresta já classificada, sem duplicatas nem revisões repetidas.
@@ -1098,47 +1108,81 @@ mod tests {
     }
 
     #[test]
-    fn ambiguous_module_becomes_review() {
+    fn ambiguous_module_becomes_review_without_definitive_mapping() {
         let root = project_root();
-        let overlapping_contract = Contract {
-            schema_version: 1,
-            project: Project {
-                name: "sobreposicao".to_owned(),
-            },
-            scan: Scan {
-                include: vec!["**/*.rs".to_owned()],
-                exclude: Vec::new(),
-            },
-            architecture: Architecture {
-                style: ArchitectureStyle::ModularMonolith,
-                modules: vec![
-                    Module {
-                        name: "geral".to_owned(),
-                        path: "crates/**/*.rs".to_owned(),
-                        responsibility: "Todos os arquivos Rust".to_owned(),
-                        allowed_dependencies: Vec::new(),
-                    },
-                    Module {
-                        name: "dominio".to_owned(),
-                        path: "crates/domain/src/**".to_owned(),
-                        responsibility: "Arquivos de domínio".to_owned(),
-                        allowed_dependencies: Vec::new(),
-                    },
-                ],
-            },
+        let module = |name: &str, path: &str| Module {
+            name: name.to_owned(),
+            path: path.to_owned(),
+            responsibility: "Módulo usado no teste de ambiguidade".to_owned(),
+            allowed_dependencies: Vec::new(),
         };
-        let inventory = discover(&root, &overlapping_contract).expect("discovery must succeed");
-        let analysis =
-            analyze(&root, &overlapping_contract, &inventory).expect("analysis must succeed");
+        let geral = module("geral", "crates/**/*.rs");
+        let dominio = module("dominio", "crates/domain/src/**");
 
-        let review = analysis
-            .reviews
-            .iter()
-            .find(|review| review.reason == ReviewReason::AmbiguousModule)
-            .expect("overlapping module paths must require review");
-        assert!(
-            review.path.starts_with("crates/domain/src/"),
-            "review must point to a domain source file"
-        );
+        for modules in [
+            vec![geral.clone(), dominio.clone()],
+            vec![dominio.clone(), geral.clone()],
+        ] {
+            let overlapping_contract = Contract {
+                schema_version: 1,
+                project: Project {
+                    name: "sobreposicao".to_owned(),
+                },
+                scan: Scan {
+                    include: vec!["**/*.rs".to_owned()],
+                    exclude: Vec::new(),
+                },
+                architecture: Architecture {
+                    style: ArchitectureStyle::ModularMonolith,
+                    modules,
+                },
+            };
+
+            let mut direct = Analysis {
+                modules: Vec::new(),
+                workspace: None,
+                edges: Vec::new(),
+                reviews: Vec::new(),
+                module_declarations: Vec::new(),
+                limitations: Vec::new(),
+                duplicate_lines: Vec::new(),
+                coverage: AnalysisCoverage::default(),
+            };
+            assert!(
+                module_for_file(
+                    &overlapping_contract,
+                    "crates/domain/src/lib.rs",
+                    &mut direct
+                )
+                .is_none(),
+                "ambiguous file must not have a definitive module"
+            );
+            let review = direct
+                .reviews
+                .iter()
+                .find(|review| review.reason == ReviewReason::AmbiguousModule)
+                .expect("overlapping module paths must require review");
+            assert_eq!(
+                review.detail,
+                "o arquivo corresponde a mais de um módulo do contrato: dominio, geral"
+            );
+
+            let inventory = discover(&root, &overlapping_contract).expect("discovery must succeed");
+            let analysis =
+                analyze(&root, &overlapping_contract, &inventory).expect("analysis must succeed");
+            assert!(
+                analysis
+                    .module_declarations
+                    .iter()
+                    .filter(|declaration| declaration.path.starts_with("crates/domain/src/"))
+                    .all(|declaration| declaration.module_name.is_none())
+            );
+            assert!(
+                analysis
+                    .edges
+                    .iter()
+                    .all(|edge| !edge.path.starts_with("crates/domain/src/"))
+            );
+        }
     }
 }

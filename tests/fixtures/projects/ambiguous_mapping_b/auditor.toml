@@ -1,0 +1,41 @@
+schema_version = 1
+
+[project]
+name = "projeto-mapeamento-ambigu"
+
+[scan]
+include = ["src/**/*"]
+exclude = []
+
+[architecture]
+style = "modular_monolith"
+
+[[architecture.modules]]
+name = "entities"
+path = "src/**/entity.py"
+responsibility = "Path sobreposto usado para testar ambiguidade de destino"
+allowed_dependencies = []
+
+[[architecture.modules]]
+name = "application"
+path = "src/application/**"
+responsibility = "Casos de uso"
+allowed_dependencies = ["domain"]
+
+[[architecture.modules]]
+name = "infrastructure"
+path = "src/infrastructure/**"
+responsibility = "Integrações"
+allowed_dependencies = []
+
+[[architecture.modules]]
+name = "overlap"
+path = "src/**/overlap.rs"
+responsibility = "Path sobreposto usado para testar ambiguidade de origem"
+allowed_dependencies = ["infrastructure"]
+
+[[architecture.modules]]
+name = "domain"
+path = "src/domain/**"
+responsibility = "Regras centrais"
+allowed_dependencies = []

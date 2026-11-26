@@ -315,6 +315,61 @@ mod tests {
         );
     }
 
+    /// Ambiguidade não pode virar conclusão definitiva nem depender da ordem do contrato.
+    #[test]
+    fn ambiguous_mapping_report_is_independent_from_contract_order() {
+        let first = audit_project(&project_fixture("ambiguous_mapping_a"))
+            .expect("first contract order must audit");
+        let second = audit_project(&project_fixture("ambiguous_mapping_b"))
+            .expect("second contract order must audit");
+
+        assert_eq!(first, second);
+        assert_eq!(first.summary.errors, 0);
+        assert!(
+            !first
+                .findings
+                .iter()
+                .any(|finding| finding.rule_id == RULE_DEPENDENCY_NOT_ALLOWED)
+        );
+
+        let ambiguous = first
+            .findings
+            .iter()
+            .find(|finding| {
+                finding.rule_id == RULE_FILE_AMBIGUOUS_MODULE
+                    && finding.path == "src/domain/overlap.rs"
+            })
+            .expect("ambiguous source must require review");
+        assert_eq!(ambiguous.severity, Severity::NeedsReview);
+        assert_eq!(
+            ambiguous.evidence.as_deref(),
+            Some("o arquivo corresponde a mais de um módulo do contrato: domain, overlap")
+        );
+
+        let unresolved = first
+            .findings
+            .iter()
+            .find(|finding| {
+                finding.rule_id == RULE_DEPENDENCY_UNRESOLVED
+                    && finding.path == "src/application/service.py"
+            })
+            .expect("ambiguous Python target must require review");
+        assert_eq!(unresolved.severity, Severity::NeedsReview);
+        assert_eq!(
+            unresolved.evidence.as_deref(),
+            Some("from domain.entity import Entity")
+        );
+
+        assert!(!first.findings.iter().any(|finding| {
+            finding.path == "src/domain/overlap.rs"
+                && finding.rule_id == RULE_DEPENDENCY_NOT_ALLOWED
+        }));
+        assert!(!first.findings.iter().any(|finding| {
+            finding.path == "src/application/service.py"
+                && finding.rule_id == RULE_DEPENDENCY_NOT_ALLOWED
+        }));
+    }
+
     /// Concentração de dependências é revisão, não violação comprovada.
     #[test]
     fn concentration_fixture_flags_hub_as_needs_review() {

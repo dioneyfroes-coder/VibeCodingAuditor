@@ -361,6 +361,26 @@ fn classify_specifier(
         .filter(|candidate| matches_pattern(&candidate.path, resolved_path))
         .collect();
 
+    if targets.len() > 1 {
+        let mut candidates: Vec<&str> = targets.iter().map(|module| module.name.as_str()).collect();
+        candidates.sort_unstable();
+        record_dependency(
+            module,
+            specifier,
+            DependencyKind::Unresolved,
+            format!(
+                "destino Python ambíguo entre módulos do contrato (candidatos: {})",
+                candidates.join(", ")
+            ),
+            Some(line),
+            Some(evidence),
+            path,
+            analysis,
+            seen_edges,
+        );
+        return;
+    }
+
     let Some(target_module) = targets.first().copied() else {
         analysis.reviews.push(ReviewItem {
             path: path.to_owned(),
@@ -452,6 +472,8 @@ pub(super) fn analyze_text(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analysis::AnalysisCoverage;
+    use crate::contract::{Architecture, ArchitectureStyle, Project, Scan};
 
     #[test]
     fn comments_and_triple_strings_are_masked() {
@@ -507,5 +529,96 @@ mod tests {
             Some("src/application/dominio".to_owned())
         );
         assert_eq!(resolve_relative("src/use_case.py", "..fora"), None);
+    }
+
+    #[test]
+    fn ambiguous_python_target_is_unresolved_regardless_of_module_order() {
+        let application = Module {
+            name: "application".to_owned(),
+            path: "src/application/**".to_owned(),
+            responsibility: "Casos de uso".to_owned(),
+            allowed_dependencies: vec!["domain".to_owned()],
+        };
+        let domain = Module {
+            name: "domain".to_owned(),
+            path: "src/domain/**".to_owned(),
+            responsibility: "Domínio".to_owned(),
+            allowed_dependencies: Vec::new(),
+        };
+        let entities = Module {
+            name: "entities".to_owned(),
+            path: "src/**/entity.py".to_owned(),
+            responsibility: "Entidades".to_owned(),
+            allowed_dependencies: Vec::new(),
+        };
+
+        for modules in [
+            vec![application.clone(), domain.clone(), entities.clone()],
+            vec![entities, domain, application.clone()],
+        ] {
+            let contract = Contract {
+                schema_version: 1,
+                project: Project {
+                    name: "ambiguidade-python".to_owned(),
+                },
+                scan: Scan {
+                    include: vec!["src/**/*.py".to_owned()],
+                    exclude: Vec::new(),
+                },
+                architecture: Architecture {
+                    style: ArchitectureStyle::ModularMonolith,
+                    modules,
+                },
+            };
+            let contract_names: HashSet<String> = contract
+                .architecture
+                .modules
+                .iter()
+                .map(|module| module.name.clone())
+                .collect();
+            let files: HashSet<&str> = ["src/application/use_case.py", "src/domain/entity.py"]
+                .into_iter()
+                .collect();
+            let mut analysis = Analysis {
+                modules: Vec::new(),
+                workspace: None,
+                edges: Vec::new(),
+                reviews: Vec::new(),
+                module_declarations: Vec::new(),
+                limitations: Vec::new(),
+                duplicate_lines: Vec::new(),
+                coverage: AnalysisCoverage::default(),
+            };
+            let mut seen_edges = HashSet::new();
+
+            classify_specifier(
+                &contract,
+                &contract_names,
+                &files,
+                &application,
+                "src/application/use_case.py",
+                1,
+                "from domain.entity import Entity",
+                "domain.entity",
+                &mut analysis,
+                &mut seen_edges,
+            );
+
+            assert_eq!(analysis.edges.len(), 1);
+            let edge = &analysis.edges[0];
+            assert_eq!(edge.from, "application");
+            assert_eq!(edge.to, "domain.entity");
+            assert_eq!(edge.kind, DependencyKind::Unresolved);
+
+            let review = analysis
+                .reviews
+                .iter()
+                .find(|review| review.reason == ReviewReason::UnresolvedDependency)
+                .expect("ambiguous target must require review");
+            assert_eq!(
+                review.detail,
+                "domain.entity: destino Python ambíguo entre módulos do contrato (candidatos: domain, entities)"
+            );
+        }
     }
 }

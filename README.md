@@ -2,7 +2,7 @@
 
 Ferramenta local para comparar a arquitetura pretendida de um projeto com a arquitetura realmente implementada. Cada achado deve apontar a regra violada, os arquivos envolvidos e, quando possível, as linhas relevantes. O contrato arquitetural (`auditor.toml`) pertence ao usuário e é versionado junto ao projeto auditado.
 
-**Status atual:** primeira fase do projeto concluída; Etapa 2 de confiabilidade iniciada pelo item 2.1 (cobertura honesta dos arquivos). Etapas 0–10 fechadas, com TypeScript/JavaScript na Etapa 10 e os trabalhos posteriores `R1`–`R6` (revisão do plano, Python, concentração, duplicação, código sem referências e Git diff). A CLI cria um modelo de `auditor.toml`, inventaria arquivos, imprime o grafo de dependências, aplica regras determinísticas, gera relatórios em texto, JSON ou Markdown e registra execuções em SQLite. A aplicação desktop e a extensão VS Code reutilizam o mesmo núcleo. Regras personalizadas, sugestões com IA e auditoria agendada ficam fora desta fase por decisão registrada.
+**Status atual:** primeira fase do projeto concluída; Etapa 2 de confiabilidade iniciada pelos itens 2.1 (cobertura honesta dos arquivos) e 2.2 (mapeamentos ambíguos sem conclusão definitiva). Etapas 0–10 fechadas, com TypeScript/JavaScript na Etapa 10 e os trabalhos posteriores `R1`–`R6` (revisão do plano, Python, concentração, duplicação, código sem referências e Git diff). A CLI cria um modelo de `auditor.toml`, inventaria arquivos, imprime o grafo de dependências, aplica regras determinísticas, gera relatórios em texto, JSON ou Markdown e registra execuções em SQLite. A aplicação desktop e a extensão VS Code reutilizam o mesmo núcleo. Regras personalizadas, sugestões com IA e auditoria agendada ficam fora desta fase por decisão registrada.
 
 ## Documentação
 
@@ -70,15 +70,15 @@ O comando `scan <raiz>` lê `<raiz>/auditor.toml`, percorre a árvore sem execut
 
 ## Análise de dependências
 
-O comando `analyze <raiz>` lê o contrato e o inventário, lê os manifests `Cargo.toml` do workspace e usa `syn` para interpretar declarações `mod` e importações `use` dos arquivos `.rs` incluídos. Para `.ts`, `.tsx`, `.js` e `.jsx`, um scanner próprio reconhece `import`, `export ... from`, `require(...)` e `import(...)`. Para `.py`, reconhece `import` e `from ... import`. Comentários e strings são descartados antes da leitura, e especificadores relativos são resolvidos lexicalmente contra os arquivos do inventário. Cada arquivo é associado ao primeiro módulo do contrato cujo `path` corresponde ao caminho relativo; múltiplas correspondências e arquivos sem correspondência viram itens de revisão.
+O comando `analyze <raiz>` lê o contrato e o inventário, lê os manifests `Cargo.toml` do workspace e usa `syn` para interpretar declarações `mod` e importações `use` dos arquivos `.rs` incluídos. Para `.ts`, `.tsx`, `.js` e `.jsx`, um scanner próprio reconhece `import`, `export ... from`, `require(...)` e `import(...)`. Para `.py`, reconhece `import` e `from ... import`. Comentários e strings são descartados antes da leitura, e especificadores relativos são resolvidos lexicalmente contra os arquivos do inventário. Um arquivo só é associado a um módulo quando exatamente um `path` do contrato corresponde ao caminho relativo. Sem correspondência, ele vira `file.unmapped`; com múltiplas correspondências, vira `file.ambiguous_module` com os candidatos listados em ordem alfabética, sem gerar arestas ou declarações `mod` atribuídas a um módulo escolhido.
 
 As arestas são classificadas assim:
 
 - `permitida`: o destino está em `allowed_dependencies` do módulo de origem.
 - `proibida`: o destino é um módulo declarado no contrato, mas não está em `allowed_dependencies`.
-- `não resolvida`: o destino não corresponde a nenhum módulo declarado; também gera item de revisão.
+- `não resolvida`: o destino não pôde ser associado de forma inequívoca a um módulo declarado — nome ausente do contrato ou múltiplos candidatos — e também gera item de revisão.
 
-A origem de cada aresta guarda arquivo relativo, linha e a linha de código encontrada. Declarações `mod` também são registradas com arquivo e linha; o conteúdo de `mod` inline é percorrido. `use` de `std`, `core`, `alloc`, `test`, `self`, `super` e dependências do próprio módulo não geram arestas arquiteturais. Em TS/JS, especificadores sem `./` ou `../` são ignorados como pacote externo, exceto quando o nome coincide com um módulo do contrato — nesse caso viram revisão, nunca erro. Em Python, nomes absolutos só viram aresta quando começam com um módulo do contrato e possuem sufixo de arquivo encontrado no inventário; pacotes externos e `import *` são ignorados.
+A origem de cada aresta guarda arquivo relativo, linha e a linha de código encontrada. Declarações `mod` também são registradas com arquivo e linha; o conteúdo de `mod` inline é percorrido. `use` de `std`, `core`, `alloc`, `test`, `self`, `super` e dependências do próprio módulo não geram arestas arquiteturais. Em TS/JS, especificadores sem `./` ou `../` são ignorados como pacote externo, exceto quando o nome coincide com um módulo do contrato — nesse caso viram revisão, nunca erro. Em Python, nomes absolutos só viram aresta quando começam com um módulo do contrato e possuem sufixo de arquivo encontrado no inventário; pacotes externos e `import *` são ignorados. Se o arquivo resolvido pertence a mais de um módulo do contrato, a dependência vira `dep.unresolved` com os candidatos ordenados, nunca `dep.not_allowed`.
 
 Limitações explícitas: em Rust, imports dentro de corpos de funções, macros complexos, código gerado e nomes resolvidos dinamicamente não são classificados; arquivos que não fazem parse viram limitação. Em TS/JS, não há suporte a `tsconfig.paths`, workspaces npm, resolução de pacotes, template literals ou imports construídos dinamicamente; `import type` é contado como acoplamento. Em Python, apenas `import` e `from ... import` em uma linha são reconhecidos; nomes absolutos sem sufixo de arquivo, imports relativos fora da raiz, `import *` e resolução dinâmica não geram arestas. O contador `packages` continua se referindo somente a pacotes Cargo, com limitation explícita quando há arquivos TS/JS ou Python.
 
@@ -103,7 +103,7 @@ O comando `audit <raiz>` reutiliza o mesmo pipeline do núcleo e aplica estas re
 | Regra | Severidade | Situação |
 |---|---|---|
 | `dep.not_allowed` | `error` | Destino é módulo declarado, mas ausente de `allowed_dependencies`. |
-| `dep.unresolved` | `needs_review` | Destino não corresponde a nenhum módulo do contrato. |
+| `dep.unresolved` | `needs_review` | Destino não pôde ser associado de forma inequívoca a um módulo do contrato. |
 | `file.unmapped` | `needs_review` | Arquivo de código incluído não corresponde a nenhum módulo. |
 | `file.ambiguous_module` | `needs_review` | Arquivo corresponde a mais de um módulo do contrato. |
 | `dep.cycle` | `warning` | Grafo contém ciclo simples entre módulos, incluindo autoimportação. |
@@ -112,7 +112,9 @@ O comando `audit <raiz>` reutiliza o mesmo pipeline do núcleo e aplica estas re
 | `code.duplicated` | `needs_review` | Linha idêntica com 40 ou mais caracteres em dois ou mais arquivos. |
 | `module.unreferenced` | `needs_review` | Módulo com arquivos incluídos e zero arestas resolvidas incidentes. |
 
-Cada achado contém `id`, `rule_id`, `severity`, `title`, `message`, `path`, `line_start`, `line_end`, `evidence`, `expected`, `suggestion` e `confidence`. Todas as regras são determinísticas, então `confidence` é sempre nulo; o auditor não inventa precisão numérica nem aplica sugestões automaticamente. Dependências não resolvidas e arquivos não mapeados são sinais para decisão humana, não violações comprovadas.
+Cada achado contém `id`, `rule_id`, `severity`, `title`, `message`, `path`, `line_start`, `line_end`, `evidence`, `expected`, `suggestion` e `confidence`. Todas as regras são determinísticas, então `confidence` é sempre nulo; o auditor não inventa precisão numérica nem aplica sugestões automaticamente. Dependências não resolvidas, destinos ambíguos e arquivos não mapeados ou ambíguos são sinais para decisão humana, não violações comprovadas.
+
+As fixtures `tests/fixtures/projects/ambiguous_mapping_a` e `ambiguous_mapping_b` descrevem o mesmo projeto com a ordem dos módulos invertida. Ambas produzem o mesmo relatório: um arquivo ambíguo com `use crate::infrastructure::Client;` não gera `dep.not_allowed`, e um import Python cujo destino pertence a dois módulos gera `dep.unresolved` com os candidatos `domain, entities`.
 
 Os formatos disponíveis são `text` (padrão), `json` e `markdown`. Sem `--output`, o relatório vai para o terminal; com `--output <arquivo>`, o arquivo indicado é gravado e sobrescrito se já existir. O projeto auditado nunca é modificado.
 

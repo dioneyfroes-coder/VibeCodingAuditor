@@ -118,17 +118,17 @@ fn unresolved_dependency_findings(analysis: &Analysis) -> Vec<Finding> {
             severity: Severity::NeedsReview,
             title: format!("Dependência não mapeada: {}", edge.to),
             message: format!(
-                "O módulo {} usa {}, que não corresponde a nenhum módulo declarado.",
-                edge.from, edge.to
+                "O módulo {} usa {}, cujo destino não pôde ser associado com segurança a um único módulo: {}.",
+                edge.from, edge.to, edge.detail
             ),
             path: edge.path.clone(),
             line_start: edge.line,
             line_end: edge.line,
             evidence: edge.evidence.clone().or_else(|| Some(edge.detail.clone())),
-            expected: "Todo destino externo deve corresponder a um módulo declarado no contrato."
+            expected: "Todo destino deve ser associado de forma inequívoca a um módulo declarado no contrato."
                 .to_owned(),
             suggestion: format!(
-                "Decida se {} deve virar módulo no contrato ou se o uso deve ser ajustado.",
+                "Decida qual módulo deve reivindicar {} ou ajuste os paths do contrato e o uso encontrado.",
                 edge.to
             ),
             confidence: None,

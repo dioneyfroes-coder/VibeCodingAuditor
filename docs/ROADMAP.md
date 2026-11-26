@@ -231,9 +231,19 @@ Ordem e critérios vêm de `RELATORIO_ETAPA_1_E_PLANO_ETAPA_2.md`, seção 8. Um
 - [x] Verificação: `cargo fmt --check`, `cargo test --workspace` (105 testes: 92 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `npm test` da extensão (4 testes) e `npm run build` da desktop passaram
 - [x] Smoke na fixture `partial_coverage`: texto, JSON, Markdown e `analyze` mostram 2 de 4 arquivos de código analisados, `.go (1)` e `.rb (1)` sem analisador, 1 limitação, 0 achados
 
+### Item 2.2 — Eliminar conclusões definitivas baseadas em mapeamentos ambíguos — Concluído em 25/11/2026
+
+- [x] `module_for_file()` não escolhe o primeiro módulo quando há mais de uma correspondência
+- [x] Ambiguidade de origem gera apenas revisão, com candidatos ordenados, sem arestas ou declarações `mod` atribuídas
+- [x] Seleção ambígua de destino no Python foi substituída por `dep.unresolved` com candidatos ordenados, sem `dep.not_allowed`
+- [x] Resultado independe da ordem dos módulos em `auditor.toml`, provado pelas fixtures `ambiguous_mapping_a` e `ambiguous_mapping_b`
+- [x] Preservar `auditor.toml` v1, os `rule_id` existentes e o consumo de `findings` pela extensão
+- [x] Revisar paradigma, nomes descritivos, documentação de código e testes dos helpers
+- [x] Verificação: `cargo fmt --check`, `cargo test --workspace` (107 testes: 94 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `npm test` da extensão (4 testes) e `npm run build` da desktop passaram
+- [x] Smoke nas duas ordens do contrato: saída JSON idêntica, 0 erros, nenhum `dep.not_allowed` nos arquivos ambíguos e revisões com candidatos `domain, overlap` e `domain, entities`
+
 ### Itens seguintes — Não iniciados
 
-- [ ] 2.2 — Eliminar conclusões definitivas baseadas em mapeamentos ambíguos
 - [ ] 2.3 — Classificar dependências externas Rust corretamente e resolver `self::`/`super::`
 - [ ] 2.4 — Tratar `workspace.members` com glob
 - [ ] 2.5 — Corrigir a análise TypeScript/JavaScript

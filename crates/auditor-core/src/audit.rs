@@ -107,7 +107,7 @@ mod tests {
         assert!(first.has_findings());
         assert_eq!(first.summary.findings, first.findings.len());
         assert_eq!(first.summary.errors, 2);
-        assert_eq!(first.summary.warnings, 3);
+        assert_eq!(first.summary.warnings, 1);
         assert_eq!(first.summary.needs_review, 2);
         assert_eq!(first.limitations.len(), 1);
     }

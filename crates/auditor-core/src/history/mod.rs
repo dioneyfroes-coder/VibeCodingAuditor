@@ -880,7 +880,7 @@ mod tests {
         let list = history.list(None, 10).expect("list must succeed");
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].project_name, "projeto-dependencias");
-        assert_eq!(list[0].summary.findings, 7);
+        assert_eq!(list[0].summary.findings, 5);
 
         let detail = history.get(list[0].id).expect("get must succeed");
         assert_eq!(detail.findings, expected_findings);
@@ -949,7 +949,7 @@ mod tests {
         assert_eq!(comparison.after_id, after_id);
         assert_eq!(comparison.new_findings, [new_finding]);
         assert_eq!(comparison.resolved_findings, [resolved]);
-        assert_eq!(comparison.persistent_findings.len(), 6);
+        assert_eq!(comparison.persistent_findings.len(), 4);
     }
 
     #[test]
@@ -1001,7 +1001,7 @@ mod tests {
 
         assert!(output.contains("Histórico de auditorias:"));
         assert!(output.contains("projeto-dependencias"));
-        assert!(output.contains("7 (2 erros, 3 avisos, 0 informações, 2 revisões)"));
+        assert!(output.contains("5 (2 erros, 1 avisos, 0 informações, 2 revisões)"));
         assert_eq!(output, render_run_list(&runs));
     }
 
@@ -1039,6 +1039,6 @@ mod tests {
         assert!(output.contains(&format!("Comparação: execução #{before_id} -> #{after_id}")));
         assert!(output.contains("Novos achados (0):\n  (nenhum)"));
         assert!(output.contains("Achados resolvidos (0):\n  (nenhum)"));
-        assert!(output.contains("Achados persistentes (7):"));
+        assert!(output.contains("Achados persistentes (5):"));
     }
 }

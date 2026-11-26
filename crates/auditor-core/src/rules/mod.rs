@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::analysis::{Analysis, DependencyKind, ReviewReason};
+use crate::analysis::{Analysis, DependencyEdge, DependencyKind, ReviewReason};
 use crate::contract::Contract;
 use crate::discovery::{Inventory, matches_pattern};
 use crate::findings::{Finding, Severity};
@@ -32,6 +32,9 @@ pub const RULE_MODULE_UNREFERENCED: &str = "module.unreferenced";
 
 /// Número de módulos distintos que caracteriza concentração de dependências.
 const CONCENTRATION_THRESHOLD: usize = 3;
+
+/// Limite de arestas exibidas como evidência de um componente cíclico.
+const CYCLE_EVIDENCE_LIMIT: usize = 8;
 
 /// Avalia as regras implementadas e devolve achados ordenados por identificador.
 pub fn evaluate(contract: &Contract, inventory: &Inventory, analysis: &Analysis) -> Vec<Finding> {
@@ -185,34 +188,30 @@ fn review_findings(analysis: &Analysis) -> Vec<Finding> {
         .collect()
 }
 
-/// Detecta ciclos entre módulos a partir das arestas resolvidas.
+/// Detecta componentes fortemente conectados a partir das arestas resolvidas.
 fn cycle_findings(analysis: &Analysis) -> Vec<Finding> {
     let adjacency = build_adjacency(analysis);
-    let cycles = find_cycles(&adjacency);
+    let components = find_cyclic_components(&adjacency);
 
-    cycles
+    components
         .into_iter()
-        .map(|cycle| {
-            let next_module = cycle.get(1).unwrap_or(&cycle[0]);
-            let first_edge = analysis
-                .edges
-                .iter()
-                .find(|edge| edge.from == cycle[0] && edge.to == *next_module);
-            let path = first_edge
-                .map(|edge| edge.path.clone())
-                .unwrap_or_else(|| cycle[0].clone());
-            let line = first_edge.and_then(|edge| edge.line);
+        .map(|component| {
+            let edges = component_edges(analysis, &component);
+            let first = edges.first().copied();
+            let names = component.join(", ");
 
             Finding {
-                id: format!("{}:{}", RULE_DEPENDENCY_CYCLE, cycle.join("->")),
+                id: format!("{}:{}", RULE_DEPENDENCY_CYCLE, component.join("->")),
                 rule_id: RULE_DEPENDENCY_CYCLE.to_owned(),
                 severity: Severity::Warning,
-                title: format!("Ciclo entre módulos: {}", cycle.join(" -> ")),
-                message: format!("O grafo contém um caminho fechado: {}.", cycle.join(" -> ")),
-                path,
-                line_start: line,
-                line_end: line,
-                evidence: Some(cycle_evidence(analysis, &cycle)),
+                title: format!("Ciclo entre módulos: {names}"),
+                message: format!("O grafo contém um componente fortemente conectado: {names}."),
+                path: first
+                    .map(|edge| edge.path.clone())
+                    .unwrap_or_else(|| component[0].clone()),
+                line_start: first.and_then(|edge| edge.line),
+                line_end: first.and_then(|edge| edge.line),
+                evidence: Some(cycle_evidence(&edges)),
                 expected: "O grafo de dependências entre módulos não deve conter ciclos."
                     .to_owned(),
                 suggestion:
@@ -454,83 +453,186 @@ fn build_adjacency(analysis: &Analysis) -> BTreeMap<String, BTreeSet<String>> {
     adjacency
 }
 
-/// Encontra ciclos simples e remove rotações duplicadas.
-fn find_cycles(adjacency: &BTreeMap<String, BTreeSet<String>>) -> BTreeSet<Vec<String>> {
-    let mut cycles = BTreeSet::new();
-
-    for start in adjacency.keys() {
-        let mut stack = vec![start.clone()];
-        let mut on_stack = BTreeSet::new();
-        on_stack.insert(start.clone());
-        visit_cycles(start, adjacency, &mut stack, &mut on_stack, &mut cycles);
-    }
-
-    cycles
-}
-
-/// Visita caminhos simples a partir de um módulo, registrando fechamentos de ciclo.
-fn visit_cycles(
-    current: &str,
-    adjacency: &BTreeMap<String, BTreeSet<String>>,
+/// Registra a entrada de um módulo na busca de Tarjan.
+fn discover(
+    node: &str,
+    next_index: &mut usize,
+    indices: &mut BTreeMap<String, usize>,
+    lowlinks: &mut BTreeMap<String, usize>,
     stack: &mut Vec<String>,
     on_stack: &mut BTreeSet<String>,
-    cycles: &mut BTreeSet<Vec<String>>,
 ) {
-    let Some(next_nodes) = adjacency.get(current) else {
-        return;
-    };
+    indices.insert(node.to_owned(), *next_index);
+    lowlinks.insert(node.to_owned(), *next_index);
+    *next_index += 1;
+    stack.push(node.to_owned());
+    on_stack.insert(node.to_owned());
+}
 
-    for next in next_nodes {
-        if on_stack.contains(next) {
-            let start_index = stack
-                .iter()
-                .position(|node| node == next)
-                .expect("node in stack must have a position");
-            cycles.insert(canonical_cycle(&stack[start_index..]));
+/// Destinos ordenados de um módulo; módulos sem saída têm vizinhos vazios.
+fn neighbors(node: &str, adjacency: &BTreeMap<String, BTreeSet<String>>) -> Vec<String> {
+    adjacency
+        .get(node)
+        .map(|targets| targets.iter().cloned().collect())
+        .unwrap_or_default()
+}
+
+/// Encontra componentes fortemente conectados com Tarjan iterativo.
+///
+/// A pilha explícita evita estouro em grafos profundos; a ordem dos vértices e
+/// das arestas vem de `BTreeMap`/`BTreeSet`, tornando o resultado estável.
+fn find_cyclic_components(adjacency: &BTreeMap<String, BTreeSet<String>>) -> Vec<Vec<String>> {
+    let mut nodes: BTreeSet<String> = adjacency.keys().cloned().collect();
+    for targets in adjacency.values() {
+        nodes.extend(targets.iter().cloned());
+    }
+
+    let mut indices: BTreeMap<String, usize> = BTreeMap::new();
+    let mut lowlinks: BTreeMap<String, usize> = BTreeMap::new();
+    let mut stack: Vec<String> = Vec::new();
+    let mut on_stack: BTreeSet<String> = BTreeSet::new();
+    let mut components: Vec<Vec<String>> = Vec::new();
+    let mut next_index = 0_usize;
+
+    for root in nodes {
+        if indices.contains_key(&root) {
             continue;
         }
 
-        on_stack.insert(next.clone());
-        stack.push(next.clone());
-        visit_cycles(next, adjacency, stack, on_stack, cycles);
-        stack.pop();
-        on_stack.remove(next);
+        discover(
+            &root,
+            &mut next_index,
+            &mut indices,
+            &mut lowlinks,
+            &mut stack,
+            &mut on_stack,
+        );
+        let mut frames = vec![(root.clone(), neighbors(&root, adjacency), 0_usize)];
+
+        while let Some(frame) = frames.last_mut() {
+            let current = frame.0.clone();
+            if frame.2 < frame.1.len() {
+                let target = frame.1[frame.2].clone();
+                frame.2 += 1;
+
+                if !indices.contains_key(&target) {
+                    discover(
+                        &target,
+                        &mut next_index,
+                        &mut indices,
+                        &mut lowlinks,
+                        &mut stack,
+                        &mut on_stack,
+                    );
+                    frames.push((target.clone(), neighbors(&target, adjacency), 0));
+                } else if on_stack.contains(&target) {
+                    let target_index = indices[&target];
+                    let current_low = lowlinks
+                        .get_mut(&current)
+                        .expect("visited node must have a lowlink");
+                    if target_index < *current_low {
+                        *current_low = target_index;
+                    }
+                }
+                continue;
+            }
+
+            let (finished, _, _) = frames.pop().expect("frame must exist");
+            if lowlinks[&finished] == indices[&finished] {
+                let mut component = Vec::new();
+                loop {
+                    let member = stack.pop().expect("stack must contain the component root");
+                    on_stack.remove(&member);
+                    let is_root = member == finished;
+                    component.push(member);
+                    if is_root {
+                        break;
+                    }
+                }
+                component.sort();
+                components.push(component);
+            }
+
+            if let Some(parent_frame) = frames.last_mut() {
+                let parent = parent_frame.0.clone();
+                let child_low = lowlinks[&finished];
+                let parent_low = lowlinks
+                    .get_mut(&parent)
+                    .expect("parent must have a lowlink");
+                if child_low < *parent_low {
+                    *parent_low = child_low;
+                }
+            }
+        }
     }
+
+    components.retain(|component| {
+        component.len() > 1
+            || adjacency
+                .get(&component[0])
+                .is_some_and(|targets| targets.contains(&component[0]))
+    });
+    components.sort();
+    components
 }
 
-/// Rotaciona um ciclo para começar no menor módulo, tornando-o estável.
-fn canonical_cycle(cycle: &[String]) -> Vec<String> {
-    let Some(start_index) = cycle
+/// Arestas internas de um componente, ordenadas e sem duplicatas.
+fn component_edges<'a>(analysis: &'a Analysis, component: &[String]) -> Vec<&'a DependencyEdge> {
+    let members: BTreeSet<&str> = component.iter().map(String::as_str).collect();
+    let mut edges: Vec<&DependencyEdge> = analysis
+        .edges
         .iter()
-        .enumerate()
-        .min_by(|(_, left), (_, right)| left.cmp(right))
-        .map(|(index, _)| index)
-    else {
-        return Vec::new();
-    };
+        .filter(|edge| {
+            edge.kind != DependencyKind::Unresolved
+                && members.contains(edge.from.as_str())
+                && members.contains(edge.to.as_str())
+        })
+        .collect();
 
-    cycle[start_index..]
-        .iter()
-        .chain(cycle[..start_index].iter())
-        .cloned()
-        .collect()
+    edges.sort_by(|left, right| {
+        (
+            left.from.as_str(),
+            left.to.as_str(),
+            left.path.as_str(),
+            left.line.unwrap_or(0),
+            left.detail.as_str(),
+        )
+            .cmp(&(
+                right.from.as_str(),
+                right.to.as_str(),
+                right.path.as_str(),
+                right.line.unwrap_or(0),
+                right.detail.as_str(),
+            ))
+    });
+    edges.dedup_by(|left, right| {
+        left.from == right.from
+            && left.to == right.to
+            && left.path == right.path
+            && left.line == right.line
+    });
+    edges
 }
 
-/// Lista as arestas de um ciclo com arquivo e linha de cada uma.
-fn cycle_evidence(analysis: &Analysis, cycle: &[String]) -> String {
-    let mut parts = Vec::new();
-    for (from, to) in cycle.iter().zip(cycle.iter().cycle().skip(1)) {
-        let edge = analysis.edges.iter().find(|edge| {
-            edge.kind != DependencyKind::Unresolved && edge.from == *from && edge.to == *to
-        });
-        let origin = match edge {
-            Some(edge) => match edge.line {
+/// Evidência limitada das arestas internas de um componente.
+fn cycle_evidence(edges: &[&DependencyEdge]) -> String {
+    let shown = edges.len().min(CYCLE_EVIDENCE_LIMIT);
+    let mut parts: Vec<String> = edges[..shown]
+        .iter()
+        .map(|edge| {
+            let origin = match edge.line {
                 Some(line) => format!("{}:{}", edge.path, line),
                 None => edge.path.clone(),
-            },
-            None => "origem indisponível".to_owned(),
-        };
-        parts.push(format!("{from} -> {to} ({origin})"));
+            };
+            format!("{} -> {} ({})", edge.from, edge.to, origin)
+        })
+        .collect();
+
+    if edges.len() > shown {
+        parts.push(format!(
+            "+{} aresta(s) adicionais no componente",
+            edges.len() - shown
+        ));
     }
     parts.join("; ")
 }
@@ -542,6 +644,20 @@ mod tests {
     use crate::contract::{Module, load_contract};
     use crate::discovery::discover;
     use std::path::PathBuf;
+    use std::time::{Duration, Instant};
+
+    /// Aresta sintética usada nos testes de grafo.
+    fn synthetic_edge(from: &str, to: &str) -> DependencyEdge {
+        DependencyEdge {
+            from: from.to_owned(),
+            to: to.to_owned(),
+            kind: DependencyKind::Allowed,
+            path: format!("src/{from}-{to}.rs"),
+            line: Some(1),
+            evidence: None,
+            detail: "aresta sintética de teste".to_owned(),
+        }
+    }
 
     /// Raiz da fixture de dependências, relativa ao crate.
     fn project_root() -> PathBuf {
@@ -585,7 +701,7 @@ mod tests {
         assert_eq!(count(RULE_DEPENDENCY_NOT_ALLOWED), 2);
         assert_eq!(count(RULE_DEPENDENCY_UNRESOLVED), 1);
         assert_eq!(count(RULE_FILE_UNMAPPED), 1);
-        assert_eq!(count(RULE_DEPENDENCY_CYCLE), 3);
+        assert_eq!(count(RULE_DEPENDENCY_CYCLE), 1);
         assert_eq!(count(RULE_MODULE_WITHOUT_FILES), 0);
         assert_eq!(count(RULE_MODULE_CONCENTRATION), 0);
         assert_eq!(count(RULE_CODE_DUPLICATED), 0);
@@ -667,7 +783,7 @@ mod tests {
     }
 
     #[test]
-    fn cycle_evidence_traces_every_edge() {
+    fn cycle_evidence_traces_component_edges() {
         let (contract, inventory, analysis) = fixture_data();
         let findings = evaluate(&contract, &inventory, &analysis);
         let finding = findings
@@ -680,32 +796,106 @@ mod tests {
             .expect("cycle must have evidence");
 
         assert_eq!(finding.severity, Severity::Warning);
-        assert!(finding.id.starts_with("dep.cycle:application->domain"));
-        assert!(evidence.contains("application -> domain"));
-        assert!(evidence.contains("domain -> application"));
-        assert!(evidence.contains("crates/application/src/lib.rs:1"));
+        assert_eq!(finding.id, "dep.cycle:application->domain->infrastructure");
+        assert_eq!(finding.path, "crates/application/src/lib.rs");
+        assert_eq!(finding.line_start, Some(1));
+        for expected in [
+            "application -> domain",
+            "application -> infrastructure",
+            "domain -> application",
+            "infrastructure -> application",
+            "infrastructure -> domain",
+            "crates/application/src/lib.rs:1",
+        ] {
+            assert!(evidence.contains(expected), "evidence faltou: {expected}");
+        }
     }
 
     #[test]
-    fn every_simple_cycle_is_detected_once() {
+    fn one_finding_per_cyclic_component() {
         let (contract, inventory, analysis) = fixture_data();
         let findings = evaluate(&contract, &inventory, &analysis);
-        let cycles: BTreeSet<&str> = findings
+        let cycles: Vec<&str> = findings
             .iter()
             .filter(|finding| finding.rule_id == RULE_DEPENDENCY_CYCLE)
             .map(|finding| finding.id.as_str())
             .collect();
 
-        assert_eq!(
-            cycles,
-            [
-                "dep.cycle:application->domain",
-                "dep.cycle:application->infrastructure",
-                "dep.cycle:application->infrastructure->domain",
-            ]
-            .into_iter()
-            .collect()
+        assert_eq!(cycles, ["dep.cycle:application->domain->infrastructure"]);
+    }
+
+    #[test]
+    fn acyclic_and_disconnected_graphs_have_no_cycle_findings() {
+        let (contract, inventory, mut analysis) = fixture_data();
+        analysis.edges.clear();
+        for (from, to) in [("a", "b"), ("c", "d"), ("e", "f")] {
+            analysis.edges.push(synthetic_edge(from, to));
+        }
+
+        let findings = evaluate(&contract, &inventory, &analysis);
+        assert!(
+            findings
+                .iter()
+                .all(|finding| finding.rule_id != RULE_DEPENDENCY_CYCLE)
         );
+    }
+
+    #[test]
+    fn disconnected_cyclic_components_are_reported_separately() {
+        let (contract, inventory, mut analysis) = fixture_data();
+        analysis.edges.clear();
+        for (from, to) in [
+            ("b", "a"),
+            ("a", "b"),
+            ("d", "c"),
+            ("c", "d"),
+            ("g", "g"),
+            ("e", "f"),
+        ] {
+            analysis.edges.push(synthetic_edge(from, to));
+        }
+
+        let findings = evaluate(&contract, &inventory, &analysis);
+        let cycles: Vec<&str> = findings
+            .iter()
+            .filter(|finding| finding.rule_id == RULE_DEPENDENCY_CYCLE)
+            .map(|finding| finding.id.as_str())
+            .collect();
+
+        assert_eq!(cycles, ["dep.cycle:a->b", "dep.cycle:c->d", "dep.cycle:g"]);
+    }
+
+    #[test]
+    fn dense_graph_cycle_detection_is_bounded() {
+        let (contract, inventory, mut analysis) = fixture_data();
+        analysis.edges.clear();
+        let nodes: Vec<String> = (0..80).map(|index| format!("m{index:03}")).collect();
+        for from in &nodes {
+            for to in &nodes {
+                analysis.edges.push(synthetic_edge(from, to));
+            }
+        }
+
+        let started = Instant::now();
+        let findings = evaluate(&contract, &inventory, &analysis);
+        let elapsed = started.elapsed();
+        let cycle = findings
+            .iter()
+            .find(|finding| finding.rule_id == RULE_DEPENDENCY_CYCLE)
+            .expect("dense graph must have one cyclic component");
+        let cycles: Vec<&str> = findings
+            .iter()
+            .filter(|finding| finding.rule_id == RULE_DEPENDENCY_CYCLE)
+            .map(|finding| finding.id.as_str())
+            .collect();
+
+        assert_eq!(cycles, [format!("dep.cycle:{}", nodes.join("->")).as_str()]);
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "SCC demorou {elapsed:?} em grafo denso"
+        );
+        let evidence = cycle.evidence.as_deref().expect("cycle must have evidence");
+        assert!(evidence.contains("+6392 aresta(s) adicionais no componente"));
     }
 
     #[test]
@@ -729,36 +919,22 @@ mod tests {
     }
 
     #[test]
-    fn canonical_cycle_starts_at_the_smallest_module() {
-        assert_eq!(
-            canonical_cycle(&["z".to_owned(), "a".to_owned(), "m".to_owned()]),
-            ["a", "m", "z"]
-        );
-    }
-
-    #[test]
     fn self_loop_is_reported_without_panicking() {
         let (contract, inventory, mut analysis) = fixture_data();
-        analysis.edges.push(DependencyEdge {
-            from: "domain".to_owned(),
-            to: "domain".to_owned(),
-            kind: DependencyKind::Forbidden,
-            path: "crates/domain/src/lib.rs".to_owned(),
-            line: Some(4),
-            evidence: Some("use domain::Entity;".to_owned()),
-            detail: "autoimportação".to_owned(),
-        });
+        analysis.edges.clear();
+        analysis.edges.push(synthetic_edge("isolado", "isolado"));
 
         let findings = evaluate(&contract, &inventory, &analysis);
         let finding = findings
             .iter()
-            .find(|finding| finding.id == "dep.cycle:domain")
+            .find(|finding| finding.id == "dep.cycle:isolado")
             .expect("self loop must become a cycle finding");
 
-        assert_eq!(finding.path, "crates/domain/src/lib.rs");
+        assert_eq!(finding.path, "src/isolado-isolado.rs");
+        assert_eq!(finding.line_start, Some(1));
         assert_eq!(
             finding.evidence.as_deref(),
-            Some("domain -> domain (crates/domain/src/lib.rs:4)")
+            Some("isolado -> isolado (src/isolado-isolado.rs:1)")
         );
     }
 }

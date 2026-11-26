@@ -2,7 +2,7 @@
 
 Ferramenta local para comparar a arquitetura pretendida de um projeto com a arquitetura realmente implementada. Cada achado deve apontar a regra violada, os arquivos envolvidos e, quando possível, as linhas relevantes. O contrato arquitetural (`auditor.toml`) pertence ao usuário e é versionado junto ao projeto auditado.
 
-**Status atual:** primeira fase do projeto concluída; Etapa 2 de confiabilidade iniciada pelos itens 2.1 (cobertura honesta dos arquivos), 2.2 (mapeamentos ambíguos sem conclusão definitiva), 2.3 (dependências externas Rust e caminhos relativos), 2.4 (globs em `workspace.members`) e 2.5 (scanner TypeScript/JavaScript). Etapas 0–10 fechadas, com TypeScript/JavaScript na Etapa 10 e os trabalhos posteriores `R1`–`R6` (revisão do plano, Python, concentração, duplicação, código sem referências e Git diff). A CLI cria um modelo de `auditor.toml`, inventaria arquivos, imprime o grafo de dependências, aplica regras determinísticas, gera relatórios em texto, JSON ou Markdown e registra execuções em SQLite. A aplicação desktop e a extensão VS Code reutilizam o mesmo núcleo. Regras personalizadas, sugestões com IA e auditoria agendada ficam fora desta fase por decisão registrada.
+**Status atual:** primeira fase do projeto concluída; Etapa 2 de confiabilidade iniciada pelos itens 2.1 (cobertura honesta dos arquivos), 2.2 (mapeamentos ambíguos sem conclusão definitiva), 2.3 (dependências externas Rust e caminhos relativos), 2.4 (globs em `workspace.members`), 2.5 (scanner TypeScript/JavaScript) e 2.6 (detecção de ciclos por componentes fortemente conectados). Etapas 0–10 fechadas, com TypeScript/JavaScript na Etapa 10 e os trabalhos posteriores `R1`–`R6` (revisão do plano, Python, concentração, duplicação, código sem referências e Git diff). A CLI cria um modelo de `auditor.toml`, inventaria arquivos, imprime o grafo de dependências, aplica regras determinísticas, gera relatórios em texto, JSON ou Markdown e registra execuções em SQLite. A aplicação desktop e a extensão VS Code reutilizam o mesmo núcleo. Regras personalizadas, sugestões com IA e auditoria agendada ficam fora desta fase por decisão registrada.
 
 ## Documentação
 
@@ -106,7 +106,7 @@ O comando `audit <raiz>` reutiliza o mesmo pipeline do núcleo e aplica estas re
 | `dep.unresolved` | `needs_review` | Destino não pôde ser associado de forma inequívoca a um módulo do contrato. |
 | `file.unmapped` | `needs_review` | Arquivo de código incluído não corresponde a nenhum módulo. |
 | `file.ambiguous_module` | `needs_review` | Arquivo corresponde a mais de um módulo do contrato. |
-| `dep.cycle` | `warning` | Grafo contém ciclo simples entre módulos, incluindo autoimportação. |
+| `dep.cycle` | `warning` | Grafo contém um componente fortemente conectado entre módulos, incluindo autoimportação; há um achado por componente. |
 | `module.no_files` | `warning` | Módulo declarado sem arquivo de código correspondente. |
 | `module.concentration` | `needs_review` | Módulo com 3 ou mais origens ou destinos distintos no grafo resolvido. |
 | `code.duplicated` | `needs_review` | Linha idêntica com 40 ou mais caracteres em dois ou mais arquivos. |
@@ -164,7 +164,7 @@ Três projetos fictícios em `tests/fixtures/projects/` exercitam o pipeline com
 | Fixture | Cenário | Resultado observado |
 |---|---|---|
 | `clean` | arquitetura correta, dependências permitidas e workspace Cargo coerente | 0 achados, 0 limitações, saída `0` |
-| `dependencies` | dependência proibida, ciclos, destino não resolvido e arquivo não mapeado | 7 achados (2 erros, 3 avisos, 2 revisões), 1 limitação, saída `1` |
+| `dependencies` | dependência proibida, componente cíclico, destino não resolvido e arquivo não mapeado | 5 achados (2 erros, 1 aviso, 2 revisões), 1 limitação, saída `1` |
 | `partial` | estrutura parcialmente desconhecida: dependência externa, path sobreposto, arquivo fora de módulo, módulo sem arquivos e arquivo com erro de parse | 4 achados (1 aviso, 3 revisões), 1 limitação, saída `1` |
 
 ```sh
@@ -176,7 +176,7 @@ cargo run -p auditor-cli -- history record tests/fixtures/projects/partial --dat
 cargo run -p auditor-cli -- history compare 1 2 --database /caminho/temporario.db
 ```
 
-A avaliação não encontrou falso positivo no projeto correto. Os três ciclos de `dependencies` são caminhos fechados reais no grafo, embora se sobreponham; essa enumeração já era uma limitação conhecida da Etapa 5. Em `partial`, o que não pôde ser decidido foi classificado como revisão necessária, e o arquivo com sintaxe inválida aparece somente em `Limitações`, sem virar erro inventado. Mensagens e evidências foram revisadas: todo achado traz `id`, quando há linha ela é apontada, e a evidência é a linha de código observada ou uma explicação explícita para achados de arquivo. O formato do contrato v1 foi suficiente para os três cenários; nenhum campo novo foi introduzido.
+A avaliação não encontrou falso positivo no projeto correto. Os três módulos de `dependencies` formam um único componente fortemente conectado: antes havia três avisos sobre caminhos fechados sobrepostos; agora há um aviso `dep.cycle:application->domain->infrastructure` com evidência ordenada das cinco arestas internas. A busca usa Tarjan iterativo em `O(V + E)`, e a evidência é limitada a 8 arestas com contagem do restante para grafos densos. Em `partial`, o que não pôde ser decidido foi classificado como revisão necessária, e o arquivo com sintaxe inválida aparece somente em `Limitações`, sem virar erro inventado. Mensagens e evidências foram revisadas: todo achado traz `id`, quando há linha ela é apontada, e a evidência é a linha de código observada ou uma explicação explícita para achados de arquivo. O formato do contrato v1 foi suficiente para os três cenários; nenhum campo novo foi introduzido.
 
 ## Aplicação desktop (Etapa 8)
 

@@ -282,9 +282,19 @@ Ordem e critérios vêm de `RELATORIO_ETAPA_1_E_PLANO_ETAPA_2.md`, seção 8. Um
 - [x] Verificação: `cargo fmt --check`, `cargo test --workspace` (126 testes: 113 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `npm test` da extensão (4 testes) e `npm run build` da desktop passaram
 - [x] Smoke: `typescript` manteve 8 arestas, 4 achados e 1 limitação; `typescript_scanner` produziu 1 aresta multilinha, 0 achados e 3 limitações
 
+### Item 2.6 — Substituir enumeração de ciclos por componentes fortemente conectados — Concluído em 25/11/2026
+
+- [x] Substituir `find_cycles()` por Tarjan iterativo, com pilha explícita e complexidade `O(V + E)`
+- [x] Emitir um achado `dep.cycle` por componente cíclico, com `id` determinístico formado pelos membros ordenados
+- [x] Ordenar as arestas internas do componente e limitar a evidência a 8 itens, com contagem das demais
+- [x] Testar grafo grande e denso, desconectado, acíclico e sem ciclo, além da fixture `dependencies`
+- [x] Preservar `rule_id`, `auditor.toml` v1, JSON consumido pela extensão e SQLite; apenas o `id` dos componentes com 3+ módulos mudou
+- [x] Revisar paradigma, nomes descritivos, documentação de código e testes dos helpers
+- [x] Verificação: `cargo fmt --check`, `cargo test --workspace` (128 testes: 115 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `npm test` da extensão (4 testes) e `npm run build` da desktop passaram
+- [x] Smoke: `dependencies` passou de 7 para 5 achados (2 erros, 1 aviso, 2 revisões), com um `dep.cycle:application->domain->infrastructure` e 5 arestas na evidência; `rust_dependencies` manteve 5 achados e 1 aviso de ciclo; teste denso com 80 módulos e 6400 arestas terminou em menos de 5 s com 1 achado
+
 ### Itens seguintes — Não iniciados
 
-- [ ] 2.6 — Substituir enumeração de ciclos por componentes fortemente conectados
 - [ ] 2.7 — Expor os motivos de exclusão e a cobertura no relatório
 - [ ] 2.8 — Reforçar a verificação automatizada
 

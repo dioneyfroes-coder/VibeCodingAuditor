@@ -337,7 +337,7 @@ Ordem e critérios vêm de `RELATORIO_ETAPA_1_E_PLANO_ETAPA_2.md`, seção 8. Um
 
 A cobertura estruturada e o resumo de motivos ainda não são gravados em colunas próprias no histórico; a limitação textual continua sendo persistida. Isso foi reavaliado no item 2.7 e mantido fora do escopo. A validação do desktop foi feita por tipos, build e testes dos helpers; a janela Tauri não foi inspecionada visualmente. Também não há fixture com symlink, permissão negada ou FIFO reais: esses motivos são exercitados com inventário em memória no construtor real do relatório. O empacotamento de instaladores continua desativado e o workflow não executa `tauri build`. A primeira execução do workflow no GitHub Actions foi observada em 26/11/2026: `CI Windows` #1, commit `7a07286`, `status: completed`, `conclusion: success`, com todas as etapas do job `verify` aprovadas em `windows-latest`.
 
-## Etapa 3 — Validação arquitetural (em andamento; 3.0 e 3.1 concluídas)
+## Etapa 3 — Validação arquitetural (em andamento; 3.0, 3.1 e 3.2 concluídas)
 
 ### Etapa 3.0 — Baseline reproduzível — Concluída em 26/11/2026
 
@@ -376,6 +376,15 @@ A cobertura estruturada e o resumo de motivos ainda não são gravados em coluna
 - [x] Relatório completo em [docs/validation/etapa-3/self-audit.md](validation/etapa-3/self-audit.md), com inventário, cobertura, arestas, achados, exclusões e avaliação humana dos módulos.
 - [x] Verificação final: `cargo fmt --check`, `cargo check --workspace`, `cargo test --workspace` (147 testes: 134 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `git diff --check`, `npm ci`/`npm test`/`npm run build` da desktop e `npm ci`/`npm test` da extensão retornaram `0`; o `git diff --check` emitiu apenas o aviso LF/CRLF esperado do OneDrive.
 
-### Etapas 3.2 a 3.7 — Pendentes
+### Etapa 3.2 — Identidade dos achados e confiabilidade do histórico — Concluída em 26/11/2026
 
-- [ ] Executar as etapas seguintes do plano na ordem definida, começando pela identidade dos achados e confiabilidade do histórico.
+- [x] Auditoria do código atual confirmou que `dep.not_allowed` e `dep.unresolved` incluíam `edge.line` no `Finding.id`; os demais identificadores já eram estáveis. O `id` era usado no `UNIQUE (run_id, finding_id)` do SQLite, em `history compare` e na mensagem dos diagnósticos da extensão, mas não era reimplementado fora do núcleo.
+- [x] Criada a fixture `tests/fixtures/projects/finding_identity` com três variantes: dependência proibida na linha 1, mesmas linhas deslocadas por comentários e evidência alterada com o mesmo vínculo arquitetural. Testes de regressão escritos antes da correção: deslocamento e duplicidade falharam com `exit code 101`; evidência alterada já passava e ficou protegida contra regressão.
+- [x] Política aplicada: `id` identifica a ocorrência lógica por `rule_id`, origem, destino e arquivo; linha e evidência continuam no achado como localização e justificativa. Repetições do mesmo vínculo no mesmo arquivo são deduplicadas de forma determinística, mantendo a primeira ocorrência ordenada por `id`, caminho, linha e evidência. Nenhum `rule_id`, campo de `auditor.toml` v1, coluna SQLite ou campo do JSON de `findings` mudou.
+- [x] IDs legados com sufixo de linha são normalizados apenas dentro de `history compare`, sem reescrever banco nem alterar o que `history show` devolve. Banco já migrado continua legível; schema futuro continua rejeitado com mensagem clara, conforme teste existente.
+- [x] Smoke na CLI: `history record` nas variantes `before` e `after` gravou o mesmo `id` `dep.not_allowed:application:infrastructure:src/lib.rs`, com local atualizado de `src/lib.rs:1` para `src/lib.rs:4`; `history compare 1 2` retornou 0 novos, 0 resolvidos e 2 persistentes.
+- [x] Verificação final: `cargo fmt --check`, `cargo check --workspace`, `cargo test --workspace` (154 testes: 141 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` e `git diff --check` retornaram `0`; o último emitiu apenas o aviso LF/CRLF esperado do OneDrive.
+
+### Etapas 3.3 a 3.7 — Pendentes
+
+- [ ] Executar as etapas seguintes do plano na ordem definida, começando pela validação em um segundo projeto real indicado pelo usuário.

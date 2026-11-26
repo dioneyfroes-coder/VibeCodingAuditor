@@ -174,9 +174,7 @@ mod tests {
         assert!(rule_ids.contains(&"module.unreferenced"));
 
         let has_id = |id: &str| report.findings.iter().any(|finding| finding.id == id);
-        assert!(has_id(
-            "dep.unresolved:external_sdk:src/application/lib.rs:4"
-        ));
+        assert!(has_id("dep.unresolved:external_sdk:src/application/lib.rs"));
         assert!(has_id("file.ambiguous_module:src/domain/overlap.rs"));
         assert!(has_id("file.unmapped:src/stray.rs"));
         assert!(has_id("module.no_files:infrastructure"));

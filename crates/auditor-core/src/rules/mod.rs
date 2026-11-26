@@ -47,7 +47,15 @@ pub fn evaluate(contract: &Contract, inventory: &Inventory, analysis: &Analysis)
     findings.extend(duplicated_line_findings(analysis));
     findings.extend(unreferenced_module_findings(contract, inventory, analysis));
     findings.extend(module_without_files_findings(contract, inventory));
-    findings.sort_by(|left, right| left.id.cmp(&right.id));
+    findings.sort_by(|left, right| {
+        left.id
+            .cmp(&right.id)
+            .then_with(|| left.path.cmp(&right.path))
+            .then_with(|| left.line_start.cmp(&right.line_start))
+            .then_with(|| left.evidence.cmp(&right.evidence))
+    });
+    let mut seen_ids = BTreeSet::new();
+    findings.retain(|finding| seen_ids.insert(finding.id.clone()));
     findings
 }
 
@@ -74,12 +82,8 @@ fn forbidden_dependency_findings(contract: &Contract, analysis: &Analysis) -> Ve
 
             Finding {
                 id: format!(
-                    "{}:{}:{}:{}:{}",
-                    RULE_DEPENDENCY_NOT_ALLOWED,
-                    edge.from,
-                    edge.to,
-                    edge.path,
-                    edge.line.unwrap_or(0)
+                    "{}:{}:{}:{}",
+                    RULE_DEPENDENCY_NOT_ALLOWED, edge.from, edge.to, edge.path
                 ),
                 rule_id: RULE_DEPENDENCY_NOT_ALLOWED.to_owned(),
                 severity: Severity::Error,
@@ -110,13 +114,7 @@ fn unresolved_dependency_findings(analysis: &Analysis) -> Vec<Finding> {
         .iter()
         .filter(|edge| edge.kind == DependencyKind::Unresolved)
         .map(|edge| Finding {
-            id: format!(
-                "{}:{}:{}:{}",
-                RULE_DEPENDENCY_UNRESOLVED,
-                edge.to,
-                edge.path,
-                edge.line.unwrap_or(0)
-            ),
+            id: format!("{}:{}:{}", RULE_DEPENDENCY_UNRESOLVED, edge.to, edge.path),
             rule_id: RULE_DEPENDENCY_UNRESOLVED.to_owned(),
             severity: Severity::NeedsReview,
             title: format!("Dependência não mapeada: {}", edge.to),
@@ -657,9 +655,10 @@ fn cycle_evidence(edges: &[&DependencyEdge]) -> String {
 mod tests {
     use super::*;
     use crate::analysis::{DependencyEdge, ReviewItem, analyze};
+    use crate::audit::audit_project;
     use crate::contract::{Module, load_contract};
     use crate::discovery::discover;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
 
     /// Aresta sintética usada nos testes de grafo.
@@ -688,6 +687,52 @@ mod tests {
         let inventory = discover(&root, &contract).expect("discovery must succeed");
         let analysis = analyze(&root, &contract, &inventory).expect("analysis must succeed");
         (contract, inventory, analysis)
+    }
+
+    /// Aresta proibida sintética com linha e evidência configuráveis.
+    fn forbidden_edge(line: usize, evidence: &str) -> DependencyEdge {
+        DependencyEdge {
+            from: "application".to_owned(),
+            to: "infrastructure".to_owned(),
+            kind: DependencyKind::Forbidden,
+            path: "src/lib.rs".to_owned(),
+            line: Some(line),
+            evidence: Some(evidence.to_owned()),
+            detail: "destino declarado no contrato, mas ausente de allowed_dependencies".to_owned(),
+        }
+    }
+
+    /// Análise com apenas as arestas informadas, para isolar a regra testada.
+    fn analysis_with_edges(edges: Vec<DependencyEdge>) -> Analysis {
+        let (_, _, mut analysis) = fixture_data();
+        analysis.edges = edges;
+        analysis.reviews.clear();
+        analysis.duplicate_lines.clear();
+        analysis
+    }
+
+    /// Raiz de uma variante da fixture de identidade de achados.
+    fn identity_root(variant: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/projects/finding_identity")
+            .join(variant)
+    }
+
+    /// Único achado proibido de um relatório real da fixture de identidade.
+    fn only_forbidden(root: &Path) -> Finding {
+        let report = audit_project(root).expect("identity fixture audit must succeed");
+        let mut findings = report
+            .findings
+            .into_iter()
+            .filter(|finding| finding.rule_id == RULE_DEPENDENCY_NOT_ALLOWED);
+        let finding = findings
+            .next()
+            .expect("identity fixture must have a forbidden finding");
+        assert!(
+            findings.next().is_none(),
+            "identity fixture must have exactly one forbidden finding"
+        );
+        finding
     }
 
     #[test]
@@ -739,6 +784,104 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         assert_eq!(ids.iter().collect::<BTreeSet<_>>().len(), ids.len());
+    }
+
+    #[test]
+    fn inserted_comment_lines_do_not_create_a_new_finding() {
+        let before = only_forbidden(&identity_root("before"));
+        let after = only_forbidden(&identity_root("after"));
+
+        assert_eq!(before.id, after.id);
+        assert_eq!(before.path, after.path);
+        assert_eq!(before.line_start, Some(1));
+        assert_eq!(after.line_start, Some(4));
+    }
+
+    #[test]
+    fn changed_evidence_without_new_binding_keeps_identity() {
+        let before = only_forbidden(&identity_root("before"));
+        let changed = only_forbidden(&identity_root("evidence_changed"));
+
+        assert_eq!(before.id, changed.id);
+        assert_eq!(before.line_start, changed.line_start);
+        assert_ne!(before.evidence, changed.evidence);
+    }
+
+    #[test]
+    fn identity_fixture_audit_is_deterministic() {
+        let root = identity_root("before");
+        let first = audit_project(&root).expect("first audit must succeed");
+        let second = audit_project(&root).expect("second audit must succeed");
+        let first_ids: Vec<&str> = first
+            .findings
+            .iter()
+            .map(|finding| finding.id.as_str())
+            .collect();
+        let second_ids: Vec<&str> = second
+            .findings
+            .iter()
+            .map(|finding| finding.id.as_str())
+            .collect();
+
+        assert_eq!(first_ids, second_ids);
+    }
+
+    #[test]
+    fn repeated_forbidden_binding_is_reported_once() {
+        let (contract, inventory, _) = fixture_data();
+        let analysis = analysis_with_edges(vec![
+            forbidden_edge(1, "use infrastructure::Client;"),
+            forbidden_edge(9, "use infrastructure::Client as Other;"),
+        ]);
+        let findings = evaluate(&contract, &inventory, &analysis);
+        let forbidden: Vec<&Finding> = findings
+            .iter()
+            .filter(|finding| finding.rule_id == RULE_DEPENDENCY_NOT_ALLOWED)
+            .collect();
+
+        assert_eq!(forbidden.len(), 1);
+        assert_eq!(forbidden[0].line_start, Some(1));
+        assert_eq!(
+            forbidden[0].evidence.as_deref(),
+            Some("use infrastructure::Client;")
+        );
+    }
+
+    #[test]
+    fn identity_changes_with_source_target_or_rule() {
+        let (contract, _, _) = fixture_data();
+        let base = forbidden_dependency_findings(
+            &contract,
+            &analysis_with_edges(vec![forbidden_edge(1, "use infrastructure::Client;")]),
+        )
+        .remove(0)
+        .id;
+
+        let mut changed_source = forbidden_edge(1, "use infrastructure::Client;");
+        changed_source.from = "domain".to_owned();
+        let changed_source_id =
+            forbidden_dependency_findings(&contract, &analysis_with_edges(vec![changed_source]))
+                .remove(0)
+                .id;
+
+        let mut changed_target = forbidden_edge(1, "use infrastructure::Client;");
+        changed_target.to = "domain".to_owned();
+        let changed_target_id =
+            forbidden_dependency_findings(&contract, &analysis_with_edges(vec![changed_target]))
+                .remove(0)
+                .id;
+
+        let mut unresolved = forbidden_edge(1, "use infrastructure::Client;");
+        unresolved.kind = DependencyKind::Unresolved;
+        unresolved.to = "external_sdk".to_owned();
+        let changed_rule_id =
+            unresolved_dependency_findings(&analysis_with_edges(vec![unresolved]))
+                .remove(0)
+                .id;
+
+        assert_ne!(base, changed_source_id);
+        assert_ne!(base, changed_target_id);
+        assert_ne!(base, changed_rule_id);
     }
 
     #[test]

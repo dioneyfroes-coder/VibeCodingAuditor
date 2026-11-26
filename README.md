@@ -161,6 +161,8 @@ O banco padrão é `data/auditor.db`, relativo ao diretório de execução da CL
 
 São gravados data/hora em UTC, raiz canonicalizada do projeto, nome e versão do schema do contrato, resumo da execução, achados e limitações. **O conteúdo integral dos arquivos auditados nunca é gravado**: de cada achado ficam apenas metadados e a linha de evidência já apresentada no relatório. A comparação usa o `id` estável de cada achado, não texto livre, e preserva a ordem dos achados gravados.
 
+A identidade segue o vínculo arquitetural, não a posição no arquivo: `dep.not_allowed` usa `rule_id`, origem, destino e arquivo, e `dep.unresolved` usa `rule_id`, destino e arquivo. Inserir linhas ou mudar a evidência não cria outro achado; linha e evidência continuam sendo a localização e a justificativa atuais do mesmo achado. Duas importações com o mesmo vínculo no mesmo arquivo são apresentadas uma única vez, na primeira ocorrência determinística. Alterar origem, destino ou regra produz identidade diferente. Bancos antigos não são reescritos: `history compare` normaliza apenas IDs legados de dependência que terminavam em `:<linha>`; `history show` continua devolvendo o ID gravado. A identidade não é preservada após renomear um arquivo, porque o caminho participa do vínculo.
+
 Política de migração: a tabela `schema_migrations` registra a versão do schema do histórico. A versão atual é `1`; aberturas em bancos já migrados não alteram dados, e um banco com versão superior à suportada é rejeitado com mensagem explícita, sem downgrade ou exclusão automática. Não há comando de limpeza nesta etapa: o banco cresce com novas execuções e deve ser gerenciado pelo usuário.
 
 ## Validação do núcleo (Etapa 7)
@@ -181,6 +183,8 @@ cargo run -p auditor-cli -- history record tests/fixtures/projects/clean --datab
 cargo run -p auditor-cli -- history record tests/fixtures/projects/partial --database /caminho/temporario.db
 cargo run -p auditor-cli -- history compare 1 2 --database /caminho/temporario.db
 ```
+
+A fixture `tests/fixtures/projects/finding_identity` cobre a Etapa 3.2 com três variantes: `before` tem a dependência proibida na linha 1, `after` insere comentários e move a mesma dependência para a linha 4, e `evidence_changed` mantém o vínculo com evidência diferente. As três produzem o mesmo `id` `dep.not_allowed:application:infrastructure:src/lib.rs`; `history compare 1 2` entre `before` e `after` retorna 0 novos, 0 resolvidos e 2 persistentes.
 
 A avaliação não encontrou falso positivo no projeto correto. Os três módulos de `dependencies` formam um único componente fortemente conectado: antes havia três avisos sobre caminhos fechados sobrepostos; agora há um aviso `dep.cycle:application->domain->infrastructure` com evidência ordenada das cinco arestas internas. A busca usa Tarjan iterativo em `O(V + E)`, e a evidência é limitada a 8 arestas com contagem do restante para grafos densos. Testes de desempenho cobrem um grafo denso de 80 módulos e 6400 arestas (limite de 5 s) e 600 componentes desconectados (limite de 10 s), ambos com achados e evidências limitados. Em `partial`, o que não pôde ser decidido foi classificado como revisão necessária, e o arquivo com sintaxe inválida aparece somente em `Limitações`, sem virar erro inventado. Mensagens e evidências foram revisadas: todo achado traz `id`, quando há linha ela é apontada, e a evidência é a linha de código observada ou uma explicação explícita para achados de arquivo. O formato do contrato v1 foi suficiente para os três cenários; nenhum campo novo foi introduzido.
 

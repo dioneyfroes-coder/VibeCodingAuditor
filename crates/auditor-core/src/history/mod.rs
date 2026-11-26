@@ -18,6 +18,7 @@ use serde::Serialize;
 
 use crate::findings::{Finding, Severity};
 use crate::report::{AuditReport, ReportSummary, finding_location};
+use crate::rules::{RULE_DEPENDENCY_NOT_ALLOWED, RULE_DEPENDENCY_UNRESOLVED};
 
 /// Caminho padrão do banco, relativo ao diretório de trabalho da CLI.
 pub const DEFAULT_DATABASE: &str = "data/auditor.db";
@@ -155,6 +156,30 @@ impl Error for HistoryError {
             Self::UnsupportedSchema { .. } | Self::NotFound { .. } => None,
         }
     }
+}
+
+/// Normaliza IDs legados de dependência que incluíam a linha no identificador.
+fn identity_key(id: &str) -> &str {
+    let Some((rule, _)) = id.split_once(':') else {
+        return id;
+    };
+    let legacy_parts = if rule == RULE_DEPENDENCY_NOT_ALLOWED {
+        5
+    } else if rule == RULE_DEPENDENCY_UNRESOLVED {
+        4
+    } else {
+        return id;
+    };
+    if id.split(':').count() != legacy_parts {
+        return id;
+    }
+    let Some((prefix, suffix)) = id.rsplit_once(':') else {
+        return id;
+    };
+    if suffix.is_empty() || !suffix.bytes().all(|byte| byte.is_ascii_digit()) {
+        return id;
+    }
+    prefix
 }
 
 /// Resumo de uma execução gravada no histórico.
@@ -315,12 +340,12 @@ impl History {
         let before_ids: BTreeSet<&str> = before
             .findings
             .iter()
-            .map(|finding| finding.id.as_str())
+            .map(|finding| identity_key(&finding.id))
             .collect();
         let after_ids: BTreeSet<&str> = after
             .findings
             .iter()
-            .map(|finding| finding.id.as_str())
+            .map(|finding| identity_key(&finding.id))
             .collect();
 
         Ok(ExecutionComparison {
@@ -329,19 +354,19 @@ impl History {
             new_findings: after
                 .findings
                 .iter()
-                .filter(|finding| !before_ids.contains(finding.id.as_str()))
+                .filter(|finding| !before_ids.contains(identity_key(&finding.id)))
                 .cloned()
                 .collect(),
             resolved_findings: before
                 .findings
                 .iter()
-                .filter(|finding| !after_ids.contains(finding.id.as_str()))
+                .filter(|finding| !after_ids.contains(identity_key(&finding.id)))
                 .cloned()
                 .collect(),
             persistent_findings: after
                 .findings
                 .iter()
-                .filter(|finding| before_ids.contains(finding.id.as_str()))
+                .filter(|finding| before_ids.contains(identity_key(&finding.id)))
                 .cloned()
                 .collect(),
         })
@@ -833,6 +858,19 @@ mod tests {
         audit_project(&project_root()).expect("fixture audit must succeed")
     }
 
+    /// Relatório com IDs no formato legado das regras de dependência.
+    fn legacy_report(current: &AuditReport) -> AuditReport {
+        let mut legacy = current.clone();
+        for finding in &mut legacy.findings {
+            if finding.rule_id == RULE_DEPENDENCY_NOT_ALLOWED
+                || finding.rule_id == RULE_DEPENDENCY_UNRESOLVED
+            {
+                finding.id = format!("{}:{}", finding.id, finding.line_start.unwrap_or(0));
+            }
+        }
+        legacy
+    }
+
     #[test]
     fn windows_extended_prefix_is_hidden_for_display() {
         assert_eq!(
@@ -950,6 +988,63 @@ mod tests {
         assert_eq!(comparison.new_findings, [new_finding]);
         assert_eq!(comparison.resolved_findings, [resolved]);
         assert_eq!(comparison.persistent_findings.len(), 4);
+    }
+
+    #[test]
+    fn identity_key_ignores_only_legacy_dependency_line_suffix() {
+        assert_eq!(
+            identity_key("dep.not_allowed:app:infra:src/lib.rs:4"),
+            "dep.not_allowed:app:infra:src/lib.rs"
+        );
+        assert_eq!(
+            identity_key("dep.unresolved:externo:src/lib.rs:9"),
+            "dep.unresolved:externo:src/lib.rs"
+        );
+        assert_eq!(
+            identity_key("dep.not_allowed:app:infra:src/lib.rs"),
+            "dep.not_allowed:app:infra:src/lib.rs"
+        );
+        assert_eq!(
+            identity_key("dep.not_allowed:app:infra:src/123"),
+            "dep.not_allowed:app:infra:src/123"
+        );
+        assert_eq!(
+            identity_key("dep.not_allowed:app:infra:src/123:4"),
+            "dep.not_allowed:app:infra:src/123"
+        );
+        assert_eq!(
+            identity_key("code.duplicated:abc:src/lib.rs"),
+            "code.duplicated:abc:src/lib.rs"
+        );
+    }
+
+    #[test]
+    fn legacy_line_suffixed_ids_compare_as_persistent() {
+        let database = TestDatabase::new();
+        let current = fixture_report();
+        let legacy = legacy_report(&current);
+        let mut history = database.open();
+        let before_id = history
+            .record(&project_root(), &legacy)
+            .expect("legacy record must succeed");
+        drop(history);
+
+        let mut history = database.open();
+        let stored = history
+            .get(before_id)
+            .expect("legacy run must remain readable after reopening");
+        assert_eq!(stored.findings[0].id, legacy.findings[0].id);
+
+        let after_id = history
+            .record_at(&project_root(), &current, 1_000_000_000)
+            .expect("current record must succeed");
+        let comparison = history
+            .compare(before_id, after_id)
+            .expect("comparison must succeed");
+
+        assert!(comparison.new_findings.is_empty());
+        assert!(comparison.resolved_findings.is_empty());
+        assert_eq!(comparison.persistent_findings.len(), current.findings.len());
     }
 
     #[test]

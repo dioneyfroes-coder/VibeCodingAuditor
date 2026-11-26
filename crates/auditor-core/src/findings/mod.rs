@@ -44,7 +44,7 @@ impl Severity {
 /// Achado estruturado com regra, evidência e sugestão rastreáveis.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Finding {
-    /// Identificador estável desta ocorrência específica.
+    /// Identificador estável da ocorrência lógica; não inclui linha nem evidência volátil.
     pub id: String,
     /// Identificador estável da regra que produziu o achado.
     pub rule_id: String,

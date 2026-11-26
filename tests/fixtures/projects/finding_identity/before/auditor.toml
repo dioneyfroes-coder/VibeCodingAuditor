@@ -1,0 +1,29 @@
+schema_version = 1
+
+[project]
+name = "projeto-identidade"
+
+[scan]
+include = ["**/*.rs"]
+exclude = []
+
+[architecture]
+style = "modular_monolith"
+
+[[architecture.modules]]
+name = "domain"
+path = "domain/src/**"
+responsibility = "Regras centrais"
+allowed_dependencies = []
+
+[[architecture.modules]]
+name = "infrastructure"
+path = "infra/src/**"
+responsibility = "Adaptadores externos"
+allowed_dependencies = []
+
+[[architecture.modules]]
+name = "application"
+path = "src/**"
+responsibility = "Casos de uso e coordenação"
+allowed_dependencies = ["domain"]

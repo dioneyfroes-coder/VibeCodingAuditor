@@ -574,4 +574,33 @@ mod tests {
             .expect("undeclared symbol must remain a review");
         assert_eq!(unknown_symbol.severity, Severity::NeedsReview);
     }
+
+    /// Glob suportado produz relatório determinístico com os membros reais.
+    #[test]
+    fn workspace_glob_fixture_report_is_deterministic() {
+        let root = project_fixture("workspace_glob");
+        let report = audit_project(&root).expect("audit must succeed");
+
+        assert_eq!(report, audit_project(&root).expect("audit must succeed"));
+        assert_eq!(report.project, "projeto-workspace-glob");
+        assert_eq!(report.summary.packages, 3);
+        assert_eq!(report.summary.errors, 0);
+        assert!(report.limitations.is_empty());
+    }
+
+    /// Glob não suportado vira limitação acionável, não erro de leitura.
+    #[test]
+    fn unsupported_workspace_glob_is_reported_as_limitation() {
+        let root = project_fixture("workspace_glob_unsupported");
+        let report = audit_project(&root).expect("audit must succeed");
+
+        assert_eq!(report, audit_project(&root).expect("audit must succeed"));
+        assert_eq!(report.summary.packages, 0);
+        assert!(report.limitations.iter().any(|limitation| {
+            limitation.contains("crates/**") && limitation.contains("não é suportado")
+        }));
+        assert!(report.limitations.iter().any(|limitation| {
+            limitation.contains("empty/*") && limitation.contains("Cargo.toml")
+        }));
+    }
 }

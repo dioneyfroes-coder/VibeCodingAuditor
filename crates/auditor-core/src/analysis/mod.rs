@@ -316,7 +316,8 @@ pub fn analyze(
     contract: &Contract,
     inventory: &Inventory,
 ) -> Result<Analysis, AnalysisError> {
-    let workspace = read_cargo_workspace(root)?;
+    let mut workspace_limitations = Vec::new();
+    let workspace = read_cargo_workspace(root, &mut workspace_limitations)?;
     let workspace_names: HashSet<String> = workspace
         .as_ref()
         .map(|info| {
@@ -353,7 +354,7 @@ pub fn analyze(
         edges: Vec::new(),
         reviews: Vec::new(),
         module_declarations: Vec::new(),
-        limitations: Vec::new(),
+        limitations: workspace_limitations,
         duplicate_lines: Vec::new(),
         coverage: AnalysisCoverage::default(),
     };
@@ -1035,8 +1036,116 @@ fn collect_manifest_dependencies(
     }
 }
 
+/// Indica se um caminho de membro do workspace contém curinga.
+fn is_member_pattern(value: &str) -> bool {
+    value.contains('*') || value.contains('?') || value.contains('[')
+}
+
+/// Expande um membro do workspace, registrando limitação para globs não suportados.
+fn expand_member_pattern(
+    root: &Path,
+    pattern: &str,
+    excludes: &[String],
+    limitations: &mut Vec<String>,
+) -> Vec<String> {
+    let trimmed = pattern.trim_matches('/');
+    let components: Vec<&str> = trimmed.split('/').filter(|part| !part.is_empty()).collect();
+    let Some(last) = components.last() else {
+        return Vec::new();
+    };
+
+    let unsupported = || {
+        format!(
+            "padrão de membro do workspace '{pattern}' não é suportado; use caminhos explícitos ou '*' no último componente"
+        )
+    };
+    let no_matches =
+        |reason: &str| format!("padrão de membro do workspace '{pattern}' não encontrou {reason}");
+
+    if !last.contains('*') {
+        if is_member_pattern(trimmed) {
+            limitations.push(unsupported());
+            return Vec::new();
+        }
+        return vec![trimmed.to_owned()];
+    }
+
+    let prefix_parts = &components[..components.len() - 1];
+    let star_count = last.chars().filter(|character| *character == '*').count();
+    let other_wildcards = last
+        .chars()
+        .any(|character| matches!(character, '?' | '[' | ']'));
+    if prefix_parts.is_empty()
+        || prefix_parts
+            .iter()
+            .any(|part| is_member_pattern(part) || matches!(*part, "." | ".."))
+        || star_count != 1
+        || other_wildcards
+    {
+        limitations.push(unsupported());
+        return Vec::new();
+    }
+
+    let prefix = prefix_parts.join("/");
+    let prefix_path = root.join(&prefix);
+    let Ok(prefix_metadata) = fs::symlink_metadata(&prefix_path) else {
+        limitations.push(no_matches("nenhum diretório com Cargo.toml"));
+        return Vec::new();
+    };
+    if !prefix_metadata.is_dir() || prefix_metadata.file_type().is_symlink() {
+        limitations.push(no_matches("nenhum diretório com Cargo.toml"));
+        return Vec::new();
+    }
+    let entries = match fs::read_dir(&prefix_path) {
+        Ok(entries) => entries,
+        Err(_) => {
+            limitations.push(no_matches("nenhum diretório com Cargo.toml"));
+            return Vec::new();
+        }
+    };
+
+    let mut members = Vec::new();
+    for entry in entries.flatten() {
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if kind.is_symlink() || !kind.is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !matches_pattern(last, &name) {
+            continue;
+        }
+        let member = format!("{prefix}/{name}");
+        if root.join(&member).join("Cargo.toml").is_file() {
+            members.push(member);
+        }
+    }
+    members.sort();
+    members.dedup();
+
+    let before_excludes = members.len();
+    members.retain(|member| {
+        !excludes
+            .iter()
+            .any(|exclude| matches_pattern(exclude, member))
+    });
+    if members.is_empty() {
+        let reason = if before_excludes == 0 {
+            "nenhum diretório com Cargo.toml"
+        } else {
+            "membros após aplicar workspace.exclude"
+        };
+        limitations.push(no_matches(reason));
+    }
+    members
+}
+
 /// Lê o manifesto raiz e os manifestos dos membros declarados no workspace.
-fn read_cargo_workspace(root: &Path) -> Result<Option<WorkspaceInfo>, AnalysisError> {
+fn read_cargo_workspace(
+    root: &Path,
+    limitations: &mut Vec<String>,
+) -> Result<Option<WorkspaceInfo>, AnalysisError> {
     let manifest = root.join("Cargo.toml");
     if !manifest.exists() {
         return Ok(None);
@@ -1076,12 +1185,32 @@ fn read_cargo_workspace(root: &Path) -> Result<Option<WorkspaceInfo>, AnalysisEr
         });
     }
 
+    let excludes: Vec<String> = workspace
+        .and_then(|workspace| workspace.get("exclude"))
+        .and_then(toml::Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(toml::Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+
     if let Some(members) = workspace
         .and_then(|workspace| workspace.get("members"))
         .and_then(toml::Value::as_array)
     {
-        for member in members.iter().filter_map(toml::Value::as_str) {
-            let member_manifest = root.join(member).join("Cargo.toml");
+        let mut expanded: Vec<String> = members
+            .iter()
+            .filter_map(toml::Value::as_str)
+            .flat_map(|member| expand_member_pattern(root, member, &excludes, limitations))
+            .collect();
+        expanded.sort();
+        expanded.dedup();
+
+        for member in expanded {
+            let member_manifest = root.join(&member).join("Cargo.toml");
             let member_text =
                 fs::read_to_string(&member_manifest).map_err(|source| AnalysisError::Io {
                     path: member_manifest.clone(),
@@ -1623,5 +1752,82 @@ mod tests {
                 .iter()
                 .all(|review| !review.detail.contains("Entity"))
         );
+    }
+
+    /// Raiz de uma fixture de workspace com glob, relativa ao crate.
+    fn workspace_glob_root(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/projects")
+            .join(name)
+    }
+
+    /// Análise completa de uma fixture de workspace com glob.
+    fn analyze_workspace_glob(name: &str) -> Analysis {
+        let root = workspace_glob_root(name);
+        let contract =
+            load_contract(&root.join("auditor.toml")).expect("fixture contract must load");
+        let inventory = discover(&root, &contract).expect("discovery must succeed");
+        analyze(&root, &contract, &inventory).expect("analysis must succeed")
+    }
+
+    #[test]
+    fn workspace_glob_expands_members_and_respects_exclude() {
+        let analysis = analyze_workspace_glob("workspace_glob");
+        let workspace = analysis.workspace.expect("workspace must be read");
+
+        let names: Vec<&str> = workspace
+            .packages
+            .iter()
+            .map(|package| package.name.as_str())
+            .collect();
+        let manifests: Vec<&str> = workspace
+            .packages
+            .iter()
+            .map(|package| package.manifest_path.as_str())
+            .collect();
+        assert_eq!(names, ["alpha", "beta", "legacy"]);
+        assert_eq!(
+            manifests,
+            [
+                "crates/alpha/Cargo.toml",
+                "crates/beta/Cargo.toml",
+                "legacy/Cargo.toml"
+            ]
+        );
+        assert_eq!(workspace.declared_dependencies, ["serde"]);
+        assert!(analysis.limitations.is_empty());
+    }
+
+    #[test]
+    fn workspace_glob_analysis_is_deterministic() {
+        let first = analyze_workspace_glob("workspace_glob");
+        let second = analyze_workspace_glob("workspace_glob");
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn unsupported_workspace_member_patterns_become_limitations() {
+        let analysis = analyze_workspace_glob("workspace_glob_unsupported");
+
+        assert!(
+            analysis
+                .workspace
+                .expect("workspace must be read")
+                .packages
+                .is_empty()
+        );
+        assert!(analysis.limitations.iter().any(|limitation| {
+            limitation.contains("crates/**") && limitation.contains("não é suportado")
+        }));
+        assert!(analysis.limitations.iter().any(|limitation| {
+            limitation.contains("empty/*") && limitation.contains("Cargo.toml")
+        }));
+        assert!(analysis.limitations.iter().any(|limitation| {
+            limitation.contains("crates/?lpha") && limitation.contains("não é suportado")
+        }));
+        assert!(analysis.limitations.iter().any(|limitation| {
+            limitation.contains("../outside/*") && limitation.contains("não é suportado")
+        }));
     }
 }

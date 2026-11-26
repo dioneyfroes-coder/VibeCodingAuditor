@@ -256,9 +256,21 @@ Ordem e critérios vêm de `RELATORIO_ETAPA_1_E_PLANO_ETAPA_2.md`, seção 8. Um
 - [x] Verificação: `cargo fmt --check`, `cargo test --workspace` (115 testes: 102 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `npm test` da extensão (4 testes) e `npm run build` da desktop passaram
 - [x] Smoke na fixture `rust_dependencies`: `analyze` exibiu 8 crates declaradas e nenhuma aresta para elas; `audit` produziu 1 erro, 1 aviso de ciclo e 3 revisões, com `dep.not_allowed` via `super::` e revisão para o destino relativo sem evidência
 
+### Item 2.4 — Tratar `workspace.members` com glob — Concluído em 25/11/2026
+
+- [x] Expandir `*` no último componente de `workspace.members` usando apenas diretórios reais com `Cargo.toml`, sem executar o Cargo
+- [x] Aplicar `workspace.exclude` também aos membros expandidos, com ordem estável e deduplicação
+- [x] Manter membros literais com o comportamento anterior
+- [x] Converter `**`, `?`, classes, `*` em componente intermediário, `.`/`..` e prefixo ausente ou simbólico em limitação acionável, não erro de leitura
+- [x] Reutilizar `matches_pattern` da descoberta e não adicionar dependência externa nem campo ao contrato
+- [x] Criar as fixtures `workspace_glob` e `workspace_glob_unsupported` e testes de regressão antes da implementação
+- [x] Preservar `auditor.toml` v1, os `rule_id` existentes, o JSON consumido pela extensão e as contagens das fixtures anteriores
+- [x] Revisar paradigma, nomes descritivos, documentação de código e testes dos helpers
+- [x] Verificação: `cargo fmt --check`, `cargo test --workspace` (120 testes: 107 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `npm test` da extensão (4 testes) e `npm run build` da desktop passaram
+- [x] Smoke nas fixtures: `workspace_glob` descobriu `alpha`, `beta` e `legacy` com 1 aresta permitida, 0 achados e 0 limitações; `workspace_glob_unsupported` produziu 4 limitações e 0 pacotes sem erro de leitura
+
 ### Itens seguintes — Não iniciados
 
-- [ ] 2.4 — Tratar `workspace.members` com glob
 - [ ] 2.5 — Corrigir a análise TypeScript/JavaScript
 - [ ] 2.6 — Substituir enumeração de ciclos por componentes fortemente conectados
 - [ ] 2.7 — Expor os motivos de exclusão e a cobertura no relatório

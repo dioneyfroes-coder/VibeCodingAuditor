@@ -1,0 +1,23 @@
+schema_version = 1
+
+[project]
+name = "projeto-workspace-glob"
+
+[scan]
+include = ["**/*.rs"]
+exclude = []
+
+[architecture]
+style = "modular_monolith"
+
+[[architecture.modules]]
+name = "domain"
+path = "crates/alpha/**/*.rs"
+responsibility = "Módulo usado para validar a descoberta do workspace"
+allowed_dependencies = []
+
+[[architecture.modules]]
+name = "application"
+path = "crates/beta/**/*.rs"
+responsibility = "Módulo de origem da aresta determinística da fixture"
+allowed_dependencies = ["domain"]

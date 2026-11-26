@@ -1,7 +1,7 @@
 # Validação em segundo projeto — Etapa 3.3
 
 Data: 26/11/2026
-Branch: `etapa-3/validacao-arquitetural`  
+Branch: `etapa-3/validacao-arquitetural`
 Alvo: `validation/targets/fake-order-service`
 
 ## Ressalva de escopo

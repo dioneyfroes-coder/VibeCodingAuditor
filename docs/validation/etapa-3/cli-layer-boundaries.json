@@ -1,0 +1,85 @@
+{
+  "project": "limites-camadas",
+  "schema_version": 2,
+  "summary": {
+    "files_included": 5,
+    "files_skipped": 1,
+    "modules": 4,
+    "packages": 0,
+    "edges": 5,
+    "findings": 3,
+    "errors": 2,
+    "warnings": 0,
+    "infos": 0,
+    "needs_review": 1
+  },
+  "skip_summary": {
+    "total": 1,
+    "intentional": 1,
+    "coverage_gaps": 0,
+    "reasons": [
+      {
+        "reason": "not_included",
+        "label": "fora do include",
+        "count": 1,
+        "examples": [
+          "auditor.toml"
+        ],
+        "additional": 0,
+        "reduces_coverage": false
+      }
+    ]
+  },
+  "findings": [
+    {
+      "id": "dep.layer_not_allowed:application:infrastructure:src/application/rules.rs",
+      "rule_id": "dep.layer_not_allowed",
+      "severity": "error",
+      "title": "Dependência entre camadas não permitida: application -> infrastructure",
+      "message": "A camada application usa infrastructure, mas a camada não permite essa dependência.",
+      "path": "src/application/rules.rs",
+      "line_start": 2,
+      "line_end": 2,
+      "evidence": "use infrastructure::Database;",
+      "expected": "domain",
+      "suggestion": "Revise o uso de infrastructure ou atualize allowed_dependencies da camada application no contrato.",
+      "confidence": null
+    },
+    {
+      "id": "dep.not_allowed:web:infrastructure:src/web/lib.rs",
+      "rule_id": "dep.not_allowed",
+      "severity": "error",
+      "title": "Dependência não permitida: web -> infrastructure",
+      "message": "O módulo web usa infrastructure, mas o contrato não permite essa dependência.",
+      "path": "src/web/lib.rs",
+      "line_start": 3,
+      "line_end": 3,
+      "evidence": "use infrastructure::Database;",
+      "expected": "application",
+      "suggestion": "Revise o uso de infrastructure ou atualize allowed_dependencies de web no contrato.",
+      "confidence": null
+    },
+    {
+      "id": "dep.unresolved:externo:src/web/lib.rs",
+      "rule_id": "dep.unresolved",
+      "severity": "needs_review",
+      "title": "Dependência não mapeada: externo",
+      "message": "O módulo web usa externo, cujo destino não pôde ser associado com segurança a um único módulo: destino não corresponde a nenhum módulo do contrato.",
+      "path": "src/web/lib.rs",
+      "line_start": 2,
+      "line_end": 2,
+      "evidence": "use externo::Client;",
+      "expected": "Todo destino deve ser associado de forma inequívoca a um módulo declarado no contrato.",
+      "suggestion": "Decida qual módulo deve reivindicar externo ou ajuste os paths do contrato e o uso encontrado.",
+      "confidence": null
+    }
+  ],
+  "limitations": [],
+  "coverage": {
+    "code_files_included": 5,
+    "code_files_analyzed": 5,
+    "code_files_not_analyzed": 0,
+    "unsupported_code_extensions": [],
+    "partial": false
+  }
+}

@@ -337,7 +337,7 @@ Ordem e critérios vêm de `RELATORIO_ETAPA_1_E_PLANO_ETAPA_2.md`, seção 8. Um
 
 A cobertura estruturada e o resumo de motivos ainda não são gravados em colunas próprias no histórico; a limitação textual continua sendo persistida. Isso foi reavaliado no item 2.7 e mantido fora do escopo. A validação do desktop foi feita por tipos, build e testes dos helpers; a janela Tauri não foi inspecionada visualmente. Também não há fixture com symlink, permissão negada ou FIFO reais: esses motivos são exercitados com inventário em memória no construtor real do relatório. O empacotamento de instaladores continua desativado e o workflow não executa `tauri build`. A primeira execução do workflow no GitHub Actions foi observada em 26/11/2026: `CI Windows` #1, commit `7a07286`, `status: completed`, `conclusion: success`, com todas as etapas do job `verify` aprovadas em `windows-latest`.
 
-## Etapa 3 — Validação arquitetural (em andamento; 3.0 a 3.5 concluídas; 3.6 e 3.7 pendentes)
+## Etapa 3 — Validação arquitetural (em andamento; 3.0 a 3.5 concluídas; 3.6 pendente; 3.7 com paridade automatizada concluída)
 
 ### Etapa 3.0 — Baseline reproduzível — Concluída em 26/11/2026
 
@@ -415,7 +415,15 @@ A cobertura estruturada e o resumo de motivos ainda não são gravados em coluna
 - [x] Contratos v2 equivalentes ao contrato raiz e ao alvo sintético da Etapa 3.3 produziram o mesmo resumo, achados, limitações e cobertura; os arquivos originais não foram alterados. Relatório em [docs/validation/etapa-3/contract-v2.md](validation/etapa-3/contract-v2.md).
 - [x] Verificação completa: `cargo fmt --all`, `cargo fmt --check`, `cargo check --workspace`, `cargo test --workspace` (185 testes: 171 no núcleo, 10 na CLI e 4 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `npm test` da extensão (5 testes) e `git diff --check` retornaram `0`; o último emitiu apenas o aviso LF/CRLF esperado do OneDrive.
 
-### Etapas 3.6 e 3.7 — Pendentes
+### Etapa 3.6 — Cobertura estruturada no histórico — Pendente
 
-- [ ] Etapa 3.6: cobertura estruturada no histórico somente se a necessidade for confirmada; nenhuma migração SQLite foi feita nesta entrega.
-- [ ] Etapa 3.7: validação manual ponta a ponta do desktop e da extensão VS Code, com checklist e comparação de resultados.
+- [ ] Somente se a necessidade de comparar cobertura entre execuções for confirmada; nenhuma migração SQLite foi feita nesta entrega.
+
+### Etapa 3.7 — Validação ponta a ponta do desktop e da extensão — Em andamento; paridade automatizada concluída em 26/11/2026
+
+- [x] Relatório real da CLI sobre `layer_boundaries` capturado em UTF-8 via `--output` (`cargo run -q -p auditor-cli -- audit tests/fixtures/projects/layer_boundaries --format json --output ...`); saída `1` esperada por haver achados.
+- [x] Apresentação do desktop extraída para `apps/desktop/src/reportView.ts` e coberta por 5 testes Node que leem o mesmo JSON: resumo, filtros, opções, cobertura e lista de arestas (7 testes no total com os 2 de exclusões). Fase vermelha registrada com `ERR_MODULE_NOT_FOUND`.
+- [x] Extensão ganhou 2 testes de paridade sobre o mesmo JSON (7 testes no total), comparando quantidade, IDs, caminhos, linhas e severidades dos diagnósticos com o relatório da CLI.
+- [x] Build do desktop passou após corrigir `TS7053` no retorno de `availableSeverities`; comandos Tauri já eram comparados com o núcleo nos testes Rust, incluindo a regra de camada. `npm run package` da extensão gerou `.vsix` com 7 arquivos, sem fontes de teste.
+- [x] Relatório com a comparação e os checklists em [docs/validation/etapa-3/desktop-vscode.md](validation/etapa-3/desktop-vscode.md).
+- [ ] Checklists visuais da janela Tauri e da host do VS Code preenchidos pelo usuário. Sem automação gráfica nesta sessão, a Etapa 3.7 não foi declarada concluída.

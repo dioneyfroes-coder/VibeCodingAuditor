@@ -56,7 +56,7 @@
   },
   "scripts": {
     "compile": "tsc -p ./",
-    "test": "npm run compile && node --test out/model.test.js",
+    "test": "npm run compile && node --test out/model.test.js tests/parity.test.mjs",
     "package": "npm run compile && vsce package --no-dependencies --out vibe-coding-auditor-0.1.0.vsix"
   },
   "devDependencies": {

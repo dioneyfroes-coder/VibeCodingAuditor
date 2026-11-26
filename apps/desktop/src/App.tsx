@@ -3,6 +3,14 @@ import { invoke } from '@tauri-apps/api/core';
 import { useState } from 'react';
 
 import {
+  availableRules,
+  availableSeverities,
+  coverageLabel,
+  edgeListLabel,
+  filterFindings,
+  reportSummaryPhrase,
+} from './reportView';
+import {
   skipSummaryHeadline,
   skipSummaryLine,
   type SkipReasonSummary,
@@ -94,12 +102,6 @@ const SEVERITY_LABELS: Record<Severity, string> = {
   needs_review: 'revisão necessária',
 };
 
-const EDGE_LABELS: Record<DependencyKind, string> = {
-  allowed: 'permitida',
-  forbidden: 'proibida',
-  unresolved: 'não resolvida',
-};
-
 const EDGE_COLORS: Record<DependencyKind, string> = {
   allowed: '#2f855a',
   forbidden: '#c53030',
@@ -116,18 +118,6 @@ function nodePosition(index: number, total: number): { x: number; y: number } {
     x: GRAPH_WIDTH / 2 + 150 * Math.cos(angle),
     y: GRAPH_HEIGHT / 2 + 105 * Math.sin(angle),
   };
-}
-
-/// Apresenta a cobertura recebida do núcleo, sem interpretar regras na interface.
-function coverageLabel(coverage: AnalysisCoverage): string {
-  const base = `Cobertura do código: ${coverage.code_files_analyzed} de ${coverage.code_files_included} arquivo(s) analisados`;
-  const partial = coverage.partial ? ' (parcial)' : '';
-  const unsupported = coverage.unsupported_code_extensions.length
-    ? `; sem analisador: ${coverage.unsupported_code_extensions
-        .map((item) => `.${item.extension} (${item.files})`)
-        .join(', ')}`
-    : '';
-  return `${base}${partial}${unsupported}`;
 }
 
 export default function App() {
@@ -197,18 +187,10 @@ export default function App() {
     });
 
   // Filtros apenas apresentam o relatório recebido; nenhuma regra é avaliada aqui.
-  const severities = report
-    ? Array.from(new Set(report.findings.map((finding) => finding.severity))).sort()
-    : [];
-  const rules = report
-    ? Array.from(new Set(report.findings.map((finding) => finding.rule_id))).sort()
-    : [];
+  const severities = report ? availableSeverities(report.findings) : [];
+  const rules = report ? availableRules(report.findings) : [];
   const visibleFindings = report
-    ? report.findings.filter(
-        (finding) =>
-          (severityFilter === 'all' || finding.severity === severityFilter) &&
-          (ruleFilter === 'all' || finding.rule_id === ruleFilter),
-      )
+    ? filterFindings(report.findings, severityFilter, ruleFilter)
     : [];
 
   const graphNodes = analysis
@@ -289,11 +271,7 @@ export default function App() {
               </ul>
             </div>
           )}
-          <p className="summary">
-            {report.summary.findings} achados ({report.summary.errors} erros,{' '}
-            {report.summary.warnings} avisos, {report.summary.infos} informações,{' '}
-            {report.summary.needs_review} revisões)
-          </p>
+          <p className="summary">{reportSummaryPhrase(report.summary)}</p>
 
           <div className="filters">
             <label>
@@ -425,11 +403,7 @@ export default function App() {
                 })}
               </svg>
               <p className="detail">
-                Arestas:{' '}
-                {analysis.edges
-                  .map((edge) => `${edge.from} → ${edge.to} (${EDGE_LABELS[edge.kind]})`)
-                  .join('; ') || 'nenhuma'}
-                . Nós tracejados não pertencem ao contrato.
+                Arestas: {edgeListLabel(analysis.edges)}. Nós tracejados não pertencem ao contrato.
               </p>
               {analysis.limitations.length > 0 && (
                 <ul>

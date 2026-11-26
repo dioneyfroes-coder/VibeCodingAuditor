@@ -321,8 +321,6 @@ struct VisitContext<'a> {
     path: &'a str,
     contract_module: Option<&'a Module>,
     lines: &'a [&'a str],
-    use_cursor: &'a mut usize,
-    mod_cursor: &'a mut usize,
     contract: &'a Contract,
     contract_names: &'a HashSet<String>,
     workspace_names: &'a HashSet<String>,
@@ -439,15 +437,11 @@ pub fn analyze(
             };
 
             let lines: Vec<&str> = text.lines().collect();
-            let mut use_cursor = 0;
-            let mut mod_cursor = 0;
 
             let mut context = VisitContext {
                 path: &file.path,
                 contract_module: module,
                 lines: &lines,
-                use_cursor: &mut use_cursor,
-                mod_cursor: &mut mod_cursor,
                 contract,
                 contract_names: &contract_names,
                 workspace_names: &workspace_names,
@@ -540,45 +534,31 @@ fn visit_items(items: &[Item], context: &mut VisitContext<'_>) {
     for item in items {
         match item {
             Item::Use(item_use) => {
-                let (line, evidence) = match locate_source_line(
+                let (line, evidence) = source_location(
                     context.lines,
-                    context.use_cursor,
-                    is_use_declaration_line,
-                ) {
-                    Some(located) => (Some(located.0), Some(located.1)),
-                    None => {
-                        context.analysis.limitations.push(format!(
-                            "não foi possível localizar a linha de um `use` em {}",
-                            context.path
-                        ));
-                        (None, None)
-                    }
-                };
+                    item_use.use_token.span,
+                    context.path,
+                    "use",
+                    &mut *context.analysis,
+                );
 
                 let mut use_path_leaves = Vec::new();
                 collect_use_path_leaves(&item_use.tree, &mut Vec::new(), &mut use_path_leaves);
 
                 if context.contract_module.is_some() {
                     for leaf in use_path_leaves {
-                        classify_use(context, &leaf, line, evidence.as_deref());
+                        classify_use(context, &leaf, line, evidence);
                     }
                 }
             }
             Item::Mod(item_mod) => {
-                let (line, _) = match locate_source_line(
+                let (line, _) = source_location(
                     context.lines,
-                    context.mod_cursor,
-                    is_mod_declaration_line,
-                ) {
-                    Some(located) => (Some(located.0), located.1),
-                    None => {
-                        context.analysis.limitations.push(format!(
-                            "não foi possível localizar a linha de um `mod` em {}",
-                            context.path
-                        ));
-                        (None, String::new())
-                    }
-                };
+                    item_mod.mod_token.span,
+                    context.path,
+                    "mod",
+                    &mut *context.analysis,
+                );
 
                 context
                     .analysis
@@ -1121,39 +1101,34 @@ fn collect_use_path_leaves(
     }
 }
 
-/// Localiza a próxima linha que satisfaz o predicate e devolve número e texto.
-fn locate_source_line(
-    lines: &[&str],
-    cursor: &mut usize,
-    predicate: fn(&str) -> bool,
-) -> Option<(usize, String)> {
-    for (index, line) in lines.iter().enumerate().skip(*cursor) {
-        if predicate(line) {
-            *cursor = index + 1;
-            return Some((index + 1, line.trim().to_owned()));
+/// Obtém linha e texto reais de uma declaração a partir do span do item.
+///
+/// O cursor textual anterior também contava `use` dentro de funções, que o
+/// visitante de itens não percorre, e deslocava a evidência das declarações
+/// seguintes. O span do `syn` associa cada item à sua própria linha.
+fn source_location<'a>(
+    lines: &'a [&'a str],
+    span: proc_macro2::Span,
+    path: &str,
+    declaration: &str,
+    analysis: &mut Analysis,
+) -> (Option<usize>, Option<&'a str>) {
+    let line = span.start().line;
+    if line == 0 {
+        analysis.limitations.push(format!(
+            "não foi possível localizar a linha de um `{declaration}` em {path}"
+        ));
+        return (None, None);
+    }
+    match lines.get(line - 1) {
+        Some(text) => (Some(line), Some(text.trim())),
+        None => {
+            analysis.limitations.push(format!(
+                "não foi possível localizar a linha de um `{declaration}` em {path}"
+            ));
+            (None, None)
         }
     }
-    None
-}
-
-/// Reconhece linhas de declaração `use`, inclusive indentadas e `pub use`.
-fn is_use_declaration_line(line: &str) -> bool {
-    let rest = line.trim_start();
-    let rest = rest
-        .strip_prefix("pub")
-        .map(str::trim_start)
-        .unwrap_or(rest);
-    rest.starts_with("use ") || rest.starts_with("use{")
-}
-
-/// Reconhece linhas de declaração `mod`, inclusive indentadas e `pub mod`.
-fn is_mod_declaration_line(line: &str) -> bool {
-    let rest = line.trim_start();
-    let rest = rest
-        .strip_prefix("pub")
-        .map(str::trim_start)
-        .unwrap_or(rest);
-    rest.starts_with("mod ") || rest.starts_with("mod{")
 }
 
 /// Converte um nome de pacote Cargo no identificador usado por `use`.
@@ -1826,33 +1801,23 @@ mod tests {
         assert!(!is_unsupported_code_extension(None));
     }
 
+    /// Um `use` dentro de função não deve deslocar a linha de um `use` de módulo.
     #[test]
-    fn declaration_lines_are_recognized() {
-        assert!(is_use_declaration_line("use domain::Entity;"));
-        assert!(is_use_declaration_line("    pub use domain::Entity;"));
-        assert!(!is_use_declaration_line("// use domain::Entity;"));
-        assert!(is_mod_declaration_line("mod internal;"));
-        assert!(is_mod_declaration_line("    pub mod nested {"));
-        assert!(!is_mod_declaration_line("let valor = 1;"));
-    }
+    fn module_level_use_keeps_its_own_source_line() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/projects/source_lines");
+        let contract =
+            load_contract(&root.join("auditor.toml")).expect("fixture contract must load");
+        let inventory = discover(&root, &contract).expect("discovery must succeed");
+        let analysis = analyze(&root, &contract, &inventory).expect("analysis must succeed");
 
-    #[test]
-    fn locate_source_line_advances_the_cursor() {
-        let lines = ["use a::A;", "let valor = 1;", "    use b::B;"];
-        let mut cursor = 0;
-
-        assert_eq!(
-            locate_source_line(&lines, &mut cursor, is_use_declaration_line),
-            Some((1, "use a::A;".to_owned()))
-        );
-        assert_eq!(
-            locate_source_line(&lines, &mut cursor, is_use_declaration_line),
-            Some((3, "use b::B;".to_owned()))
-        );
-        assert_eq!(
-            locate_source_line(&lines, &mut cursor, is_use_declaration_line),
-            None
-        );
+        let edge = analysis
+            .edges
+            .iter()
+            .find(|edge| edge.from == "app" && edge.to == "domain")
+            .expect("module-level edge must exist");
+        assert_eq!(edge.line, Some(6));
+        assert_eq!(edge.evidence.as_deref(), Some("use domain::Other;"));
     }
 
     #[test]

@@ -2,6 +2,12 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { useState } from 'react';
 
+import {
+  skipSummaryHeadline,
+  skipSummaryLine,
+  type SkipReasonSummary,
+} from './skipSummary';
+
 type Severity = 'error' | 'warning' | 'info' | 'needs_review';
 type DependencyKind = 'allowed' | 'forbidden' | 'unresolved';
 
@@ -31,30 +37,6 @@ interface AnalysisCoverage {
   code_files_not_analyzed: number;
   unsupported_code_extensions: UnsupportedCodeExtension[];
   partial: boolean;
-}
-
-type SkipReason =
-  | 'default_ignored'
-  | 'excluded'
-  | 'not_included'
-  | 'symlink'
-  | 'inaccessible'
-  | 'unsupported';
-
-interface SkipReasonCount {
-  reason: SkipReason;
-  label: string;
-  count: number;
-  examples: string[];
-  additional: number;
-  reduces_coverage: boolean;
-}
-
-interface SkipReasonSummary {
-  total: number;
-  intentional: number;
-  coverage_gaps: number;
-  reasons: SkipReasonCount[];
 }
 
 interface ReportSummary {
@@ -146,13 +128,6 @@ function coverageLabel(coverage: AnalysisCoverage): string {
         .join(', ')}`
     : '';
   return `${base}${partial}${unsupported}`;
-}
-
-/// Apresenta o cabeçalho do resumo de exclusões sem inventar regras de cobertura.
-function skipSummaryHeadline(summary: SkipReasonSummary): string {
-  const intentional = summary.intentional === 1 ? 'intencional' : 'intencionais';
-  const gaps = summary.coverage_gaps === 1 ? 'reduz cobertura' : 'reduzem cobertura';
-  return `Motivos dos não incluídos: ${summary.total} (${summary.intentional} ${intentional}, ${summary.coverage_gaps} ${gaps})`;
 }
 
 export default function App() {
@@ -309,13 +284,7 @@ export default function App() {
               <p className="detail">{skipSummaryHeadline(report.skip_summary)}</p>
               <ul className="detail">
                 {report.skip_summary.reasons.map((reason) => (
-                  <li key={reason.reason}>
-                    {reason.label}: {reason.count} (
-                    {reason.reduces_coverage ? 'reduz cobertura' : 'intencional'})
-                    {reason.examples.length > 0 &&
-                      `; exemplos: ${reason.examples.join(', ')}`}
-                    {reason.additional > 0 && `; +${reason.additional} outros`}
-                  </li>
+                  <li key={reason.reason}>{skipSummaryLine(reason)}</li>
                 ))}
               </ul>
             </div>

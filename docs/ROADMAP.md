@@ -301,7 +301,8 @@ Ordem e critérios vêm de `RELATORIO_ETAPA_1_E_PLANO_ETAPA_2.md`, seção 8. Um
 - [x] Limitar a saída a 3 exemplos por motivo, com contagem dos demais, em texto, JSON, Markdown e desktop
 - [x] Preservar `auditor.toml` v1, `rule_id`, SQLite e o JSON consumido pela extensão; o campo no JSON é aditivo
 - [x] Revisar paradigma, nomes descritivos, documentação de código e testes dos helpers
-- [x] Verificação: `cargo fmt --check`, `cargo test --workspace` (132 testes: 119 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `npm test` da extensão (4 testes) e `npm run build` da desktop passaram
+- [x] Revisão complementar: teste do núcleo com os seis motivos no mesmo construtor do pipeline, validando texto, JSON e Markdown; extração dos textos do resumo para `apps/desktop/src/skipSummary.ts` com 2 testes Node
+- [x] Verificação: `cargo fmt --check`, `cargo test --workspace` (133 testes: 120 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `npm test` da extensão (4 testes), `npm test` da desktop (2 testes) e `npm run build` da desktop passaram
 - [x] Smoke: `simple` mostrou 14 entradas fora do inventário (10 ignoradas por padrão, 1 excluída, 3 fora do `include`), com 3 exemplos e `+7 outros` no maior motivo; `dependencies` manteve 5 achados e `typescript` manteve 8 arestas, 4 achados e 1 limitação
 
 ### Item seguinte — Não iniciado
@@ -309,3 +310,5 @@ Ordem e critérios vêm de `RELATORIO_ETAPA_1_E_PLANO_ETAPA_2.md`, seção 8. Um
 - [ ] 2.8 — Reforçar a verificação automatizada
 
 A cobertura estruturada e o resumo de motivos ainda não são gravados em colunas próprias no histórico; a limitação textual continua sendo persistida. Isso foi reavaliado no item 2.7 e mantido fora do escopo: o item pedia transparência no relatório da execução, não mudança no esquema SQLite.
+
+A validação do desktop foi feita por `tsc --noEmit`, build Vite e testes unitários dos helpers de apresentação. A janela Tauri não foi aberta para inspeção visual nesta entrega; isso segue como limitação explícita. Também não há fixture com symlink, permissão negada ou FIFO reais: esses motivos são exercitados com inventário em memória no construtor real do relatório, porque não são reproduzíveis de forma igual no Windows.

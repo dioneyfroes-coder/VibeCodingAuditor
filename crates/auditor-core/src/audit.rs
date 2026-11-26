@@ -77,6 +77,7 @@ pub fn audit_project(root: &Path) -> Result<AuditReport, AuditError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::discovery::{SkipReason, SkippedEntry};
     use crate::findings::Severity;
     use crate::report::ReportFormat;
     use crate::rules::{
@@ -241,6 +242,127 @@ mod tests {
         assert!(markdown.contains("padrão ignorado"));
         assert!(markdown.contains("excluído"));
         assert!(markdown.contains("fora do include"));
+    }
+
+    /// Todos os motivos, inclusive os que reduzem cobertura, chegam às três saídas.
+    ///
+    /// O inventário é montado em memória porque symlinks, permissões e FIFOs não
+    /// são reproduzíveis de forma igual no Windows. O relatório, porém, é o
+    /// mesmo construído pelo pipeline real.
+    #[test]
+    fn all_skip_reasons_reach_text_json_and_markdown() {
+        let root = project_fixture("clean");
+        let contract =
+            contract::load_contract(&root.join("auditor.toml")).expect("contrato válido");
+        let mut inventory = discovery::discover(&root, &contract).expect("descoberta deve passar");
+        let analysis =
+            analysis::analyze(&root, &contract, &inventory).expect("análise deve passar");
+
+        inventory.skipped = vec![
+            SkippedEntry {
+                path: ".next".to_owned(),
+                reason: SkipReason::DefaultIgnored,
+            },
+            SkippedEntry {
+                path: ".turbo".to_owned(),
+                reason: SkipReason::DefaultIgnored,
+            },
+            SkippedEntry {
+                path: ".venv".to_owned(),
+                reason: SkipReason::DefaultIgnored,
+            },
+            SkippedEntry {
+                path: "build/artefato.txt".to_owned(),
+                reason: SkipReason::DefaultIgnored,
+            },
+            SkippedEntry {
+                path: "vendor".to_owned(),
+                reason: SkipReason::Excluded,
+            },
+            SkippedEntry {
+                path: "notes.txt".to_owned(),
+                reason: SkipReason::NotIncluded,
+            },
+            SkippedEntry {
+                path: "atalho.rs".to_owned(),
+                reason: SkipReason::Symlink,
+            },
+            SkippedEntry {
+                path: "bloqueado.rs".to_owned(),
+                reason: SkipReason::Inaccessible,
+            },
+            SkippedEntry {
+                path: "fifo".to_owned(),
+                reason: SkipReason::Unsupported,
+            },
+        ];
+
+        let report = AuditReport::from_pipeline(&contract, &inventory, &analysis, Vec::new());
+        assert_eq!(report.summary.files_skipped, 9);
+        assert_eq!(report.skip_summary.reasons.len(), 6);
+
+        let text = report
+            .render(ReportFormat::Text)
+            .expect("renderização em texto deve passar");
+        assert!(
+            text.contains("Motivos dos não incluídos: 9 (6 intencionais, 3 reduzem cobertura)")
+        );
+        assert!(text.contains(
+            "padrão ignorado: 4 (intencional); exemplos: .next, .turbo, .venv; +1 outros"
+        ));
+        assert!(text.contains("link simbólico: 1 (reduz cobertura)"));
+        assert!(text.contains("inacessível: 1 (reduz cobertura)"));
+        assert!(text.contains("tipo não tratado: 1 (reduz cobertura)"));
+        assert!(!text.contains("build/artefato.txt"));
+
+        let json = report
+            .render(ReportFormat::Json)
+            .expect("renderização em JSON deve passar");
+        let value: serde_json::Value = serde_json::from_str(&json).expect("JSON deve ser válido");
+        assert_eq!(value["skip_summary"]["total"], 9);
+        assert_eq!(value["skip_summary"]["intentional"], 6);
+        assert_eq!(value["skip_summary"]["coverage_gaps"], 3);
+
+        let expected = [
+            ("default_ignored", 4, false),
+            ("excluded", 1, false),
+            ("not_included", 1, false),
+            ("symlink", 1, true),
+            ("inaccessible", 1, true),
+            ("unsupported", 1, true),
+        ];
+        for (index, (reason, count, reduces_coverage)) in expected.iter().enumerate() {
+            let entry = &value["skip_summary"]["reasons"][index];
+            assert_eq!(entry["reason"], *reason);
+            assert_eq!(entry["count"], *count);
+            assert_eq!(entry["reduces_coverage"], *reduces_coverage);
+            assert!(
+                entry["examples"]
+                    .as_array()
+                    .is_some_and(|items| items.len() <= 3)
+            );
+        }
+        assert_eq!(value["skip_summary"]["reasons"][0]["additional"], 1);
+
+        let markdown = report
+            .render(ReportFormat::Markdown)
+            .expect("renderização em Markdown deve passar");
+        assert!(
+            markdown
+                .contains("- Motivos dos não incluídos: 9 (6 intencionais, 3 reduzem cobertura)")
+        );
+        for label in [
+            "padrão ignorado",
+            "excluído",
+            "fora do include",
+            "link simbólico",
+            "inacessível",
+            "tipo não tratado",
+        ] {
+            assert!(text.contains(label), "texto deve conter {label}");
+            assert!(markdown.contains(label), "Markdown deve conter {label}");
+        }
+        assert!(!markdown.contains("build/artefato.txt"));
     }
 
     /// Projeto TypeScript/JavaScript com arestas permitidas, proibidas e ambíguas.

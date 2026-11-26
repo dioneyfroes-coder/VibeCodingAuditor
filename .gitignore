@@ -2,6 +2,7 @@
 data/
 node_modules/
 apps/desktop/dist/
+apps/desktop/out/
 apps/desktop/src-tauri/gen/schemas/
 extensions/vscode/out/
 *.vsix

@@ -90,7 +90,7 @@ Extensões de código reconhecidas sem analisador — por exemplo `.go`, `.java`
 
 O campo `coverage` é aditivo no JSON: a extensão VS Code continua consumindo `findings` como antes. O histórico SQLite continua gravando as limitações em texto, sem coluna nova para a cobertura estruturada nesta etapa. A fixture `tests/fixtures/projects/partial_coverage` exerce o caso: 5 arquivos incluídos, 4 de código, 2 analisados, `.go` (1) e `.rb` (1) sem analisador, 1 limitação e 0 achados. O comando `analyze <raiz>` também mostra a cobertura.
 
-O relatório também expõe `skip_summary`, com `total`, `intentional`, `coverage_gaps` e `reasons`. Cada motivo traz `reason`, `label`, `count`, até 3 `examples` e `additional` para os caminhos omitidos. Diretórios ignorados por padrão, exclusões do contrato e arquivos fora de `include` são intencionais; link simbólico, entrada inacessível e tipo não tratado são marcados como `reduces_coverage`. A fixture `tests/fixtures/projects/simple` tem 14 entradas fora do inventário: 10 ignoradas por padrão, 1 excluída e 3 fora do `include`. O resumo aparece em texto, Markdown, JSON e desktop sem despejar a lista completa. Após reavaliar o item 2.7, `coverage` e `skip_summary` seguem fora do esquema SQLite: o histórico guarda resumo, achados e limitações, não detalhes estruturados de cobertura.
+O relatório também expõe `skip_summary`, com `total`, `intentional`, `coverage_gaps` e `reasons`. Cada motivo traz `reason`, `label`, `count`, até 3 `examples` e `additional` para os caminhos omitidos. Diretórios ignorados por padrão, exclusões do contrato e arquivos fora de `include` são intencionais; link simbólico, entrada inacessível e tipo não tratado são marcados como `reduces_coverage`. A fixture `tests/fixtures/projects/simple` tem 14 entradas fora do inventário: 10 ignoradas por padrão, 1 excluída e 3 fora do `include`. O resumo aparece em texto, Markdown, JSON e desktop sem despejar a lista completa. Um teste do núcleo cobre os seis motivos no construtor real do relatório, incluindo link simbólico, entrada inacessível e tipo não tratado como redutores de cobertura; não há fixture com esses três casos reais porque não são reproduzíveis de forma igual no Windows. Após reavaliar o item 2.7, `coverage` e `skip_summary` seguem fora do esquema SQLite: o histórico guarda resumo, achados e limitações, não detalhes estruturados de cobertura.
 
 A regra `module.concentration` usa apenas arestas resolvidas entre módulos declarados, deduplicadas por par origem/destino. Ela conta origens e destinos distintos e sinaliza revisão quando um deles chega a 3; o limite é fixo para manter a regra determinística e não vira parâmetro do contrato. O custo é `O(M + E)` por auditoria, sem leitura adicional de arquivos; a decisão sobre refatorar permanece com o usuário.
 
@@ -189,15 +189,19 @@ Pré-requisitos verificados no ambiente: WebView2 `158.0.4370.33`, MSVC `14.44.3
 ```sh
 cd apps/desktop
 npm install
+npm test
+npm run build
 npm run tauri dev
 npm run tauri build
 ```
+
+O `npm test` compila `src/skipSummary.ts` e executa 2 testes Node puros, sem dependência nova, sobre os textos do resumo de exclusões produzidos para os seis motivos do núcleo.
 
 Telas disponíveis: seleção nativa da pasta do projeto, auditoria com resumo e filtros por severidade/regra, grafo de dependências em SVG com as classificações feitas pelo núcleo, visualizador somente leitura do `auditor.toml`, histórico local com registro explícito e painel de configurações do caminho do banco.
 
 Segurança: apenas `core:default` e `dialog:allow-open` foram concedidos à janela principal; não há plugin de filesystem, CSP foi definido explicitamente e não há execução automática em segundo plano. O contrato nunca é editado pela interface — uma futura edição exigiria confirmação explícita.
 
-Limitações conhecidas: o caminho do banco é relativo ao diretório de execução do aplicativo (use um caminho absoluto no painel para fixá-lo); o empacotamento de instaladores está desativado (`bundle.active = false`), então `tauri build` gera somente o executável; o ícone incluído é técnico e substituível. A comparação de execuções continua disponível pela CLI, não pela interface.
+Limitações conhecidas: o caminho do banco é relativo ao diretório de execução do aplicativo (use um caminho absoluto no painel para fixá-lo); o empacotamento de instaladores está desativado (`bundle.active = false`), então `tauri build` gera somente o executável; o ícone incluído é técnico e substituível. A comparação de execuções continua disponível pela CLI, não pela interface. A verificação do resumo de exclusões foi feita por tipos, build e testes dos helpers de apresentação; a janela Tauri não foi inspecionada visualmente nesta entrega.
 
 O critério de conclusão foi verificado por testes de adaptação: o comando `audit_project` devolve exatamente o mesmo `AuditReport` produzido por `auditor-core`, e o binário de release foi gerado e iniciado com sucesso.
 

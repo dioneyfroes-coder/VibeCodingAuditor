@@ -508,4 +508,70 @@ mod tests {
         assert!(error.to_string().contains("contrato"));
         assert!(Error::source(&error).is_some());
     }
+
+    /// Crates declaradas no Cargo não viram achado; relativos entre fronteiras viram.
+    #[test]
+    fn rust_dependencies_fixture_classifies_external_and_relative_imports() {
+        let root = project_fixture("rust_dependencies");
+        let report = audit_project(&root).expect("audit must succeed");
+
+        assert_eq!(report, audit_project(&root).expect("audit must succeed"));
+        assert_eq!(report.project, "projeto-dependencias-rust");
+        assert_eq!(report.summary.errors, 1);
+
+        for external in [
+            "serde",
+            "json_alias",
+            "alias_api",
+            "dev_helper",
+            "build_tool",
+            "unix_only",
+        ] {
+            assert!(
+                report
+                    .findings
+                    .iter()
+                    .all(|finding| !finding.id.contains(external)),
+                "{external} must not produce a finding"
+            );
+        }
+
+        let forbidden = report
+            .findings
+            .iter()
+            .find(|finding| {
+                finding.rule_id == RULE_DEPENDENCY_NOT_ALLOWED
+                    && finding.path == "src/domain/mod.rs"
+            })
+            .expect("super crossing into application must be reported");
+        assert_eq!(forbidden.severity, Severity::Error);
+        assert_eq!(forbidden.line_start, Some(3));
+        assert_eq!(
+            forbidden.evidence.as_deref(),
+            Some("use super::application::Service;")
+        );
+
+        let relative_review = report
+            .findings
+            .iter()
+            .find(|finding| {
+                finding.rule_id == RULE_DEPENDENCY_UNRESOLVED
+                    && finding.path == "src/application/mod.rs"
+                    && finding.line_start == Some(4)
+            })
+            .expect("unresolvable relative path must be reported");
+        assert_eq!(relative_review.severity, Severity::NeedsReview);
+        assert!(relative_review.message.contains("missing_module"));
+
+        let unknown_symbol = report
+            .findings
+            .iter()
+            .find(|finding| {
+                finding.rule_id == RULE_DEPENDENCY_UNRESOLVED
+                    && finding.path == "src/domain/mod.rs"
+                    && finding.line_start == Some(4)
+            })
+            .expect("undeclared symbol must remain a review");
+        assert_eq!(unknown_symbol.severity, Severity::NeedsReview);
+    }
 }

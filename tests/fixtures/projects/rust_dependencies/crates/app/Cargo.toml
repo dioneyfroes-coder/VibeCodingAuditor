@@ -1,0 +1,17 @@
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { workspace = true }
+json_alias = { package = "json-real", version = "1" }
+
+[dev-dependencies]
+dev_helper = "1"
+
+[build-dependencies]
+build_tool = "1"
+
+[target.'cfg(unix)'.dependencies]
+unix_only = "1"

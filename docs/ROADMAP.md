@@ -242,9 +242,22 @@ Ordem e critérios vêm de `RELATORIO_ETAPA_1_E_PLANO_ETAPA_2.md`, seção 8. Um
 - [x] Verificação: `cargo fmt --check`, `cargo test --workspace` (107 testes: 94 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `npm test` da extensão (4 testes) e `npm run build` da desktop passaram
 - [x] Smoke nas duas ordens do contrato: saída JSON idêntica, 0 erros, nenhum `dep.not_allowed` nos arquivos ambíguos e revisões com candidatos `domain, overlap` e `domain, entities`
 
+### Item 2.3 — Classificar dependências externas Rust corretamente e resolver `self::`/`super::` — Concluído em 25/11/2026
+
+- [x] Ler `[dependencies]`, `[dev-dependencies]`, `[build-dependencies]`, `[target.*.dependencies]` (e equivalentes de dev/build por plataforma) e `[workspace.dependencies]` sem executar o Cargo
+- [x] Resolver aliases `package = "..."` e herança `workspace = true`, normalizando nomes para identificadores Rust
+- [x] Expor crates declaradas em `WorkspaceInfo.declared_dependencies` e no `analyze`, sem alterar `ReportSummary.packages`
+- [x] Imports de crates declaradas não geram `dep.unresolved`; raízes ausentes do contrato e dos manifests continuam em revisão
+- [x] `self::`/`super::` entre módulos do contrato viram arestas `Allowed`/`Forbidden`; destinos internos seguem sem aresta; destinos sem evidência viram revisão explícita
+- [x] `crate::self`/`crate::super` não viram dependência
+- [x] Criar a fixture `tests/fixtures/projects/rust_dependencies` e testes de regressão antes da implementação
+- [x] Preservar `auditor.toml` v1, os `rule_id` existentes e o consumo de `findings` pela extensão
+- [x] Revisar paradigma, nomes descritivos, documentação de código e testes dos helpers
+- [x] Verificação: `cargo fmt --check`, `cargo test --workspace` (115 testes: 102 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `npm test` da extensão (4 testes) e `npm run build` da desktop passaram
+- [x] Smoke na fixture `rust_dependencies`: `analyze` exibiu 8 crates declaradas e nenhuma aresta para elas; `audit` produziu 1 erro, 1 aviso de ciclo e 3 revisões, com `dep.not_allowed` via `super::` e revisão para o destino relativo sem evidência
+
 ### Itens seguintes — Não iniciados
 
-- [ ] 2.3 — Classificar dependências externas Rust corretamente e resolver `self::`/`super::`
 - [ ] 2.4 — Tratar `workspace.members` com glob
 - [ ] 2.5 — Corrigir a análise TypeScript/JavaScript
 - [ ] 2.6 — Substituir enumeração de ciclos por componentes fortemente conectados

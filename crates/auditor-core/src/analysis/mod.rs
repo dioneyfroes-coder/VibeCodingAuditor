@@ -165,6 +165,8 @@ pub struct Analysis {
 pub struct WorkspaceInfo {
     /// Pacotes ordenados por nome e caminho de manifesto.
     pub packages: Vec<WorkspacePackage>,
+    /// Crates externas declaradas nos manifests, normalizadas como identificadores Rust.
+    pub declared_dependencies: Vec<String>,
 }
 
 /// Pacote identificado em um `Cargo.toml`.
@@ -299,8 +301,11 @@ struct VisitContext<'a> {
     lines: &'a [&'a str],
     use_cursor: &'a mut usize,
     mod_cursor: &'a mut usize,
+    contract: &'a Contract,
     contract_names: &'a HashSet<String>,
     workspace_names: &'a HashSet<String>,
+    declared_dependencies: &'a HashSet<String>,
+    inventory_paths: &'a BTreeSet<String>,
     analysis: &'a mut Analysis,
     seen_edges: &'a mut HashSet<String>,
 }
@@ -321,6 +326,15 @@ pub fn analyze(
                 .collect()
         })
         .unwrap_or_default();
+    let declared_dependencies: HashSet<String> = workspace
+        .as_ref()
+        .map(|info| info.declared_dependencies.iter().cloned().collect())
+        .unwrap_or_default();
+    let inventory_paths: BTreeSet<String> = inventory
+        .files
+        .iter()
+        .map(|file| file.path.clone())
+        .collect();
     let contract_names: HashSet<String> = contract
         .architecture
         .modules
@@ -407,8 +421,11 @@ pub fn analyze(
                 lines: &lines,
                 use_cursor: &mut use_cursor,
                 mod_cursor: &mut mod_cursor,
+                contract,
                 contract_names: &contract_names,
                 workspace_names: &workspace_names,
+                declared_dependencies: &declared_dependencies,
+                inventory_paths: &inventory_paths,
                 analysis: &mut analysis,
                 seen_edges: &mut seen_edges,
             };
@@ -555,18 +572,23 @@ fn visit_items(items: &[Item], context: &mut VisitContext<'_>) {
     }
 }
 
+/// Módulos do contrato cujo `path` corresponde ao caminho informado.
+fn modules_for_path<'a>(contract: &'a Contract, path: &str) -> Vec<&'a Module> {
+    contract
+        .architecture
+        .modules
+        .iter()
+        .filter(|module| matches_pattern(&module.path, path))
+        .collect()
+}
+
 /// Associa um arquivo a um módulo do contrato e registra revisões de mapeamento.
 pub(crate) fn module_for_file<'a>(
     contract: &'a Contract,
     path: &str,
     analysis: &mut Analysis,
 ) -> Option<&'a Module> {
-    let matching_modules: Vec<&Module> = contract
-        .architecture
-        .modules
-        .iter()
-        .filter(|module| matches_pattern(&module.path, path))
-        .collect();
+    let matching_modules = modules_for_path(contract, path);
 
     match matching_modules.len() {
         0 => {
@@ -637,6 +659,21 @@ pub(crate) fn record_dependency(
     });
 }
 
+/// Resultado da resolução de um caminho relativo Rust.
+enum RelativeTarget {
+    /// O destino pertence ao próprio módulo e não cruza uma fronteira.
+    Internal,
+    /// O destino foi associado a um módulo do contrato.
+    Module(String),
+    /// Não há evidência suficiente; o destino precisa de revisão.
+    Unknown {
+        /// Nome usado como destino na aresta.
+        target: String,
+        /// Explicação da falta de evidência.
+        detail: String,
+    },
+}
+
 /// Classifica uma folha de caminho de `use` e registra a aresta correspondente.
 fn classify_use(
     context: &mut VisitContext<'_>,
@@ -655,9 +692,13 @@ fn classify_use(
         if leaf.len() < 2 {
             return;
         }
+        if leaf[1] == "self" || leaf[1] == "super" {
+            classify_relative(context, &leaf[1..], line, evidence, module);
+            return;
+        }
         leaf[1].clone()
     } else if first == "self" || first == "super" {
-        // Dependências internas ao mesmo módulo não cruzam a fronteira do contrato.
+        classify_relative(context, leaf, line, evidence, module);
         return;
     } else {
         first.clone()
@@ -666,29 +707,48 @@ fn classify_use(
     if IGNORED_ROOTS.contains(&target.as_str()) || target == module.name {
         return;
     }
+    if context.declared_dependencies.contains(&target) {
+        return;
+    }
 
-    let (kind, detail) = if module.allowed_dependencies.contains(&target) {
+    let unresolved_detail = if context.workspace_names.contains(&target) {
+        "pacote do workspace sem módulo correspondente no contrato".to_owned()
+    } else {
+        "destino não corresponde a nenhum módulo do contrato".to_owned()
+    };
+    record_classified_target(context, module, &target, line, evidence, unresolved_detail);
+}
+
+/// Registra a classificação final de um destino, com a explicação de quando não resolveu.
+fn record_classified_target(
+    context: &mut VisitContext<'_>,
+    module: &Module,
+    target: &str,
+    line: Option<usize>,
+    evidence: Option<&str>,
+    unresolved_detail: String,
+) {
+    let (kind, detail) = if module
+        .allowed_dependencies
+        .iter()
+        .any(|allowed| allowed == target)
+    {
         (
             DependencyKind::Allowed,
             "destino presente em allowed_dependencies".to_owned(),
         )
-    } else if context.contract_names.contains(&target) {
+    } else if context.contract_names.contains(target) {
         (
             DependencyKind::Forbidden,
             "destino declarado no contrato, mas ausente de allowed_dependencies".to_owned(),
         )
     } else {
-        let detail = if context.workspace_names.contains(&target) {
-            "pacote do workspace sem módulo correspondente no contrato".to_owned()
-        } else {
-            "destino não corresponde a nenhum módulo do contrato".to_owned()
-        };
-        (DependencyKind::Unresolved, detail)
+        (DependencyKind::Unresolved, unresolved_detail)
     };
 
     record_dependency(
         module,
-        &target,
+        target,
         kind,
         detail,
         line,
@@ -697,6 +757,151 @@ fn classify_use(
         &mut *context.analysis,
         &mut *context.seen_edges,
     );
+}
+
+/// Classifica `self::`/`super::` a partir do arquivo de origem e do contrato.
+fn classify_relative(
+    context: &mut VisitContext<'_>,
+    leaf: &[String],
+    line: Option<usize>,
+    evidence: Option<&str>,
+    module: &Module,
+) {
+    let mut prefix = 0;
+    let mut super_count = 0;
+    while let Some(segment) = leaf.get(prefix) {
+        if segment == "super" {
+            super_count += 1;
+            prefix += 1;
+        } else if segment == "self" {
+            prefix += 1;
+        } else {
+            break;
+        }
+    }
+    let Some(segment) = leaf.get(prefix) else {
+        return;
+    };
+
+    if segment == &module.name || IGNORED_ROOTS.contains(&segment.as_str()) {
+        return;
+    }
+    if context.declared_dependencies.contains(segment) {
+        return;
+    }
+
+    let (target, unresolved_detail) = if context.contract_names.contains(segment) {
+        (segment.clone(), "destino do caminho relativo".to_owned())
+    } else {
+        match resolve_relative_target(context, segment, super_count, module) {
+            RelativeTarget::Internal => return,
+            RelativeTarget::Module(name) => (
+                name,
+                "destino do caminho relativo associado ao módulo".to_owned(),
+            ),
+            RelativeTarget::Unknown { target, detail } => (target, detail),
+        }
+    };
+
+    record_classified_target(context, module, &target, line, evidence, unresolved_detail);
+}
+
+/// Junta um diretório relativo e um nome de arquivo usando `/` como separador.
+fn join_relative(dir: &Path, name: &str) -> String {
+    dir.join(name).to_string_lossy().replace('\\', "/")
+}
+
+/// Localiza o arquivo `lib.rs`/`mod.rs` que representa um diretório de módulo.
+fn module_file_in(context: &VisitContext<'_>, dir: &Path) -> Option<String> {
+    ["lib.rs", "mod.rs"]
+        .into_iter()
+        .map(|name| join_relative(dir, name))
+        .find(|candidate| context.inventory_paths.contains(candidate))
+}
+
+/// Procura o módulo de destino de um caminho relativo no inventário e no contrato.
+fn resolve_relative_target(
+    context: &VisitContext<'_>,
+    segment: &str,
+    super_count: usize,
+    module: &Module,
+) -> RelativeTarget {
+    let source_dir = Path::new(context.path)
+        .parent()
+        .unwrap_or_else(|| Path::new(""));
+    let stem = Path::new(context.path)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    let ancestor_dir = if stem == "mod" || stem == "lib" {
+        source_dir.parent().unwrap_or(source_dir).to_path_buf()
+    } else {
+        source_dir.to_path_buf()
+    };
+    let mut base = if super_count == 0 {
+        source_dir.to_path_buf()
+    } else {
+        ancestor_dir.clone()
+    };
+    for _ in 1..super_count {
+        if let Some(parent) = base.parent() {
+            base = parent.to_path_buf();
+        }
+    }
+
+    let prefix = if super_count == 0 {
+        "self::".to_owned()
+    } else {
+        "super::".repeat(super_count)
+    };
+
+    let candidates = [
+        join_relative(&base, &format!("{segment}.rs")),
+        join_relative(&base, &format!("{segment}/mod.rs")),
+        join_relative(&base, &format!("{segment}/lib.rs")),
+    ];
+    let mut modules = BTreeSet::new();
+    for candidate in &candidates {
+        if context.inventory_paths.contains(candidate) {
+            for matched in modules_for_path(context.contract, candidate) {
+                modules.insert(matched.name.clone());
+            }
+        }
+    }
+
+    if modules.len() == 1 {
+        let name = modules.into_iter().next().expect("single module");
+        return if name == module.name {
+            RelativeTarget::Internal
+        } else {
+            RelativeTarget::Module(name)
+        };
+    }
+    if modules.len() > 1 {
+        let names: Vec<String> = modules.into_iter().collect();
+        return RelativeTarget::Unknown {
+            target: segment.to_owned(),
+            detail: format!(
+                "{prefix}{segment}: corresponde a mais de um módulo do contrato: {}",
+                names.join(", ")
+            ),
+        };
+    }
+
+    if super_count == 0 {
+        return RelativeTarget::Internal;
+    }
+    if let Some(file) = module_file_in(context, &ancestor_dir) {
+        let ancestors = modules_for_path(context.contract, &file);
+        if ancestors.len() == 1 && ancestors[0].name == module.name {
+            return RelativeTarget::Internal;
+        }
+    }
+
+    RelativeTarget::Unknown {
+        target: segment.to_owned(),
+        detail: format!("{prefix}{segment}: não pôde ser associado a um módulo do contrato"),
+    }
 }
 
 /// Coleta os caminhos completos das folhas de um `use`, incluindo grupos e renomes.
@@ -765,6 +970,71 @@ fn is_mod_declaration_line(line: &str) -> bool {
     rest.starts_with("mod ") || rest.starts_with("mod{")
 }
 
+/// Converte um nome de pacote Cargo no identificador usado por `use`.
+fn normalize_crate_name(name: &str) -> String {
+    name.replace('-', "_")
+}
+
+/// Resolve o nome de crate declarado por uma entrada de dependência.
+///
+/// O alias local e o pacote real são mantidos: um pode aparecer no código e o
+/// outro ser o nome canônico no manifesto.
+fn dependency_names(
+    key: &str,
+    entry: &toml::Value,
+    workspace_dependencies: Option<&toml::Value>,
+) -> [String; 2] {
+    let declared = entry
+        .get("package")
+        .and_then(toml::Value::as_str)
+        .or_else(|| {
+            if entry.get("workspace").and_then(toml::Value::as_bool) == Some(true) {
+                workspace_dependencies
+                    .and_then(|table| table.get(key))
+                    .and_then(|inherited| inherited.get("package"))
+                    .and_then(toml::Value::as_str)
+            } else {
+                None
+            }
+        })
+        .unwrap_or(key);
+    [normalize_crate_name(key), normalize_crate_name(declared)]
+}
+
+/// Coleta os nomes declarados em uma tabela de dependências.
+fn collect_dependency_table(
+    table: Option<&toml::Value>,
+    workspace_dependencies: Option<&toml::Value>,
+    names: &mut BTreeSet<String>,
+) {
+    let Some(entries) = table.and_then(toml::Value::as_table) else {
+        return;
+    };
+    for (key, entry) in entries {
+        for name in dependency_names(key, entry, workspace_dependencies) {
+            names.insert(name);
+        }
+    }
+}
+
+/// Coleta as tabelas de dependências relevantes de um manifesto.
+fn collect_manifest_dependencies(
+    document: &toml::Value,
+    workspace_dependencies: Option<&toml::Value>,
+    names: &mut BTreeSet<String>,
+) {
+    for section in ["dependencies", "dev-dependencies", "build-dependencies"] {
+        collect_dependency_table(document.get(section), workspace_dependencies, names);
+    }
+    if let Some(targets) = document.get("target").and_then(toml::Value::as_table) {
+        for target in targets.values() {
+            for section in ["dependencies", "dev-dependencies", "build-dependencies"] {
+                collect_dependency_table(target.get(section), workspace_dependencies, names);
+            }
+        }
+    }
+}
+
 /// Lê o manifesto raiz e os manifestos dos membros declarados no workspace.
 fn read_cargo_workspace(root: &Path) -> Result<Option<WorkspaceInfo>, AnalysisError> {
     let manifest = root.join("Cargo.toml");
@@ -781,6 +1051,18 @@ fn read_cargo_workspace(root: &Path) -> Result<Option<WorkspaceInfo>, AnalysisEr
         source,
     })?;
 
+    let workspace = document.get("workspace");
+    let workspace_dependencies = workspace.and_then(|table| table.get("dependencies"));
+    let mut declared = BTreeSet::new();
+    collect_dependency_table(
+        workspace_dependencies,
+        workspace_dependencies,
+        &mut declared,
+    );
+    if document.get("package").is_some() {
+        collect_manifest_dependencies(&document, workspace_dependencies, &mut declared);
+    }
+
     let mut packages = Vec::new();
 
     if let Some(name) = document
@@ -794,8 +1076,7 @@ fn read_cargo_workspace(root: &Path) -> Result<Option<WorkspaceInfo>, AnalysisEr
         });
     }
 
-    if let Some(members) = document
-        .get("workspace")
+    if let Some(members) = workspace
         .and_then(|workspace| workspace.get("members"))
         .and_then(toml::Value::as_array)
     {
@@ -811,6 +1092,7 @@ fn read_cargo_workspace(root: &Path) -> Result<Option<WorkspaceInfo>, AnalysisEr
                     path: member_manifest.clone(),
                     source,
                 })?;
+            collect_manifest_dependencies(&member_document, workspace_dependencies, &mut declared);
 
             if let Some(name) = member_document
                 .get("package")
@@ -829,7 +1111,10 @@ fn read_cargo_workspace(root: &Path) -> Result<Option<WorkspaceInfo>, AnalysisEr
         (&left.name, &left.manifest_path).cmp(&(&right.name, &right.manifest_path))
     });
 
-    Ok(Some(WorkspaceInfo { packages }))
+    Ok(Some(WorkspaceInfo {
+        packages,
+        declared_dependencies: declared.into_iter().collect(),
+    }))
 }
 
 #[cfg(test)]
@@ -1184,5 +1469,159 @@ mod tests {
                     .all(|edge| !edge.path.starts_with("crates/domain/src/"))
             );
         }
+    }
+
+    /// Raiz da fixture de dependências externas e caminhos relativos Rust.
+    fn rust_dependencies_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/projects/rust_dependencies")
+    }
+
+    /// Análise completa da fixture de dependências externas Rust.
+    fn analyze_rust_dependencies() -> Analysis {
+        let root = rust_dependencies_root();
+        let contract =
+            load_contract(&root.join("auditor.toml")).expect("fixture contract must load");
+        let inventory = discover(&root, &contract).expect("discovery must succeed");
+        analyze(&root, &contract, &inventory).expect("analysis must succeed")
+    }
+
+    #[test]
+    fn declared_cargo_dependencies_are_read_from_all_tables() {
+        let analysis = analyze_rust_dependencies();
+        let workspace = analysis.workspace.expect("workspace must be read");
+
+        assert_eq!(
+            workspace.declared_dependencies,
+            [
+                "alias_api",
+                "build_tool",
+                "dev_helper",
+                "json_alias",
+                "json_real",
+                "real_api",
+                "serde",
+                "unix_only"
+            ]
+        );
+    }
+
+    #[test]
+    fn declared_external_imports_do_not_create_dependencies_or_reviews() {
+        let analysis = analyze_rust_dependencies();
+
+        for target in [
+            "serde",
+            "json_alias",
+            "alias_api",
+            "dev_helper",
+            "build_tool",
+            "unix_only",
+        ] {
+            assert!(
+                analysis.edges.iter().all(|edge| edge.to != target),
+                "{target} must not become an architectural edge"
+            );
+            assert!(
+                analysis
+                    .reviews
+                    .iter()
+                    .all(|review| !review.detail.contains(target)),
+                "{target} must not require review when declared in Cargo"
+            );
+        }
+    }
+
+    #[test]
+    fn relative_paths_crossing_contract_boundaries_are_classified() {
+        let analysis = analyze_rust_dependencies();
+
+        let forbidden = analysis
+            .edges
+            .iter()
+            .find(|edge| edge.from == "domain" && edge.to == "application")
+            .expect("super crossing into application must produce an edge");
+        assert_eq!(forbidden.kind, DependencyKind::Forbidden);
+        assert_eq!(forbidden.path, "src/domain/mod.rs");
+        assert_eq!(forbidden.line, Some(3));
+        assert_eq!(
+            forbidden.evidence.as_deref(),
+            Some("use super::application::Service;")
+        );
+
+        let allowed = analysis
+            .edges
+            .iter()
+            .find(|edge| {
+                edge.from == "application"
+                    && edge.to == "domain"
+                    && edge.path == "src/application/mod.rs"
+            })
+            .expect("super crossing into domain must produce an edge");
+        assert_eq!(allowed.kind, DependencyKind::Allowed);
+        assert_eq!(allowed.line, Some(3));
+    }
+
+    #[test]
+    fn unresolvable_relative_path_requires_explicit_review() {
+        let analysis = analyze_rust_dependencies();
+
+        let review = analysis
+            .reviews
+            .iter()
+            .find(|review| review.path == "src/application/mod.rs" && review.line == Some(4))
+            .expect("unknown relative target must require review");
+        assert_eq!(review.reason, ReviewReason::UnresolvedDependency);
+        assert!(review.detail.contains("missing_module"));
+    }
+
+    #[test]
+    fn undeclared_symbol_remains_unresolved() {
+        let analysis = analyze_rust_dependencies();
+
+        let edge = analysis
+            .edges
+            .iter()
+            .find(|edge| edge.to == "unknown_symbol")
+            .expect("undeclared root must remain unresolved");
+        assert_eq!(edge.kind, DependencyKind::Unresolved);
+        assert!(
+            analysis
+                .reviews
+                .iter()
+                .any(|review| review.detail.contains("unknown_symbol"))
+        );
+    }
+
+    #[test]
+    fn crate_self_alias_does_not_become_a_dependency() {
+        let analysis = analyze_rust_dependencies();
+
+        assert!(
+            analysis
+                .edges
+                .iter()
+                .all(|edge| edge.to != "self" && edge.to != "app_self")
+        );
+        let edge = analysis
+            .edges
+            .iter()
+            .find(|edge| edge.path == "src/application/crate_self.rs")
+            .expect("grouped crate use must still classify domain");
+        assert_eq!(edge.to, "domain");
+        assert_eq!(edge.kind, DependencyKind::Allowed);
+    }
+
+    #[test]
+    fn relative_imports_inside_the_same_module_stay_internal() {
+        let analysis = analyze_rust_dependencies();
+
+        assert!(analysis.edges.iter().all(|edge| edge.to != "Entity"));
+        assert!(
+            analysis
+                .reviews
+                .iter()
+                .all(|review| !review.detail.contains("Entity"))
+        );
     }
 }

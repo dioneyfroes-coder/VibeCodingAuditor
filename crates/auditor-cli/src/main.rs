@@ -190,6 +190,10 @@ fn analyze_project(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
             .map(|package| package.name.as_str())
             .collect();
         println!("Pacotes Cargo: {}", packages.join(", "));
+        println!(
+            "Dependências externas declaradas: {}",
+            workspace.declared_dependencies.join(", ")
+        );
     }
 
     println!("Arestas: {}", analysis.edges.len());

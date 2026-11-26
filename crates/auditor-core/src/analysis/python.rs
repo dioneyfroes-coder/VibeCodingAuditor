@@ -590,6 +590,7 @@ mod tests {
                 architecture: Architecture {
                     style: ArchitectureStyle::ModularMonolith,
                     modules,
+                    layers: Vec::new(),
                 },
             };
             let contract_names: HashSet<String> = contract

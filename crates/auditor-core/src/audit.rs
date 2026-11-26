@@ -82,7 +82,8 @@ mod tests {
     use crate::report::ReportFormat;
     use crate::rules::{
         RULE_DEPENDENCY_CYCLE, RULE_DEPENDENCY_NOT_ALLOWED, RULE_DEPENDENCY_UNRESOLVED,
-        RULE_FILE_AMBIGUOUS_MODULE, RULE_FILE_UNMAPPED, RULE_MODULE_WITHOUT_FILES,
+        RULE_FILE_AMBIGUOUS_MODULE, RULE_FILE_UNMAPPED, RULE_LAYER_NOT_ALLOWED,
+        RULE_MODULE_WITHOUT_FILES,
     };
 
     /// Raiz de uma fixture de projeto, relativa ao crate.
@@ -125,6 +126,56 @@ mod tests {
 
         assert!(rule_ids.contains(&RULE_DEPENDENCY_NOT_ALLOWED));
         assert!(rule_ids.contains(&RULE_DEPENDENCY_CYCLE));
+    }
+
+    #[test]
+    fn v2_fixture_report_traces_layer_finding() {
+        let root = project_fixture("layer_boundaries");
+        let report = audit_project(&root).expect("v2 audit must succeed");
+        let has_id = |id: &str| report.findings.iter().any(|finding| finding.id == id);
+
+        assert_eq!(report.schema_version, 2);
+        assert_eq!(report.summary.errors, 2);
+        assert_eq!(report.summary.needs_review, 1);
+        assert!(has_id(
+            "dep.layer_not_allowed:application:infrastructure:src/application/rules.rs"
+        ));
+        assert!(has_id("dep.not_allowed:web:infrastructure:src/web/lib.rs"));
+        assert!(has_id("dep.unresolved:externo:src/web/lib.rs"));
+
+        let layer = report
+            .findings
+            .iter()
+            .find(|finding| finding.rule_id == RULE_LAYER_NOT_ALLOWED)
+            .expect("layer finding must exist");
+        assert_eq!(layer.severity, crate::findings::Severity::Error);
+        assert_eq!(layer.line_start, Some(2));
+        assert_eq!(layer.expected, "domain");
+    }
+
+    #[test]
+    fn v2_fixture_outputs_are_deterministic_and_consistent() {
+        let root = project_fixture("layer_boundaries");
+        let first = audit_project(&root).expect("v2 audit must succeed");
+        let second = audit_project(&root).expect("v2 audit must succeed");
+        let id = "dep.layer_not_allowed:application:infrastructure:src/application/rules.rs";
+
+        assert_eq!(first, second);
+        for format in [
+            ReportFormat::Text,
+            ReportFormat::Json,
+            ReportFormat::Markdown,
+        ] {
+            let rendered = first.render(format).expect("render must succeed");
+            assert!(
+                rendered.contains(id),
+                "{format:?} must contain the layer id"
+            );
+            assert!(
+                rendered.contains("application -> infrastructure"),
+                "{format:?} must contain the layer title"
+            );
+        }
     }
 
     /// Projeto sem violações, sem revisões pendentes e sem limitações.

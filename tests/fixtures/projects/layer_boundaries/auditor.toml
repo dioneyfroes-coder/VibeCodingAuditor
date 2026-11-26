@@ -1,0 +1,55 @@
+schema_version = 2
+
+[project]
+name = "limites-camadas"
+
+[scan]
+include = ["src/**/*.rs"]
+exclude = []
+
+[architecture]
+style = "modular_monolith"
+
+[[architecture.modules]]
+name = "domain"
+path = "src/domain/**"
+responsibility = "Regras de negócio"
+allowed_dependencies = []
+
+[[architecture.modules]]
+name = "application"
+path = "src/application/**"
+responsibility = "Casos de uso"
+allowed_dependencies = ["domain", "infrastructure"]
+
+[[architecture.modules]]
+name = "infrastructure"
+path = "src/infrastructure/**"
+responsibility = "Adaptadores"
+allowed_dependencies = ["domain", "application"]
+
+[[architecture.modules]]
+name = "web"
+path = "src/web/**"
+responsibility = "Apresentação"
+allowed_dependencies = ["application"]
+
+[[architecture.layers]]
+name = "domain"
+modules = ["domain"]
+allowed_dependencies = []
+
+[[architecture.layers]]
+name = "application"
+modules = ["application"]
+allowed_dependencies = ["domain"]
+
+[[architecture.layers]]
+name = "infrastructure"
+modules = ["infrastructure"]
+allowed_dependencies = ["domain", "application"]
+
+[[architecture.layers]]
+name = "presentation"
+modules = ["web"]
+allowed_dependencies = ["application"]

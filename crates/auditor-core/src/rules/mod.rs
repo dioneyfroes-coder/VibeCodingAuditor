@@ -7,12 +7,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::analysis::{Analysis, DependencyEdge, DependencyKind, ReviewReason};
-use crate::contract::Contract;
+use crate::contract::{Contract, Layer};
 use crate::discovery::{Inventory, matches_pattern};
 use crate::findings::{Finding, Severity};
 
 /// Identificador estável da regra de dependência proibida.
 pub const RULE_DEPENDENCY_NOT_ALLOWED: &str = "dep.not_allowed";
+/// Identificador estável da regra de dependência entre camadas proibida.
+pub const RULE_LAYER_NOT_ALLOWED: &str = "dep.layer_not_allowed";
 /// Identificador estável da regra de dependência não resolvida.
 pub const RULE_DEPENDENCY_UNRESOLVED: &str = "dep.unresolved";
 /// Identificador estável da regra de arquivo fora dos módulos do contrato.
@@ -40,6 +42,7 @@ const CYCLE_EVIDENCE_LIMIT: usize = 8;
 pub fn evaluate(contract: &Contract, inventory: &Inventory, analysis: &Analysis) -> Vec<Finding> {
     let mut findings = Vec::new();
     findings.extend(forbidden_dependency_findings(contract, analysis));
+    findings.extend(layer_dependency_findings(contract, analysis));
     findings.extend(unresolved_dependency_findings(analysis));
     findings.extend(review_findings(analysis));
     findings.extend(cycle_findings(analysis));
@@ -103,6 +106,74 @@ fn forbidden_dependency_findings(contract: &Contract, analysis: &Analysis) -> Ve
                 ),
                 confidence: None,
             }
+        })
+        .collect()
+}
+
+/// Converte arestas permitidas pelo módulo, mas proibidas pela camada.
+fn layer_dependency_findings(contract: &Contract, analysis: &Analysis) -> Vec<Finding> {
+    let layers = &contract.architecture.layers;
+    if layers.is_empty() {
+        return Vec::new();
+    }
+
+    let module_layers: BTreeMap<&str, &Layer> = layers
+        .iter()
+        .flat_map(|layer| {
+            layer
+                .modules
+                .iter()
+                .map(move |module| (module.as_str(), layer))
+        })
+        .collect();
+
+    analysis
+        .edges
+        .iter()
+        .filter(|edge| edge.kind == DependencyKind::Allowed)
+        .filter_map(|edge| {
+            let source_layer = module_layers.get(edge.from.as_str()).copied()?;
+            let target_layer = module_layers.get(edge.to.as_str()).copied()?;
+            if source_layer
+                .allowed_dependencies
+                .iter()
+                .any(|name| name == &target_layer.name)
+            {
+                return None;
+            }
+
+            let allowed = if source_layer.allowed_dependencies.is_empty() {
+                "nenhuma dependência permitida".to_owned()
+            } else {
+                source_layer.allowed_dependencies.join(", ")
+            };
+
+            Some(Finding {
+                id: format!(
+                    "{}:{}:{}:{}",
+                    RULE_LAYER_NOT_ALLOWED, edge.from, edge.to, edge.path
+                ),
+                rule_id: RULE_LAYER_NOT_ALLOWED.to_owned(),
+                severity: Severity::Error,
+                title: format!(
+                    "Dependência entre camadas não permitida: {} -> {}",
+                    source_layer.name, target_layer.name
+                ),
+                message: format!(
+                    "A camada {} usa {}, mas a camada não permite essa dependência.",
+                    source_layer.name, target_layer.name
+                ),
+                path: edge.path.clone(),
+                line_start: edge.line,
+                line_end: edge.line,
+                evidence: edge.evidence.clone().or_else(|| Some(edge.detail.clone())),
+                expected: allowed,
+                suggestion: format!(
+                    "Revise o uso de {} ou atualize allowed_dependencies da camada {} no contrato.",
+                    edge.to, source_layer.name
+                ),
+                confidence: None,
+            })
         })
         .collect()
 }
@@ -656,7 +727,7 @@ mod tests {
     use super::*;
     use crate::analysis::{DependencyEdge, ReviewItem, analyze};
     use crate::audit::audit_project;
-    use crate::contract::{Module, load_contract};
+    use crate::contract::{Module, load_contract, parse_contract};
     use crate::discovery::discover;
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
@@ -735,9 +806,225 @@ mod tests {
         finding
     }
 
+    /// Contrato v2 em memória com quatro módulos e quatro camadas.
+    fn layer_contract() -> Contract {
+        parse_contract(
+            r#"
+schema_version = 2
+
+[project]
+name = "camadas"
+
+[scan]
+include = ["src/**/*.rs", "web/src/**/*.ts"]
+exclude = []
+
+[architecture]
+style = "modular_monolith"
+
+[[architecture.modules]]
+name = "domain"
+path = "src/domain/**"
+responsibility = "Domínio"
+allowed_dependencies = []
+
+[[architecture.modules]]
+name = "application"
+path = "src/application/**"
+responsibility = "Aplicação"
+allowed_dependencies = ["domain"]
+
+[[architecture.modules]]
+name = "infrastructure"
+path = "src/infrastructure/**"
+responsibility = "Infraestrutura"
+allowed_dependencies = ["domain", "application"]
+
+[[architecture.modules]]
+name = "web"
+path = "web/src/**"
+responsibility = "Cliente"
+allowed_dependencies = ["application", "infrastructure", "domain"]
+
+[[architecture.layers]]
+name = "domain"
+modules = ["domain"]
+allowed_dependencies = []
+
+[[architecture.layers]]
+name = "application"
+modules = ["application"]
+allowed_dependencies = ["domain"]
+
+[[architecture.layers]]
+name = "infrastructure"
+modules = ["infrastructure"]
+allowed_dependencies = ["domain", "application"]
+
+[[architecture.layers]]
+name = "presentation"
+modules = ["web"]
+allowed_dependencies = ["application"]
+"#,
+        )
+        .expect("layer contract must be valid")
+    }
+
+    /// Inventário vazio para isolar as regras que não dependem de arquivos.
+    fn contract_inventory(_contract: &Contract) -> Inventory {
+        Inventory {
+            root: PathBuf::new(),
+            files: Vec::new(),
+            skipped: Vec::new(),
+        }
+    }
+
+    /// Aresta sintética com origem, destino, tipo e arquivo configuráveis.
+    fn typed_edge(from: &str, to: &str, kind: DependencyKind) -> DependencyEdge {
+        DependencyEdge {
+            from: from.to_owned(),
+            to: to.to_owned(),
+            kind,
+            path: format!("src/{from}-{to}.rs"),
+            line: Some(3),
+            evidence: Some(format!("use {to}::Client;")),
+            detail: "aresta sintética de teste".to_owned(),
+        }
+    }
+
+    #[test]
+    fn layer_rule_flags_allowed_module_but_forbidden_layer() {
+        let contract = layer_contract();
+        let analysis = analysis_with_edges(vec![typed_edge(
+            "web",
+            "infrastructure",
+            DependencyKind::Allowed,
+        )]);
+        let findings = evaluate(&contract, &contract_inventory(&contract), &analysis);
+        let layer: Vec<&Finding> = findings
+            .iter()
+            .filter(|finding| finding.rule_id == RULE_LAYER_NOT_ALLOWED)
+            .collect();
+
+        assert_eq!(layer.len(), 1);
+        assert_eq!(
+            layer[0].id,
+            "dep.layer_not_allowed:web:infrastructure:src/web-infrastructure.rs"
+        );
+        assert_eq!(layer[0].severity, Severity::Error);
+        assert_eq!(layer[0].line_start, Some(3));
+        assert_eq!(
+            layer[0].evidence.as_deref(),
+            Some("use infrastructure::Client;")
+        );
+        assert!(layer[0].message.contains("presentation"));
+        assert!(layer[0].message.contains("infrastructure"));
+        assert_eq!(layer[0].expected, "application");
+    }
+
+    #[test]
+    fn forbidden_module_does_not_get_a_second_layer_error() {
+        let contract = layer_contract();
+        let analysis =
+            analysis_with_edges(vec![typed_edge("web", "domain", DependencyKind::Forbidden)]);
+        let findings = evaluate(&contract, &contract_inventory(&contract), &analysis);
+        let layer_count = findings
+            .iter()
+            .filter(|finding| finding.rule_id == RULE_LAYER_NOT_ALLOWED)
+            .count();
+        let module_count = findings
+            .iter()
+            .filter(|finding| finding.rule_id == RULE_DEPENDENCY_NOT_ALLOWED)
+            .count();
+
+        assert_eq!(layer_count, 0);
+        assert_eq!(module_count, 1);
+    }
+
+    #[test]
+    fn allowed_module_and_layer_produce_no_layer_finding() {
+        let contract = layer_contract();
+        let analysis = analysis_with_edges(vec![typed_edge(
+            "web",
+            "application",
+            DependencyKind::Allowed,
+        )]);
+        let findings = evaluate(&contract, &contract_inventory(&contract), &analysis);
+
+        assert!(
+            findings
+                .iter()
+                .all(|finding| finding.rule_id != RULE_LAYER_NOT_ALLOWED)
+        );
+    }
+
+    #[test]
+    fn unresolved_edge_does_not_produce_a_layer_finding() {
+        let contract = layer_contract();
+        let analysis = analysis_with_edges(vec![typed_edge(
+            "web",
+            "externo",
+            DependencyKind::Unresolved,
+        )]);
+        let findings = evaluate(&contract, &contract_inventory(&contract), &analysis);
+        let unresolved = findings
+            .iter()
+            .any(|finding| finding.rule_id == RULE_DEPENDENCY_UNRESOLVED);
+        let layer = findings
+            .iter()
+            .any(|finding| finding.rule_id == RULE_LAYER_NOT_ALLOWED);
+
+        assert!(unresolved);
+        assert!(!layer);
+    }
+
+    #[test]
+    fn v1_contract_ignores_layer_rule() {
+        let (contract, inventory, _) = fixture_data();
+        let analysis = analysis_with_edges(vec![typed_edge(
+            "application",
+            "infrastructure",
+            DependencyKind::Allowed,
+        )]);
+        let findings = evaluate(&contract, &inventory, &analysis);
+
+        assert!(
+            findings
+                .iter()
+                .all(|finding| finding.rule_id != RULE_LAYER_NOT_ALLOWED)
+        );
+    }
+
+    #[test]
+    fn layer_findings_are_deterministic() {
+        let contract = layer_contract();
+        let inventory = contract_inventory(&contract);
+        let analysis = analysis_with_edges(vec![
+            typed_edge("web", "infrastructure", DependencyKind::Allowed),
+            typed_edge("web", "domain", DependencyKind::Allowed),
+        ]);
+        let first = evaluate(&contract, &inventory, &analysis);
+        let second = evaluate(&contract, &inventory, &analysis);
+
+        assert_eq!(first, second);
+        let ids: Vec<&str> = first
+            .iter()
+            .filter(|finding| finding.rule_id == RULE_LAYER_NOT_ALLOWED)
+            .map(|finding| finding.id.as_str())
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                "dep.layer_not_allowed:web:domain:src/web-domain.rs",
+                "dep.layer_not_allowed:web:infrastructure:src/web-infrastructure.rs",
+            ]
+        );
+    }
+
     #[test]
     fn stable_rule_ids_are_declared() {
         assert_eq!(RULE_DEPENDENCY_NOT_ALLOWED, "dep.not_allowed");
+        assert_eq!(RULE_LAYER_NOT_ALLOWED, "dep.layer_not_allowed");
         assert_eq!(RULE_DEPENDENCY_UNRESOLVED, "dep.unresolved");
         assert_eq!(RULE_FILE_UNMAPPED, "file.unmapped");
         assert_eq!(RULE_FILE_AMBIGUOUS_MODULE, "file.ambiguous_module");

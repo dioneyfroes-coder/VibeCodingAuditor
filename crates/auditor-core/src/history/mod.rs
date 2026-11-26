@@ -16,6 +16,7 @@ use rusqlite::types::Type;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::Serialize;
 
+use crate::discovery::SkipReason;
 use crate::findings::{Finding, Severity};
 use crate::report::{AuditReport, ReportSummary, finding_location};
 use crate::rules::{RULE_DEPENDENCY_NOT_ALLOWED, RULE_DEPENDENCY_UNRESOLVED};
@@ -24,7 +25,7 @@ use crate::rules::{RULE_DEPENDENCY_NOT_ALLOWED, RULE_DEPENDENCY_UNRESOLVED};
 pub const DEFAULT_DATABASE: &str = "data/auditor.db";
 
 /// Versão do schema de histórico suportada por esta versão do núcleo.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// Colunas persistidas de uma execução, na ordem usada nas consultas.
 const RUN_COLUMNS: &str = "id, recorded_at_unix, project_name, project_root, \
@@ -79,6 +80,35 @@ CREATE TABLE audit_limitations (
 CREATE INDEX audit_findings_by_run ON audit_findings(run_id);
 CREATE INDEX audit_findings_by_rule ON audit_findings(rule_id);
 CREATE INDEX audit_runs_by_project ON audit_runs(project_name);
+";
+
+/// Migração v2: cobertura agregada, extensões sem analisador e motivos de exclusão.
+///
+/// Nenhum exemplo de caminho é gravado: apenas rótulos, posições e contagens.
+const MIGRATION_V2: &str = "
+CREATE TABLE audit_run_coverage (
+    run_id INTEGER PRIMARY KEY REFERENCES audit_runs(id) ON DELETE CASCADE,
+    code_files_included INTEGER NOT NULL,
+    code_files_analyzed INTEGER NOT NULL,
+    code_files_not_analyzed INTEGER NOT NULL,
+    partial INTEGER NOT NULL
+);
+
+CREATE TABLE audit_coverage_unsupported_extensions (
+    run_id INTEGER NOT NULL REFERENCES audit_runs(id) ON DELETE CASCADE,
+    extension TEXT NOT NULL,
+    files INTEGER NOT NULL,
+    PRIMARY KEY (run_id, extension)
+);
+
+CREATE TABLE audit_coverage_skip_reasons (
+    run_id INTEGER NOT NULL REFERENCES audit_runs(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    count INTEGER NOT NULL,
+    reduces_coverage INTEGER NOT NULL,
+    PRIMARY KEY (run_id, position)
+);
 ";
 
 /// Falha operacional ao abrir, migrar, gravar ou consultar o histórico.
@@ -201,7 +231,44 @@ pub struct RunSummary {
     pub summary: ReportSummary,
 }
 
-/// Execução gravada com seus achados e limitações.
+/// Extensão de código sem analisador gravada para uma execução.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StoredUnsupportedExtension {
+    /// Extensão normalizada, sem o ponto inicial.
+    pub extension: String,
+    /// Quantidade de arquivos incluídos com essa extensão.
+    pub files: usize,
+}
+
+/// Motivo de exclusão gravado para uma execução, sem exemplos de caminho.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StoredSkipReason {
+    /// Rótulo estável produzido por `SkipReason::label()`.
+    pub label: String,
+    /// Quantidade de entradas com esse motivo.
+    pub count: usize,
+    /// Indica se o motivo reduziu a cobertura da análise.
+    pub reduces_coverage: bool,
+}
+
+/// Cobertura estruturada gravada para uma execução.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct StoredCoverage {
+    /// Arquivos de código incluídos no inventário.
+    pub code_files_included: usize,
+    /// Arquivos de código processados por um analisador.
+    pub code_files_analyzed: usize,
+    /// Arquivos de código incluídos que não foram processados.
+    pub code_files_not_analyzed: usize,
+    /// Indica que pelo menos um arquivo de código não foi analisado.
+    pub partial: bool,
+    /// Extensões de código sem analisador, ordenadas por extensão.
+    pub unsupported_extensions: Vec<StoredUnsupportedExtension>,
+    /// Motivos de exclusão, na ordem estável de `SkipReason::ALL`.
+    pub skip_reasons: Vec<StoredSkipReason>,
+}
+
+/// Execução gravada com seus achados, limitações e cobertura.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RunDetail {
     /// Cabeçalho da execução.
@@ -210,6 +277,8 @@ pub struct RunDetail {
     pub findings: Vec<Finding>,
     /// Limitações registradas, ordenadas por texto.
     pub limitations: Vec<String>,
+    /// Cobertura estruturada; ausente em execuções anteriores à migração v2.
+    pub coverage: Option<StoredCoverage>,
 }
 
 /// Diferença entre duas execuções, calculada pelo `id` dos achados.
@@ -225,6 +294,10 @@ pub struct ExecutionComparison {
     pub resolved_findings: Vec<Finding>,
     /// Achados presentes nas duas execuções, com os dados da posterior.
     pub persistent_findings: Vec<Finding>,
+    /// Cobertura da execução anterior, quando gravada.
+    pub before_coverage: Option<StoredCoverage>,
+    /// Cobertura da execução posterior, quando gravada.
+    pub after_coverage: Option<StoredCoverage>,
 }
 
 /// Conexão com o banco de histórico local.
@@ -326,6 +399,7 @@ impl History {
             run,
             findings: self.findings_for(id)?,
             limitations: self.limitations_for(id)?,
+            coverage: self.coverage_for(id)?,
         })
     }
 
@@ -369,6 +443,8 @@ impl History {
                 .filter(|finding| before_ids.contains(identity_key(&finding.id)))
                 .cloned()
                 .collect(),
+            before_coverage: before.coverage,
+            after_coverage: after.coverage,
         })
     }
 
@@ -452,13 +528,66 @@ impl History {
                 .map_err(|source| database_error(&database_path, source))?;
         }
 
+        let count = |value: usize| i64::try_from(value).unwrap_or(i64::MAX);
+        transaction
+            .execute(
+                "INSERT INTO audit_run_coverage (
+                    run_id, code_files_included, code_files_analyzed,
+                    code_files_not_analyzed, partial
+                 ) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    run_id,
+                    count(report.coverage.code_files_included),
+                    count(report.coverage.code_files_analyzed),
+                    count(report.coverage.code_files_not_analyzed),
+                    i64::from(report.coverage.partial),
+                ],
+            )
+            .map_err(|source| database_error(&database_path, source))?;
+
+        for extension in &report.coverage.unsupported_code_extensions {
+            transaction
+                .execute(
+                    "INSERT INTO audit_coverage_unsupported_extensions (run_id, extension, files)
+                     VALUES (?1, ?2, ?3)",
+                    params![run_id, extension.extension, count(extension.files)],
+                )
+                .map_err(|source| database_error(&database_path, source))?;
+        }
+
+        for (position, reason) in SkipReason::ALL.iter().enumerate() {
+            let reason_count = report
+                .skip_summary
+                .reasons
+                .iter()
+                .find(|entry| entry.reason == *reason)
+                .map_or(0, |entry| entry.count);
+            if reason_count == 0 {
+                continue;
+            }
+            transaction
+                .execute(
+                    "INSERT INTO audit_coverage_skip_reasons (
+                        run_id, position, label, count, reduces_coverage
+                     ) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        run_id,
+                        count(position),
+                        reason.label(),
+                        count(reason_count),
+                        i64::from(reason.reduces_coverage()),
+                    ],
+                )
+                .map_err(|source| database_error(&database_path, source))?;
+        }
+
         transaction
             .commit()
             .map_err(|source| database_error(&database_path, source))?;
         Ok(run_id)
     }
 
-    /// Aplica a migração inicial quando o banco ainda não tem schema.
+    /// Aplica as migrações pendentes, em ordem, em uma única transação.
     fn migrate(&mut self) -> Result<(), HistoryError> {
         self.connection
             .execute(
@@ -479,32 +608,34 @@ impl History {
             .map_err(|source| database_error(&self.path, source))?
             .flatten();
 
-        match found {
-            None => {
-                let database_path = self.path.clone();
-                let transaction = self
-                    .connection
-                    .transaction()
-                    .map_err(|source| database_error(&database_path, source))?;
-                transaction
-                    .execute_batch(MIGRATION_V1)
-                    .map_err(|source| database_error(&database_path, source))?;
-                transaction
-                    .execute(
-                        "INSERT INTO schema_migrations (version, applied_at_unix) VALUES (?1, ?2)",
-                        params![SCHEMA_VERSION, 0],
-                    )
-                    .map_err(|source| database_error(&database_path, source))?;
-                transaction
-                    .commit()
-                    .map_err(|source| database_error(&database_path, source))
-            }
-            Some(version) if version == SCHEMA_VERSION => Ok(()),
-            Some(version) => Err(HistoryError::UnsupportedSchema {
+        if let Some(version) = found
+            && version > SCHEMA_VERSION
+        {
+            return Err(HistoryError::UnsupportedSchema {
                 found: version,
                 supported: SCHEMA_VERSION,
-            }),
+            });
         }
+
+        let pending: Vec<(i64, &str)> = [(1_i64, MIGRATION_V1), (2_i64, MIGRATION_V2)]
+            .into_iter()
+            .filter(|(version, _)| found.is_none_or(|applied| *version > applied))
+            .collect();
+        if pending.is_empty() {
+            return Ok(());
+        }
+
+        let database_path = self.path.clone();
+        let transaction = self
+            .connection
+            .transaction()
+            .map_err(|source| database_error(&database_path, source))?;
+        for (version, sql) in pending {
+            apply_migration(&transaction, version, sql, &database_path)?;
+        }
+        transaction
+            .commit()
+            .map_err(|source| database_error(&database_path, source))
     }
 
     /// Carrega os achados de uma execução, ordenados por identificador.
@@ -538,6 +669,84 @@ impl History {
             .map_err(|source| database_error(&self.path, source))?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|source| database_error(&self.path, source))
+    }
+
+    /// Carrega a cobertura estruturada; execuções antigas não possuem uma linha.
+    fn coverage_for(&self, run_id: i64) -> Result<Option<StoredCoverage>, HistoryError> {
+        let scalars = {
+            let mut statement = self
+                .connection
+                .prepare(
+                    "SELECT code_files_included, code_files_analyzed,
+                            code_files_not_analyzed, partial
+                     FROM audit_run_coverage WHERE run_id = ?1",
+                )
+                .map_err(|source| database_error(&self.path, source))?;
+            statement
+                .query_row([run_id], |row| {
+                    Ok((
+                        read_usize(row, 0)?,
+                        read_usize(row, 1)?,
+                        read_usize(row, 2)?,
+                        row.get::<_, i64>(3)? != 0,
+                    ))
+                })
+                .optional()
+                .map_err(|source| database_error(&self.path, source))?
+        };
+        let Some((included, analyzed, not_analyzed, partial)) = scalars else {
+            return Ok(None);
+        };
+
+        let unsupported_extensions = {
+            let mut statement = self
+                .connection
+                .prepare(
+                    "SELECT extension, files FROM audit_coverage_unsupported_extensions
+                     WHERE run_id = ?1 ORDER BY extension",
+                )
+                .map_err(|source| database_error(&self.path, source))?;
+            let rows = statement
+                .query_map([run_id], |row| {
+                    Ok(StoredUnsupportedExtension {
+                        extension: row.get(0)?,
+                        files: read_usize(row, 1)?,
+                    })
+                })
+                .map_err(|source| database_error(&self.path, source))?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|source| database_error(&self.path, source))?
+        };
+
+        let skip_reasons = {
+            let mut statement = self
+                .connection
+                .prepare(
+                    "SELECT label, count, reduces_coverage FROM audit_coverage_skip_reasons
+                     WHERE run_id = ?1 ORDER BY position",
+                )
+                .map_err(|source| database_error(&self.path, source))?;
+            let rows = statement
+                .query_map([run_id], |row| {
+                    Ok(StoredSkipReason {
+                        label: row.get(0)?,
+                        count: read_usize(row, 1)?,
+                        reduces_coverage: row.get::<_, i64>(2)? != 0,
+                    })
+                })
+                .map_err(|source| database_error(&self.path, source))?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|source| database_error(&self.path, source))?
+        };
+
+        Ok(Some(StoredCoverage {
+            code_files_included: included,
+            code_files_analyzed: analyzed,
+            code_files_not_analyzed: not_analyzed,
+            partial,
+            unsupported_extensions,
+            skip_reasons,
+        }))
     }
 
     /// Constrói um resumo a partir de uma linha da tabela `audit_runs`.
@@ -603,6 +812,25 @@ fn database_error(path: &Path, source: rusqlite::Error) -> HistoryError {
     }
 }
 
+/// Executa uma migração e registra a versão aplicada dentro da transação.
+fn apply_migration(
+    transaction: &rusqlite::Transaction<'_>,
+    version: i64,
+    sql: &str,
+    path: &Path,
+) -> Result<(), HistoryError> {
+    transaction
+        .execute_batch(sql)
+        .map_err(|source| database_error(path, source))?;
+    transaction
+        .execute(
+            "INSERT INTO schema_migrations (version, applied_at_unix) VALUES (?1, 0)",
+            params![version],
+        )
+        .map_err(|source| database_error(path, source))?;
+    Ok(())
+}
+
 /// Renderiza a listagem de execuções em texto estável.
 pub fn render_run_list(runs: &[RunSummary]) -> String {
     if runs.is_empty() {
@@ -644,6 +872,21 @@ pub fn render_run_detail(detail: &RunDetail) -> String {
         format!("Achados: {}", summary_phrase(&run.summary)),
     ];
 
+    match &detail.coverage {
+        Some(coverage) => {
+            lines.push(format!(
+                "Cobertura do código: {}",
+                coverage_phrase(coverage, true)
+            ));
+            lines.push(skip_summary_phrase(coverage));
+            for reason in &coverage.skip_reasons {
+                lines.push(format!("  - {}", skip_reason_phrase(reason)));
+            }
+        }
+        None => lines
+            .push("Cobertura do código: sem dados (execução anterior à migração v2)".to_owned()),
+    }
+
     if detail.findings.is_empty() {
         lines.push("Nenhum achado.".to_owned());
     } else {
@@ -667,6 +910,49 @@ pub fn render_comparison(comparison: &ExecutionComparison) -> String {
         "Comparação: execução #{} -> #{}",
         comparison.before_id, comparison.after_id
     )];
+
+    match (&comparison.before_coverage, &comparison.after_coverage) {
+        (None, None) => lines.push("Cobertura: sem dados nas duas execuções".to_owned()),
+        (None, Some(after)) => lines.push(format!(
+            "Cobertura: sem dados -> {}",
+            coverage_phrase(after, false)
+        )),
+        (Some(before), None) => lines.push(format!(
+            "Cobertura: {} -> sem dados",
+            coverage_phrase(before, false)
+        )),
+        (Some(before), Some(after)) => {
+            lines.push(format!(
+                "Cobertura: {} -> {}",
+                coverage_phrase(before, false),
+                coverage_phrase(after, false)
+            ));
+            lines.push(format!(
+                "  analisados: {} -> {} ({})",
+                before.code_files_analyzed,
+                after.code_files_analyzed,
+                signed_delta(before.code_files_analyzed, after.code_files_analyzed)
+            ));
+            lines.push(format!(
+                "  não analisados: {} -> {} ({})",
+                before.code_files_not_analyzed,
+                after.code_files_not_analyzed,
+                signed_delta(
+                    before.code_files_not_analyzed,
+                    after.code_files_not_analyzed
+                )
+            ));
+            lines.push(format!(
+                "  sem analisador: {} -> {}",
+                describe_stored_unsupported(&before.unsupported_extensions),
+                describe_stored_unsupported(&after.unsupported_extensions)
+            ));
+            lines.push(format!(
+                "  motivos de exclusão: {}",
+                skip_reason_changes(before, after)
+            ));
+        }
+    }
 
     lines.push(format!(
         "Novos achados ({}):",
@@ -693,6 +979,125 @@ fn summary_phrase(summary: &ReportSummary) -> String {
         "{} ({} erros, {} avisos, {} informações, {} revisões)",
         summary.findings, summary.errors, summary.warnings, summary.infos, summary.needs_review
     )
+}
+
+/// Resume a cobertura gravada sem inventar uma nota geral de qualidade.
+fn coverage_phrase(coverage: &StoredCoverage, with_file_word: bool) -> String {
+    let unit = if with_file_word { " arquivo(s)" } else { "" };
+    let mut line = format!(
+        "{} de {}{} analisados",
+        coverage.code_files_analyzed, coverage.code_files_included, unit
+    );
+    if coverage.partial {
+        line.push_str(" (parcial)");
+    }
+    if !coverage.unsupported_extensions.is_empty() {
+        line.push_str(&format!(
+            "; sem analisador: {}",
+            describe_stored_unsupported(&coverage.unsupported_extensions)
+        ));
+    }
+    line
+}
+
+/// Descreve extensões sem analisador gravadas, ordenadas por extensão.
+fn describe_stored_unsupported(extensions: &[StoredUnsupportedExtension]) -> String {
+    if extensions.is_empty() {
+        return "(nenhum)".to_owned();
+    }
+    extensions
+        .iter()
+        .map(|entry| format!(".{} ({})", entry.extension, entry.files))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Resume os motivos de exclusão gravados, sem exemplos de caminho.
+fn skip_summary_phrase(coverage: &StoredCoverage) -> String {
+    let total: usize = coverage
+        .skip_reasons
+        .iter()
+        .map(|reason| reason.count)
+        .sum();
+    let intentional: usize = coverage
+        .skip_reasons
+        .iter()
+        .filter(|reason| !reason.reduces_coverage)
+        .map(|reason| reason.count)
+        .sum();
+    let gaps = total - intentional;
+    format!(
+        "Motivos dos não incluídos: {} ({} {}, {} {})",
+        total,
+        intentional,
+        if intentional == 1 {
+            "intencional"
+        } else {
+            "intencionais"
+        },
+        gaps,
+        if gaps == 1 {
+            "reduz cobertura"
+        } else {
+            "reduzem cobertura"
+        }
+    )
+}
+
+/// Descreve um motivo gravado sem listar entradas.
+fn skip_reason_phrase(reason: &StoredSkipReason) -> String {
+    format!(
+        "{}: {} ({})",
+        reason.label,
+        reason.count,
+        if reason.reduces_coverage {
+            "reduz cobertura"
+        } else {
+            "intencional"
+        }
+    )
+}
+
+/// Diferença com sinal explícito entre duas contagens.
+fn signed_delta(before: usize, after: usize) -> String {
+    let before = i64::try_from(before).unwrap_or(i64::MAX);
+    let after = i64::try_from(after).unwrap_or(i64::MAX);
+    let delta = after - before;
+    if delta > 0 {
+        format!("+{delta}")
+    } else {
+        delta.to_string()
+    }
+}
+
+/// Compara os motivos de exclusão de duas execuções em ordem determinística.
+fn skip_reason_changes(before: &StoredCoverage, after: &StoredCoverage) -> String {
+    let mut parts = Vec::new();
+    for reason in &before.skip_reasons {
+        let after_count = after
+            .skip_reasons
+            .iter()
+            .find(|entry| entry.label == reason.label)
+            .map_or(0, |entry| entry.count);
+        parts.push(format!(
+            "{} {} -> {}",
+            reason.label, reason.count, after_count
+        ));
+    }
+    for reason in &after.skip_reasons {
+        if !before
+            .skip_reasons
+            .iter()
+            .any(|entry| entry.label == reason.label)
+        {
+            parts.push(format!("{} 0 -> {}", reason.label, reason.count));
+        }
+    }
+    if parts.is_empty() {
+        "(nenhum)".to_owned()
+    } else {
+        parts.join("; ")
+    }
 }
 
 /// Acrescenta o cabeçalho comum de um achado às linhas de saída.
@@ -897,6 +1302,15 @@ mod tests {
             .expect("legacy schema must be created");
         connection
             .execute(
+                "CREATE TABLE schema_migrations (
+                    version INTEGER PRIMARY KEY,
+                    applied_at_unix INTEGER NOT NULL
+                 )",
+                [],
+            )
+            .expect("migration control table must be created");
+        connection
+            .execute(
                 "INSERT INTO schema_migrations (version, applied_at_unix) VALUES (1, 0)",
                 [],
             )
@@ -939,7 +1353,7 @@ mod tests {
         let run_id = create_version_one_database(&database.path);
 
         {
-            let mut history = database.open();
+            let history = database.open();
             let detail = history
                 .get(run_id)
                 .expect("legacy run must remain readable after migration");
@@ -1005,9 +1419,9 @@ mod tests {
         assert!(rendered.contains(
             "Cobertura do código: 2 de 4 arquivo(s) analisados (parcial); sem analisador: .go (1), .rb (1)"
         ));
-        assert!(rendered.contains(
-            "Motivos dos não incluídos: 1 (1 intencional, 0 reduzem cobertura)"
-        ));
+        assert!(
+            rendered.contains("Motivos dos não incluídos: 1 (1 intencional, 0 reduzem cobertura)")
+        );
         assert!(rendered.contains("  - fora do include: 1 (intencional)"));
     }
 
@@ -1052,16 +1466,11 @@ mod tests {
 
         let rendered = render_comparison(&comparison);
         assert!(rendered.contains(
-            "Cobertura: 2 de 4 analisados (parcial); sem analisador: .go (1), .rb (1)"
-        ));
-        assert!(rendered.contains(
-            "        -> 3 de 4 analisados (parcial); sem analisador: .rb (1)"
+            "Cobertura: 2 de 4 analisados (parcial); sem analisador: .go (1), .rb (1) -> 3 de 4 analisados (parcial); sem analisador: .rb (1)"
         ));
         assert!(rendered.contains("  analisados: 2 -> 3 (+1)"));
         assert!(rendered.contains("  não analisados: 2 -> 1 (-1)"));
-        assert!(rendered.contains(
-            "  sem analisador: .go (1), .rb (1) -> .rb (1)"
-        ));
+        assert!(rendered.contains("  sem analisador: .go (1), .rb (1) -> .rb (1)"));
         assert!(rendered.contains("  motivos de exclusão: fora do include 1 -> 1"));
     }
 
@@ -1398,5 +1807,56 @@ mod tests {
         assert!(output.contains("Novos achados (0):\n  (nenhum)"));
         assert!(output.contains("Achados resolvidos (0):\n  (nenhum)"));
         assert!(output.contains("Achados persistentes (5):"));
+    }
+
+    /// Cobertura vazia e deltas zero não devem inventar dados nem sinais.
+    #[test]
+    fn coverage_helpers_handle_empty_values_and_zero_delta() {
+        let empty = StoredCoverage::default();
+
+        assert_eq!(coverage_phrase(&empty, false), "0 de 0 analisados");
+        assert_eq!(
+            describe_stored_unsupported(&empty.unsupported_extensions),
+            "(nenhum)"
+        );
+        assert_eq!(
+            skip_summary_phrase(&empty),
+            "Motivos dos não incluídos: 0 (0 intencionais, 0 reduzem cobertura)"
+        );
+        assert_eq!(signed_delta(2, 2), "0");
+        assert_eq!(skip_reason_changes(&empty, &empty), "(nenhum)");
+    }
+
+    /// Motivos que surgiram ou desapareceram aparecem com contagem zero explícita.
+    #[test]
+    fn skip_reason_changes_tracks_added_and_removed_labels() {
+        let before = StoredCoverage {
+            skip_reasons: vec![StoredSkipReason {
+                label: "excluído".to_owned(),
+                count: 2,
+                reduces_coverage: false,
+            }],
+            ..StoredCoverage::default()
+        };
+        let after = StoredCoverage {
+            skip_reasons: vec![StoredSkipReason {
+                label: "link simbólico".to_owned(),
+                count: 1,
+                reduces_coverage: true,
+            }],
+            ..StoredCoverage::default()
+        };
+
+        let changes = skip_reason_changes(&before, &after);
+        assert!(changes.contains("excluído 2 -> 0"));
+        assert!(changes.contains("link simbólico 0 -> 1"));
+        assert_eq!(
+            skip_summary_phrase(&after),
+            "Motivos dos não incluídos: 1 (0 intencionais, 1 reduz cobertura)"
+        );
+        assert_eq!(
+            skip_reason_phrase(&after.skip_reasons[0]),
+            "link simbólico: 1 (reduz cobertura)"
+        );
     }
 }

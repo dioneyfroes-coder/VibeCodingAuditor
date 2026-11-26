@@ -198,11 +198,12 @@ pub fn layer_mapping_limitations(contract: &Contract, analysis: &Analysis) -> Ve
         .flat_map(|layer| layer.modules.iter().map(String::as_str))
         .collect();
     let mut limitations = BTreeSet::new();
-    for edge in analysis
-        .edges
-        .iter()
-        .filter(|edge| edge.kind != DependencyKind::Unresolved)
-    {
+    for edge in analysis.edges.iter().filter(|edge| {
+        matches!(
+            edge.kind,
+            DependencyKind::Allowed | DependencyKind::Forbidden
+        )
+    }) {
         if !mapped_modules.contains(edge.from.as_str())
             || !mapped_modules.contains(edge.to.as_str())
         {
@@ -310,7 +311,10 @@ fn cycle_findings(analysis: &Analysis) -> Vec<Finding> {
 
     let mut edges_by_component: BTreeMap<String, Vec<&DependencyEdge>> = BTreeMap::new();
     for edge in &analysis.edges {
-        if edge.kind == DependencyKind::Unresolved {
+        if !matches!(
+            edge.kind,
+            DependencyKind::Allowed | DependencyKind::Forbidden
+        ) {
             continue;
         }
         let (Some(from), Some(to)) = (
@@ -577,7 +581,10 @@ fn module_without_files_findings(contract: &Contract, inventory: &Inventory) -> 
 fn build_adjacency(analysis: &Analysis) -> BTreeMap<String, BTreeSet<String>> {
     let mut adjacency: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for edge in &analysis.edges {
-        if edge.kind == DependencyKind::Unresolved {
+        if !matches!(
+            edge.kind,
+            DependencyKind::Allowed | DependencyKind::Forbidden
+        ) {
             continue;
         }
         adjacency

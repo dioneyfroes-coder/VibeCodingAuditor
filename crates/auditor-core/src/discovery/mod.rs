@@ -27,8 +27,52 @@ pub const DEFAULT_IGNORED_DIRS: &[&str] = &[
     ".turbo",
 ];
 
-/// Resultado de uma varredura.
+/// Extensões incluídas por padrão quando não há `scan.include` do contrato.
+///
+/// A lista acompanha os analisadores disponíveis em `analysis` e não inclui
+/// documentação nem arquivos de configuração.
+pub const DEFAULT_DISCOVERY_INCLUDE: &[&str] = &[
+    "**/*.rs", "**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/*.py",
+];
+
+/// Escopo de varredura, separado das regras arquiteturais do contrato.
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScanOptions {
+    /// Padrões que precisam corresponder para um arquivo entrar no inventário.
+    pub include: Vec<String>,
+    /// Padrões que excluem arquivos e diretórios do inventário.
+    pub exclude: Vec<String>,
+}
+
+impl ScanOptions {
+    /// Deriva o escopo de varredura de um contrato válido.
+    pub fn from_contract(contract: &Contract) -> Self {
+        Self {
+            include: contract.scan.include.clone(),
+            exclude: contract.scan.exclude.clone(),
+        }
+    }
+
+    /// Escopo seguro usado quando o projeto não tem `auditor.toml`.
+    pub fn without_contract() -> Self {
+        Self {
+            include: DEFAULT_DISCOVERY_INCLUDE
+                .iter()
+                .map(|pattern| (*pattern).to_owned())
+                .collect(),
+            exclude: Vec::new(),
+        }
+    }
+}
+
+impl Default for ScanOptions {
+    fn default() -> Self {
+        Self::without_contract()
+    }
+}
+
+/// Resultado de uma varredura.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Inventory {
     /// Raiz canonicalizada informada pelo usuário.
     pub root: PathBuf,
@@ -39,7 +83,7 @@ pub struct Inventory {
 }
 
 /// Arquivo incluído no inventário.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiscoveredFile {
     /// Caminho relativo à raiz, usando `/` como separador.
     pub path: String,
@@ -50,7 +94,7 @@ pub struct DiscoveredFile {
 }
 
 /// Entrada não incluída no inventário.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SkippedEntry {
     /// Caminho relativo da entrada, usando `/` como separador.
     pub path: String,
@@ -138,8 +182,18 @@ impl Error for DiscoveryError {
     }
 }
 
-/// Percorre a raiz e produz um inventário ordenado.
+/// Percorre a raiz e produz um inventário ordenado usando o escopo do contrato.
 pub fn discover(root: &Path, contract: &Contract) -> Result<Inventory, DiscoveryError> {
+    discover_with_options(root, &ScanOptions::from_contract(contract))
+}
+
+/// Percorre a raiz sem contrato, usando apenas defaults seguros de descoberta.
+pub fn discover_without_contract(root: &Path) -> Result<Inventory, DiscoveryError> {
+    discover_with_options(root, &ScanOptions::default())
+}
+
+/// Percorre a raiz com opções de varredura já separadas das regras arquiteturais.
+fn discover_with_options(root: &Path, options: &ScanOptions) -> Result<Inventory, DiscoveryError> {
     let canonical_root = fs::canonicalize(root).map_err(|source| DiscoveryError::Root {
         path: root.to_path_buf(),
         source,
@@ -151,7 +205,7 @@ pub fn discover(root: &Path, contract: &Contract) -> Result<Inventory, Discovery
         skipped: Vec::new(),
     };
 
-    walk_tree(&canonical_root, &canonical_root, contract, &mut inventory);
+    walk_tree(&canonical_root, &canonical_root, options, &mut inventory);
 
     inventory
         .files
@@ -163,7 +217,7 @@ pub fn discover(root: &Path, contract: &Contract) -> Result<Inventory, Discovery
 }
 
 /// Percorre um diretório, registrando arquivos incluídos e entradas ignoradas.
-fn walk_tree(root: &Path, directory: &Path, contract: &Contract, inventory: &mut Inventory) {
+fn walk_tree(root: &Path, directory: &Path, options: &ScanOptions, inventory: &mut Inventory) {
     let entries = match fs::read_dir(directory) {
         Ok(entries) => entries,
         Err(_) => {
@@ -223,27 +277,26 @@ fn walk_tree(root: &Path, directory: &Path, contract: &Contract, inventory: &mut
                 });
                 continue;
             }
-            if is_excluded_path(&path, contract) {
+            if is_excluded_by(&path, &options.exclude) {
                 inventory.skipped.push(SkippedEntry {
                     path,
                     reason: SkipReason::Excluded,
                 });
                 continue;
             }
-            walk_tree(root, &entry_path, contract, inventory);
+            walk_tree(root, &entry_path, options, inventory);
             continue;
         }
 
         if file_type.is_file() {
-            if is_excluded_path(&path, contract) {
+            if is_excluded_by(&path, &options.exclude) {
                 inventory.skipped.push(SkippedEntry {
                     path,
                     reason: SkipReason::Excluded,
                 });
                 continue;
             }
-            if !contract
-                .scan
+            if !options
                 .include
                 .iter()
                 .any(|pattern| matches_pattern(pattern, &path))
@@ -282,13 +335,15 @@ fn relative_path(root: &Path, path: &Path) -> String {
         .join("/")
 }
 
-/// Indica se o caminho foi excluído por `scan.exclude`.
+/// Indica se o caminho foi excluído por `scan.exclude` do contrato.
+#[cfg(test)]
 fn is_excluded_path(path: &str, contract: &Contract) -> bool {
-    contract
-        .scan
-        .exclude
-        .iter()
-        .any(|pattern| matches_pattern(pattern, path))
+    is_excluded_by(path, &contract.scan.exclude)
+}
+
+/// Indica se o caminho corresponde a algum padrão de exclusão informado.
+fn is_excluded_by(path: &str, exclude: &[String]) -> bool {
+    exclude.iter().any(|pattern| matches_pattern(pattern, path))
 }
 
 /// Corresponde ao subconjunto de glob usado pelo contrato: `**` como
@@ -528,5 +583,59 @@ modules = []
         assert!(matches_pattern_component("*.rs", "root.rs"));
         assert!(matches_pattern_component("app*.rs", "application.rs"));
         assert!(!matches_pattern_component("*.rs", "dir"));
+    }
+
+    #[test]
+    fn discovery_without_contract_uses_safe_defaults() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/projects/discovery_no_contract");
+        let inventory = discover_without_contract(&root).expect("discovery must succeed");
+        let files: Vec<&str> = inventory
+            .files
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect();
+
+        assert_eq!(
+            files,
+            vec![
+                "script.py",
+                "src/domain.rs",
+                "src/lib.rs",
+                "web/app.ts",
+                "web/util.ts"
+            ]
+        );
+        assert!(
+            inventory.skipped.iter().any(|entry| {
+                entry.path == "README.md" && entry.reason == SkipReason::NotIncluded
+            })
+        );
+        assert!(
+            inventory.skipped.iter().any(|entry| {
+                entry.path == "target" && entry.reason == SkipReason::DefaultIgnored
+            })
+        );
+    }
+
+    #[test]
+    fn scan_options_are_separate_from_architectural_rules() {
+        let contract = fixture_contract();
+        let options = ScanOptions::from_contract(&contract);
+
+        assert_eq!(options.include, contract.scan.include);
+        assert_eq!(options.exclude, contract.scan.exclude);
+        assert!(
+            ScanOptions::default()
+                .include
+                .iter()
+                .any(|pattern| pattern == "**/*.rs")
+        );
+        assert!(
+            ScanOptions::default()
+                .include
+                .iter()
+                .any(|pattern| pattern == "**/*.py")
+        );
     }
 }

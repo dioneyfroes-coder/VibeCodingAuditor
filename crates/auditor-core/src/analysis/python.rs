@@ -11,6 +11,7 @@ use std::path::{Component, Path};
 
 use super::{
     Analysis, DependencyKind, Module, ReviewItem, ReviewReason, find_word, record_dependency,
+    record_observed_dependency,
 };
 use crate::contract::Contract;
 use crate::discovery::{Inventory, matches_pattern};
@@ -427,10 +428,35 @@ fn classify_specifier(
     );
 }
 
+/// Registra especificadores Python como relações observadas, sem classificação.
+pub(super) fn observe_text(
+    path: &str,
+    text: &str,
+    analysis: &mut Analysis,
+    seen_edges: &mut HashSet<String>,
+) {
+    let mut state = ScanState::default();
+    for (index, raw_line) in text.lines().enumerate() {
+        let masked = mask_line(raw_line, &mut state);
+        for specifier in parse_specifiers(&masked) {
+            record_observed_dependency(
+                path,
+                &specifier,
+                "especificador Python observado; sem contrato para classificação".to_owned(),
+                Some(index + 1),
+                Some(raw_line.trim()),
+                path,
+                analysis,
+                seen_edges,
+            );
+        }
+    }
+}
+
 /// Analisa um arquivo Python e acrescenta arestas, revisões e limitações.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn analyze_text(
-    contract: &Contract,
+    contract: Option<&Contract>,
     contract_names: &HashSet<String>,
     inventory: &Inventory,
     path: &str,
@@ -440,8 +466,12 @@ pub(super) fn analyze_text(
     seen_edges: &mut HashSet<String>,
 ) {
     let Some(module) = module else {
+        if contract.is_none() {
+            observe_text(path, text, analysis, seen_edges);
+        }
         return;
     };
+    let contract = contract.expect("mapped module requires a contract");
 
     let files: HashSet<&str> = inventory
         .files

@@ -327,6 +327,7 @@ fn dependency_kind_label(kind: auditor_core::analysis::DependencyKind) -> &'stat
         auditor_core::analysis::DependencyKind::Allowed => "permitida",
         auditor_core::analysis::DependencyKind::Forbidden => "proibida",
         auditor_core::analysis::DependencyKind::Unresolved => "não resolvida",
+        auditor_core::analysis::DependencyKind::Observed => "observada",
     }
 }
 
@@ -529,5 +530,6 @@ mod tests {
             dependency_kind_label(DependencyKind::Unresolved),
             "não resolvida"
         );
+        assert_eq!(dependency_kind_label(DependencyKind::Observed), "observada");
     }
 }

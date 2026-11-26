@@ -13,7 +13,7 @@ use std::path::{Component, Path};
 
 use super::{
     Analysis, DependencyKind, Module, ReviewItem, ReviewReason, find_word, is_word_char,
-    record_dependency,
+    record_dependency, record_observed_dependency,
 };
 use crate::contract::Contract;
 use crate::discovery::{Inventory, matches_pattern};
@@ -531,10 +531,65 @@ fn line_for_offset(line_starts: &[usize], offset: usize) -> usize {
     line.min(line_starts.len().saturating_sub(1))
 }
 
+/// Registra especificadores TypeScript/JavaScript como relações observadas.
+pub(super) fn observe_text(
+    path: &str,
+    text: &str,
+    analysis: &mut Analysis,
+    seen_edges: &mut HashSet<String>,
+) {
+    let mut state = ScanState::default();
+    let mut masked_document = String::new();
+    let mut literals = Vec::new();
+    let mut line_starts = Vec::new();
+    let mut source_lines = Vec::new();
+
+    for raw_line in text.lines() {
+        line_starts.push(masked_document.len());
+        source_lines.push(raw_line.trim());
+        let (masked, mut line_literals) = mask_line(raw_line, &mut state);
+        masked_document.push_str(&masked);
+        masked_document.push('\n');
+        literals.append(&mut line_literals);
+    }
+    line_starts.push(masked_document.len());
+
+    for statement in parse_specifiers(&masked_document, &literals) {
+        let line = line_for_offset(&line_starts, statement.offset);
+        let end_line = line_for_offset(&line_starts, statement.end.saturating_sub(1));
+        let first = line.saturating_sub(1);
+        let last = end_line.max(line).min(source_lines.len());
+        let evidence = source_lines[first..last].join(" ");
+
+        match statement.specifier {
+            ParsedSpecifier::Static(specifier) => record_observed_dependency(
+                path,
+                &specifier,
+                "especificador observado; sem contrato para classificação".to_owned(),
+                Some(line),
+                Some(&evidence),
+                path,
+                analysis,
+                seen_edges,
+            ),
+            ParsedSpecifier::DynamicLiteral(specifier) => {
+                analysis.limitations.push(format!(
+                    "{path}:{line} especificador de template literal não é resolvido: {specifier}"
+                ));
+            }
+            ParsedSpecifier::DynamicExpression => {
+                analysis.limitations.push(format!(
+                    "{path}:{line} importação dinâmica sem literal estático não é resolvida"
+                ));
+            }
+        }
+    }
+}
+
 /// Analisa um arquivo TypeScript/JavaScript e acrescenta arestas e revisões.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn analyze_text(
-    contract: &Contract,
+    contract: Option<&Contract>,
     contract_names: &HashSet<String>,
     inventory: &Inventory,
     path: &str,
@@ -544,8 +599,12 @@ pub(super) fn analyze_text(
     seen_edges: &mut HashSet<String>,
 ) {
     let Some(module) = module else {
+        if contract.is_none() {
+            observe_text(path, text, analysis, seen_edges);
+        }
         return;
     };
+    let contract = contract.expect("mapped module requires a contract");
 
     let files: HashSet<&str> = inventory
         .files

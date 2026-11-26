@@ -230,6 +230,8 @@ pub enum DependencyKind {
     Forbidden,
     /// O destino não pôde ser associado a um módulo do contrato.
     Unresolved,
+    /// Relação vista no código, sem contrato aprovado para classificá-la.
+    Observed,
 }
 
 /// Aresta direcional entre dois módulos.
@@ -341,6 +343,8 @@ impl Error for AnalysisError {
 enum LocalDependencyTarget {
     /// O pacote local foi associado sem ambiguidade a um módulo do contrato.
     Module(String),
+    /// O pacote local foi visto sem contrato: permanece como relação observada.
+    Package(String),
     /// Não há evidência suficiente; a importação exige revisão explícita.
     NeedsReview(String),
 }
@@ -363,7 +367,7 @@ struct VisitContext<'a> {
     path: &'a str,
     contract_module: Option<&'a Module>,
     lines: &'a [&'a str],
-    contract: &'a Contract,
+    contract: Option<&'a Contract>,
     contract_names: &'a HashSet<String>,
     workspace_names: &'a HashSet<String>,
     declared_dependencies: &'a HashSet<String>,
@@ -373,10 +377,24 @@ struct VisitContext<'a> {
     seen_edges: &'a mut HashSet<String>,
 }
 
-/// Analisa os arquivos Rust do inventário e produz o grafo inicial.
+/// Analisa os arquivos do inventário com as regras do contrato aprovado.
 pub fn analyze(
     root: &Path,
     contract: &Contract,
+    inventory: &Inventory,
+) -> Result<Analysis, AnalysisError> {
+    analyze_inner(root, Some(contract), inventory)
+}
+
+/// Analisa os arquivos do inventário sem módulos declarados nem classificação.
+pub fn analyze_observations(root: &Path, inventory: &Inventory) -> Result<Analysis, AnalysisError> {
+    analyze_inner(root, None, inventory)
+}
+
+/// Coleta evidências e, quando há contrato, classifica as relações encontradas.
+fn analyze_inner(
+    root: &Path,
+    contract: Option<&Contract>,
     inventory: &Inventory,
 ) -> Result<Analysis, AnalysisError> {
     let mut workspace_limitations = Vec::new();
@@ -403,19 +421,27 @@ pub fn analyze(
         .map(|file| file.path.clone())
         .collect();
     let contract_names: HashSet<String> = contract
-        .architecture
-        .modules
-        .iter()
-        .map(|module| module.name.clone())
-        .collect();
+        .map(|contract| {
+            contract
+                .architecture
+                .modules
+                .iter()
+                .map(|module| module.name.clone())
+                .collect()
+        })
+        .unwrap_or_default();
 
     let mut analysis = Analysis {
         modules: contract
-            .architecture
-            .modules
-            .iter()
-            .map(|module| module.name.clone())
-            .collect(),
+            .map(|contract| {
+                contract
+                    .architecture
+                    .modules
+                    .iter()
+                    .map(|module| module.name.clone())
+                    .collect()
+            })
+            .unwrap_or_default(),
         workspace,
         edges: Vec::new(),
         reviews: Vec::new(),
@@ -463,7 +489,8 @@ pub fn analyze(
             }
         };
 
-        let module = module_for_file(contract, &file.path, &mut analysis);
+        let module =
+            contract.and_then(|contract| module_for_file(contract, &file.path, &mut analysis));
 
         if extension == Some("rs") {
             let parsed = match syn::parse_file(&text) {
@@ -615,6 +642,10 @@ fn visit_items(items: &[Item], context: &mut VisitContext<'_>) {
                     for leaf in use_path_leaves {
                         classify_use(context, &leaf, line, evidence);
                     }
+                } else if context.contract.is_none() {
+                    for leaf in &use_path_leaves {
+                        observe_use_path(context, leaf, line, evidence);
+                    }
                 }
             }
             Item::Mod(item_mod) => {
@@ -705,13 +736,18 @@ impl<'ast> Visit<'ast> for QualifiedPathVisitor<'ast, '_> {
         );
         if self.context.contract_module.is_some() {
             classify_use(self.context, &leaf, line, evidence);
+        } else if self.context.contract.is_none() {
+            observe_qualified_path(self.context, &leaf, line, evidence);
         }
         visit::visit_path(self, path);
     }
 }
 
 /// Módulos do contrato cujo `path` corresponde ao caminho informado.
-fn modules_for_path<'a>(contract: &'a Contract, path: &str) -> Vec<&'a Module> {
+fn modules_for_path<'a>(contract: Option<&'a Contract>, path: &str) -> Vec<&'a Module> {
+    let Some(contract) = contract else {
+        return Vec::new();
+    };
     contract
         .architecture
         .modules
@@ -726,7 +762,7 @@ pub(crate) fn module_for_file<'a>(
     path: &str,
     analysis: &mut Analysis,
 ) -> Option<&'a Module> {
-    let matching_modules = modules_for_path(contract, path);
+    let matching_modules = modules_for_path(Some(contract), path);
 
     match matching_modules.len() {
         0 => {
@@ -797,6 +833,97 @@ pub(crate) fn record_dependency(
     });
 }
 
+/// Registra uma relação vista no código sem julgá-la pelo contrato.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn record_observed_dependency(
+    from: &str,
+    target: &str,
+    detail: String,
+    line: Option<usize>,
+    evidence: Option<&str>,
+    path: &str,
+    analysis: &mut Analysis,
+    seen_edges: &mut HashSet<String>,
+) {
+    let edge_key = format!("observed\0{from}\0{target}\0{path}\0{line:?}");
+    if !seen_edges.insert(edge_key) {
+        return;
+    }
+
+    analysis.edges.push(DependencyEdge {
+        from: from.to_owned(),
+        to: target.to_owned(),
+        kind: DependencyKind::Observed,
+        path: path.to_owned(),
+        line,
+        evidence: evidence.map(str::to_owned),
+        detail,
+    });
+}
+
+/// Extrai o primeiro destino nomeado de uma folha de caminho Rust.
+fn observed_target_from_leaf(leaf: &[String]) -> Option<String> {
+    let first = leaf.first()?;
+    if IGNORED_ROOTS.contains(&first.as_str()) {
+        return None;
+    }
+    let target = if matches!(first.as_str(), "crate" | "self" | "super") {
+        leaf.get(1)?.clone()
+    } else {
+        first.clone()
+    };
+    (!matches!(target.as_str(), "crate" | "self" | "super")).then_some(target)
+}
+
+/// Registra um `use` como relação observada quando não há módulo do contrato.
+fn observe_use_path(
+    context: &mut VisitContext<'_>,
+    leaf: &[String],
+    line: Option<usize>,
+    evidence: Option<&str>,
+) {
+    let Some(target) = observed_target_from_leaf(leaf) else {
+        return;
+    };
+    let detail = if context.declared_dependencies.contains(&target) {
+        "dependência declarada observada; sem contrato para classificação"
+    } else {
+        "destino observado no código; sem contrato para classificação"
+    };
+    record_observed_dependency(
+        context.path,
+        &target,
+        detail.to_owned(),
+        line,
+        evidence,
+        context.path,
+        &mut *context.analysis,
+        &mut *context.seen_edges,
+    );
+}
+
+/// Registra um caminho qualificado como relação observada.
+fn observe_qualified_path(
+    context: &mut VisitContext<'_>,
+    leaf: &[String],
+    line: Option<usize>,
+    evidence: Option<&str>,
+) {
+    let Some(target) = observed_target_from_leaf(leaf) else {
+        return;
+    };
+    record_observed_dependency(
+        context.path,
+        &target,
+        "destino qualificado observado; sem contrato para classificação".to_owned(),
+        line,
+        evidence,
+        context.path,
+        &mut *context.analysis,
+        &mut *context.seen_edges,
+    );
+}
+
 /// Resultado da resolução de um caminho relativo Rust.
 enum RelativeTarget {
     /// O destino pertence ao próprio módulo e não cruza uma fronteira.
@@ -851,6 +978,16 @@ fn classify_local_dependency(
             line,
             evidence,
             "dependência local do workspace associada ao módulo do contrato".to_owned(),
+        ),
+        LocalDependencyTarget::Package(name) => record_observed_dependency(
+            context.path,
+            &name,
+            "pacote local observado; sem contrato para classificação".to_owned(),
+            line,
+            evidence,
+            context.path,
+            &mut *context.analysis,
+            &mut *context.seen_edges,
         ),
         LocalDependencyTarget::NeedsReview(detail) => record_dependency(
             module,
@@ -1515,7 +1652,7 @@ fn module_is_inside_package(module_path: &str, package_dir: &str) -> bool {
 /// Associa uma dependência `path` a um módulo do contrato, quando possível.
 fn resolve_one_local_dependency(
     root: &Path,
-    contract: &Contract,
+    contract: Option<&Contract>,
     dependency: &DeclaredLocalDependency,
     workspace: &WorkspaceInfo,
 ) -> LocalDependencyTarget {
@@ -1544,6 +1681,9 @@ fn resolve_one_local_dependency(
         ));
     };
 
+    let Some(contract) = contract else {
+        return LocalDependencyTarget::Package(package.name.clone());
+    };
     let mut candidates: Vec<&str> = contract
         .architecture
         .modules
@@ -1589,7 +1729,7 @@ fn insert_local_target(
 /// Resolve todas as dependências `path` declaradas no Cargo.
 fn resolve_local_dependencies(
     root: &Path,
-    contract: &Contract,
+    contract: Option<&Contract>,
     declared: &[DeclaredLocalDependency],
     workspace: &Option<WorkspaceInfo>,
 ) -> BTreeMap<String, LocalDependencyTarget> {
@@ -2611,5 +2751,35 @@ mod tests {
         assert!(analysis.limitations.iter().any(|limitation| {
             limitation.contains("../outside/*") && limitation.contains("não é suportado")
         }));
+    }
+
+    #[test]
+    fn discovery_analysis_records_observed_edges_without_contract() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/projects/discovery_no_contract");
+        let inventory = crate::discovery::discover_without_contract(&root)
+            .expect("discovery without contract must succeed");
+        let analysis = analyze_observations(&root, &inventory).expect("analysis must succeed");
+
+        assert!(analysis.modules.is_empty());
+        assert!(analysis.reviews.is_empty());
+        assert_eq!(analysis.coverage.code_files_included, 5);
+        assert_eq!(analysis.coverage.code_files_analyzed, 5);
+
+        let observed = |from: &str, to: &str| {
+            analysis.edges.iter().any(|edge| {
+                edge.from == from && edge.to == to && edge.kind == DependencyKind::Observed
+            })
+        };
+        assert!(observed("src/lib.rs", "auditor_core"));
+        assert!(observed("src/lib.rs", "domain"));
+        assert!(observed("web/app.ts", "./util"));
+        assert!(observed("script.py", "src.domain"));
+        assert!(
+            analysis
+                .edges
+                .iter()
+                .all(|edge| edge.kind == DependencyKind::Observed)
+        );
     }
 }

@@ -15,7 +15,7 @@ Estado consolidado das Etapas 0–10 e dos trabalhos posteriores. Decisões e es
 | 8 | Criar a aplicação desktop com Tauri | Concluída em 25/11/2026 — Tauri/React compilados e iniciados; 78 testes passaram |
 | 9 | Criar a extensão VS Code | Concluída em 25/11/2026 — `.vsix` gerado; diagnósticos conferem com a CLI; 82 testes passaram |
 | 10 | Expandir linguagens e recursos | Concluída em 25/11/2026; extensões adicionais nesta rodada: TypeScript/JavaScript e Python no núcleo. Demais opções avaliadas e diferidas |
-| 4 (nova fase) | Descoberta automática e Architecture Builder | Em andamento — Etapa 4.0 concluída em 26/11/2026; nenhuma funcionalidade implementada ainda |
+| 4 (nova fase) | Descoberta automática e Architecture Builder | Em andamento — Etapas 4.0 e 4.1 concluídas em 26/11/2026; descoberta sem contrato implementada no núcleo |
 
 Etapa 2 (confiabilidade do motor): concluída em 26/11/2026 — itens 2.1 a 2.8 verificados localmente no Windows e cobertos pelo workflow de CI, cuja primeira execução remota (`CI Windows` #1, commit `7a07286`) terminou com sucesso.
 
@@ -465,9 +465,19 @@ Nova fase iniciada em 26/11/2026 a partir de `PLANO_ETAPA_4_DESCOBERTA_E_ARCHITE
 - [x] Decisão `E4.0` registrada antes de qualquer mudança arquitetural: contrato opcional, modos separados, TOML inválido como erro, descoberta sem falsas violações, nenhuma aprovação automática de dependências, perfis limitados ao schema suportado e núcleo como fonte única da verdade. A implementação depende de aprovação.
 - [x] Proposta técnica escrita em [docs/architecture/DISCOVERY_MODE_PROPOSAL.md](architecture/DISCOVERY_MODE_PROPOSAL.md), incluindo APIs afetadas, formato de descoberta, agrupamento de candidatos, compatibilidade CLI/JSON/SQLite, mudanças previstas no desktop e riscos.
 
-### Etapa 4.1 a 4.8 — Não iniciadas
+### Etapa 4.1 — Descoberta sem contrato no núcleo — Concluída em 26/11/2026
 
-- [ ] 4.1 — descoberta sem contrato no núcleo.
+- [x] Após o usuário responder “prossiga”, a implementação ficou restrita ao núcleo; CLI, Tauri, React, extensão, SQLite e contratos não foram alterados em comportamento.
+- [x] `ScanOptions` separa escopo de varredura de regras arquiteturais. `discover()` continua usando `scan.include`/`scan.exclude` do contrato; `discover_without_contract()` usa `DEFAULT_DISCOVERY_INCLUDE` (`.rs`, `.ts`, `.tsx`, `.js`, `.jsx`, `.py`) e nenhuma exclusão adicional. `DEFAULT_IGNORED_DIRS` e `SkippedEntry` permanecem os mesmos.
+- [x] `DependencyKind::Observed` representa relação vista no código sem classificação. `analyze_observations()` roda sem módulos declarados e não produz `reviews`, arestas `Allowed`/`Forbidden` nem aprovação automática. `analyze()` preserva o caminho de conformidade.
+- [x] `project_run()` escolhe o modo pela presença de `auditor.toml`: `ProjectRun::Discovery` sem contrato, `ProjectRun::Compliance` com contrato válido. TOML existente e inválido retorna `AuditError::Contract`; não há fallback silencioso. `ExecutionMode` e `ContractStatus` tornam o modo explícito no modelo e no JSON.
+- [x] Relações observadas guardam arquivo, linha, evidência e detalhe. Rust registra `use` e caminhos qualificados; TypeScript/JavaScript e Python registram especificadores estáticos lidos pelos mascaradores existentes, com limitações para especificadores dinâmicos. `skip_summary` e `coverage` continuam presentes no inventário e na análise.
+- [x] Testes escritos antes da implementação falharam na fase vermelha por funções e tipos inexistentes. A primeira suíte completa após a implementação encontrou uma regressão em `ambiguous_module_becomes_review_without_definitive_mapping`: as novas ramificações de observação também rodavam com contrato válido. Elas foram restritas a `contract.is_none()` e a inclusão de `workspace_names` em `is_root` foi revertida; a suíte passou depois disso.
+- [x] Verificação final: `cargo fmt --all` = `0`, `cargo fmt --all --check` = `0`, `cargo check --workspace` = `0`, `cargo test --workspace` = `0` (202 testes: 188 no núcleo, 10 na CLI e 4 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` = `0`, `git diff --check` = `0` (apenas avisos LF/CRLF do OneDrive), `npm --prefix apps/desktop test` = `0` (12), `npm --prefix apps/desktop run build` = `0` e `npm --prefix extensions/vscode test` = `0` (7).
+- [x] Limitações explícitas: ainda não há módulos candidatos nem agrupamento por evidência (4.2); os comandos da CLI e o contrato do relatório não expõem o novo modo (4.3); `auditor init` continua gerando v1 (risco já registrado na proposta); descoberta cobre somente os analisadores existentes e não resolve pacotes externos.
+
+### Etapa 4.2 a 4.8 — Não iniciadas
+
 - [ ] 4.2 — módulos candidatos e relações observadas.
 - [ ] 4.3 — CLI e contrato do relatório.
 - [ ] 4.4 — modelo do Architecture Builder.
@@ -476,4 +486,4 @@ Nova fase iniciada em 26/11/2026 a partir de `PLANO_ETAPA_4_DESCOBERTA_E_ARCHITE
 - [ ] 4.7 — consistência entre CLI, VS Code e histórico.
 - [ ] 4.8 — fixtures, validação manual e fechamento.
 
-Nenhuma subetapa de 4.1 a 4.8 foi iniciada. Esta seção será atualizada somente com evidência de testes e comportamentos realmente implementados.
+Esta seção será atualizada somente com evidência de testes e comportamentos realmente implementados.

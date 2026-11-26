@@ -8,9 +8,11 @@ use std::error::Error;
 use std::fmt;
 use std::path::Path;
 
-use crate::analysis::{self, AnalysisError};
-use crate::contract::{self, ContractError};
-use crate::discovery::{self, DiscoveryError};
+use serde::Serialize;
+
+use crate::analysis::{self, Analysis, AnalysisError};
+use crate::contract::{self, Contract, ContractError};
+use crate::discovery::{self, DiscoveryError, Inventory};
 use crate::report::AuditReport;
 use crate::rules;
 
@@ -43,6 +45,69 @@ impl From<AnalysisError> for AuditError {
     }
 }
 
+/// Modo de execução, explícito em todos os resultados serializados.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionMode {
+    /// Estrutura observada, sem contrato aprovado.
+    Discovery,
+    /// Comparação com um contrato válido.
+    Compliance,
+}
+
+/// Estado do contrato na raiz informada.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ContractStatus {
+    /// Não há `auditor.toml` na raiz.
+    Missing,
+    /// Há um contrato válido, com a versão de schema lida.
+    Present {
+        /// Versão de schema do contrato aprovado.
+        schema_version: u32,
+    },
+}
+
+/// Resultado da descoberta sem contrato.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DiscoveryReport {
+    /// Estado do contrato, sempre `missing` neste modo.
+    pub contract: ContractStatus,
+    /// Inventário produzido com os defaults seguros de descoberta.
+    pub inventory: Inventory,
+    /// Relações observadas, sem classificação arquitetural.
+    pub analysis: Analysis,
+}
+
+/// Resultado da conformidade com contrato válido.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ComplianceRun {
+    /// Estado do contrato, sempre `present` neste modo.
+    pub contract: ContractStatus,
+    /// Relatório de conformidade inalterado.
+    pub report: AuditReport,
+}
+
+/// Execução discriminada: descoberta ou conformidade.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum ProjectRun {
+    /// Nenhum contrato válido foi encontrado.
+    Discovery(DiscoveryReport),
+    /// Um contrato válido foi carregado e aplicado.
+    Compliance(ComplianceRun),
+}
+
+impl ProjectRun {
+    /// Modo explícito desta execução.
+    pub fn mode(&self) -> ExecutionMode {
+        match self {
+            Self::Discovery(_) => ExecutionMode::Discovery,
+            Self::Compliance(_) => ExecutionMode::Compliance,
+        }
+    }
+}
+
 impl fmt::Display for AuditError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -63,14 +128,19 @@ impl Error for AuditError {
     }
 }
 
-/// Executa o pipeline completo na raiz informada e devolve o relatório.
+/// Executa o pipeline de conformidade na raiz informada e devolve o relatório.
 pub fn audit_project(root: &Path) -> Result<AuditReport, AuditError> {
     let contract = contract::load_contract(&root.join("auditor.toml"))?;
-    let inventory = discovery::discover(root, &contract)?;
-    let analysis = analysis::analyze(root, &contract, &inventory)?;
-    let findings = rules::evaluate(&contract, &inventory, &analysis);
-    let mut report = AuditReport::from_pipeline(&contract, &inventory, &analysis, findings);
-    for limitation in rules::layer_mapping_limitations(&contract, &analysis) {
+    audit_with_contract(root, &contract)
+}
+
+/// Executa o pipeline de conformidade com um contrato já validado.
+fn audit_with_contract(root: &Path, contract: &Contract) -> Result<AuditReport, AuditError> {
+    let inventory = discovery::discover(root, contract)?;
+    let analysis = analysis::analyze(root, contract, &inventory)?;
+    let findings = rules::evaluate(contract, &inventory, &analysis);
+    let mut report = AuditReport::from_pipeline(contract, &inventory, &analysis, findings);
+    for limitation in rules::layer_mapping_limitations(contract, &analysis) {
         if !report.limitations.contains(&limitation) {
             report.limitations.push(limitation);
         }
@@ -78,8 +148,41 @@ pub fn audit_project(root: &Path) -> Result<AuditReport, AuditError> {
     Ok(report)
 }
 
+/// Inventaria e analisa a raiz sem contrato, sem emitir conclusões de regra.
+pub fn discover_project(root: &Path) -> Result<DiscoveryReport, AuditError> {
+    let inventory = discovery::discover_without_contract(root)?;
+    let analysis = analysis::analyze_observations(root, &inventory)?;
+    Ok(DiscoveryReport {
+        contract: ContractStatus::Missing,
+        inventory,
+        analysis,
+    })
+}
+
+/// Escolhe o modo pela presença do contrato, sem fallback silencioso.
+pub fn project_run(root: &Path) -> Result<ProjectRun, AuditError> {
+    let contract_path = root.join("auditor.toml");
+    match contract_path.try_exists() {
+        Ok(true) => {
+            let contract = contract::load_contract(&contract_path)?;
+            let schema_version = contract.schema_version;
+            Ok(ProjectRun::Compliance(ComplianceRun {
+                contract: ContractStatus::Present { schema_version },
+                report: audit_with_contract(root, &contract)?,
+            }))
+        }
+        Ok(false) => Ok(ProjectRun::Discovery(discover_project(root)?)),
+        Err(source) => Err(AuditError::Contract(ContractError::Io {
+            path: contract_path,
+            source,
+        })),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
     use crate::discovery::{SkipReason, SkippedEntry};
     use crate::findings::Severity;
@@ -905,5 +1008,97 @@ mod tests {
                     && finding.path != "src/application/regex.ts"
                     && finding.path != "src/application/template.ts")
         );
+    }
+
+    #[test]
+    fn project_run_uses_discovery_without_contract() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/projects/discovery_no_contract");
+        let run = project_run(&root).expect("discovery run must succeed");
+
+        assert_eq!(run.mode(), ExecutionMode::Discovery);
+        match run {
+            ProjectRun::Discovery(report) => {
+                assert_eq!(report.contract, ContractStatus::Missing);
+                assert_eq!(report.analysis.coverage.code_files_analyzed, 5);
+                assert!(
+                    report
+                        .analysis
+                        .edges
+                        .iter()
+                        .all(|edge| { edge.kind == crate::analysis::DependencyKind::Observed })
+                );
+            }
+            ProjectRun::Compliance(_) => panic!("missing contract must not produce compliance"),
+        }
+    }
+
+    #[test]
+    fn project_run_preserves_compliance_with_valid_contract() {
+        let root = project_fixture("clean");
+        let run = project_run(&root).expect("compliance run must succeed");
+
+        assert_eq!(run.mode(), ExecutionMode::Compliance);
+        match run {
+            ProjectRun::Compliance(run) => {
+                assert_eq!(run.report.project, "projeto-correto");
+                assert!(matches!(
+                    run.contract,
+                    ContractStatus::Present { schema_version: 1 }
+                ));
+            }
+            ProjectRun::Discovery(_) => panic!("valid contract must not produce discovery"),
+        }
+    }
+
+    #[test]
+    fn project_run_preserves_v2_compliance_with_layer_findings() {
+        let root = project_fixture("layer_boundaries");
+        let run = project_run(&root).expect("v2 compliance run must succeed");
+
+        assert_eq!(run.mode(), ExecutionMode::Compliance);
+        let ProjectRun::Compliance(run) = run else {
+            panic!("valid v2 contract must not produce discovery");
+        };
+        assert_eq!(run.report.schema_version, 2);
+        assert!(matches!(
+            run.contract,
+            ContractStatus::Present { schema_version: 2 }
+        ));
+        assert!(
+            run.report
+                .findings
+                .iter()
+                .any(|finding| finding.rule_id == RULE_LAYER_NOT_ALLOWED)
+        );
+    }
+
+    #[test]
+    fn project_run_rejects_invalid_contract_instead_of_discovering() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/projects/discovery_invalid_contract");
+        let error = project_run(&root).expect_err("invalid contract must fail explicitly");
+
+        assert!(matches!(
+            error,
+            AuditError::Contract(ContractError::UnsupportedSchemaVersion { found: 99 })
+        ));
+    }
+
+    #[test]
+    fn project_run_serializes_mode_and_contract_status() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/projects/discovery_no_contract");
+        let discovery = project_run(&root).expect("discovery run must succeed");
+        let value = serde_json::to_value(&discovery).expect("discovery must serialize");
+        assert_eq!(value["mode"], "discovery");
+        assert_eq!(value["contract"]["status"], "missing");
+
+        let compliance =
+            project_run(&project_fixture("clean")).expect("compliance run must succeed");
+        let value = serde_json::to_value(&compliance).expect("compliance must serialize");
+        assert_eq!(value["mode"], "compliance");
+        assert_eq!(value["contract"]["status"], "present");
+        assert_eq!(value["contract"]["schema_version"], 1);
     }
 }

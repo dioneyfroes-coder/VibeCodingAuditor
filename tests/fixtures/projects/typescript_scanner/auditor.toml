@@ -1,0 +1,23 @@
+schema_version = 1
+
+[project]
+name = "projeto-scanner-typescript"
+
+[scan]
+include = ["src/**/*.ts"]
+exclude = []
+
+[architecture]
+style = "modular_monolith"
+
+[[architecture.modules]]
+name = "domain"
+path = "src/domain/**"
+responsibility = "Modelos usados pela fixture do scanner"
+allowed_dependencies = []
+
+[[architecture.modules]]
+name = "application"
+path = "src/application/**"
+responsibility = "Casos de uso com construções de importação difíceis"
+allowed_dependencies = ["domain"]

@@ -269,9 +269,21 @@ Ordem e critérios vêm de `RELATORIO_ETAPA_1_E_PLANO_ETAPA_2.md`, seção 8. Um
 - [x] Verificação: `cargo fmt --check`, `cargo test --workspace` (120 testes: 107 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `npm test` da extensão (4 testes) e `npm run build` da desktop passaram
 - [x] Smoke nas fixtures: `workspace_glob` descobriu `alpha`, `beta` e `legacy` com 1 aresta permitida, 0 achados e 0 limitações; `workspace_glob_unsupported` produziu 4 limitações e 0 pacotes sem erro de leitura
 
+### Item 2.5 — Corrigir a análise TypeScript/JavaScript — Concluído em 25/11/2026
+
+- [x] Ler o código como documento contínuo e delimitar declarações por profundidade de parênteses, colchetes e chaves
+- [x] Reconhecer `import` estático multilinha preservando linha de início e evidência reconstruída
+- [x] Diferenciar `import.meta` de declaração de import, sem capturar literais posteriores
+- [x] Mascarar comentários, strings, template literals e regex; testar cada caso sem aresta inventada
+- [x] Manter `import()`/`require()` com literal estático como aresta e converter template literal ou chamada sem literal em limitação explícita
+- [x] Criar a fixture `typescript_scanner` e testes de regressão antes da implementação
+- [x] Preservar `auditor.toml` v1, os `rule_id` existentes, o JSON consumido pela extensão e a fixture `typescript` com 8 arestas, 4 achados e 1 limitação
+- [x] Revisar paradigma, nomes descritivos, documentação de código e testes dos helpers
+- [x] Verificação: `cargo fmt --check`, `cargo test --workspace` (126 testes: 113 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `npm test` da extensão (4 testes) e `npm run build` da desktop passaram
+- [x] Smoke: `typescript` manteve 8 arestas, 4 achados e 1 limitação; `typescript_scanner` produziu 1 aresta multilinha, 0 achados e 3 limitações
+
 ### Itens seguintes — Não iniciados
 
-- [ ] 2.5 — Corrigir a análise TypeScript/JavaScript
 - [ ] 2.6 — Substituir enumeração de ciclos por componentes fortemente conectados
 - [ ] 2.7 — Expor os motivos de exclusão e a cobertura no relatório
 - [ ] 2.8 — Reforçar a verificação automatizada

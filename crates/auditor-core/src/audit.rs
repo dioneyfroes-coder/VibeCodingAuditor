@@ -603,4 +603,38 @@ mod tests {
             limitation.contains("empty/*") && limitation.contains("Cargo.toml")
         }));
     }
+
+    /// Scanner em documento contínuo: multilinha funciona, ruído não vira aresta.
+    #[test]
+    fn typescript_scanner_fixture_avoids_false_edges_and_reports_dynamic_limits() {
+        let root = project_fixture("typescript_scanner");
+        let report = audit_project(&root).expect("audit must succeed");
+
+        assert_eq!(report, audit_project(&root).expect("audit must succeed"));
+        assert_eq!(report.project, "projeto-scanner-typescript");
+        assert_eq!(report.summary.modules, 2);
+        assert_eq!(report.summary.edges, 1);
+        assert_eq!(report.summary.findings, 0);
+        assert_eq!(report.limitations.len(), 3);
+        assert!(
+            report
+                .limitations
+                .iter()
+                .any(|limitation| limitation.contains("pacotes npm"))
+        );
+        assert!(report.limitations.iter().any(|limitation| {
+            limitation.contains("dynamic_expression.ts") && limitation.contains("não é resolvida")
+        }));
+        assert!(report.limitations.iter().any(|limitation| {
+            limitation.contains("template_specifier.ts") && limitation.contains("template literal")
+        }));
+        assert!(
+            report
+                .findings
+                .iter()
+                .all(|finding| finding.path != "src/application/meta.ts"
+                    && finding.path != "src/application/regex.ts"
+                    && finding.path != "src/application/template.ts")
+        );
+    }
 }

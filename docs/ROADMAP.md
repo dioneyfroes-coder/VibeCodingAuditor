@@ -337,7 +337,7 @@ Ordem e critérios vêm de `RELATORIO_ETAPA_1_E_PLANO_ETAPA_2.md`, seção 8. Um
 
 A cobertura estruturada e o resumo de motivos ainda não são gravados em colunas próprias no histórico; a limitação textual continua sendo persistida. Isso foi reavaliado no item 2.7 e mantido fora do escopo. A validação do desktop foi feita por tipos, build e testes dos helpers; a janela Tauri não foi inspecionada visualmente. Também não há fixture com symlink, permissão negada ou FIFO reais: esses motivos são exercitados com inventário em memória no construtor real do relatório. O empacotamento de instaladores continua desativado e o workflow não executa `tauri build`. A primeira execução do workflow no GitHub Actions foi observada em 26/11/2026: `CI Windows` #1, commit `7a07286`, `status: completed`, `conclusion: success`, com todas as etapas do job `verify` aprovadas em `windows-latest`.
 
-## Etapa 3 — Validação arquitetural (em andamento; 3.0 a 3.3 concluídas; proposta 3.4 aguardando aprovação)
+## Etapa 3 — Validação arquitetural (em andamento; 3.0 a 3.5 concluídas; 3.6 e 3.7 pendentes)
 
 ### Etapa 3.0 — Baseline reproduzível — Concluída em 26/11/2026
 
@@ -395,14 +395,27 @@ A cobertura estruturada e o resumo de motivos ainda não são gravados em coluna
 - [x] Integridade confirmada: SHA-256 dos 20 arquivos do alvo permaneceu idêntico antes e depois de segunda auditoria somente leitura. Relatório integral em [docs/validation/etapa-3/second-project-synthetic.md](validation/etapa-3/second-project-synthetic.md).
 - [x] Ressalva explícita: o alvo é sintético e criado nesta sessão, não um projeto de terceiros. A validação sai da arquitetura do auditor, mas não substitui uma repetição futura em projeto real disponível.
 
-### Etapa 3.4 — Especificação do contrato v2 — Em andamento; aguardando aprovação
+### Etapa 3.4 — Especificação do contrato v2 — Concluída em 26/11/2026
 
 - [x] Proposta escrita em [docs/architecture/CONTRACT_V2_PROPOSAL.md](architecture/CONTRACT_V2_PROPOSAL.md), antes de qualquer alteração de código. Problemas concretos dos dois pilotos: ausência de campo de camada na autoauditoria, dois arquivos `file.unmapped` no alvo sintético por falta de fronteira `shared`/frontend, risco de ampliar permissão globalmente para expressar exceção e paths sobrepostos que hoje só viram revisão em tempo de análise.
 - [x] Escopo proposto: Leitura de v1 e v2 com normalização interna, sem reescrever arquivos; `architecture.layers[]` com `name`, `modules` e `allowed_dependencies`; nova regra `dep.layer_not_allowed`; validação de sobreposição de paths e de ciclo entre camadas. `responsibility` permanece descrição para humanos.
 - [x] Capacidades avaliadas: camadas incluídas; domínios e exceções adiados por falta de evidência nos pilotos; linguagem genérica de regras, limiares de métrica, migração automática, novos parsers e dependências rejeitados. `module.concentration` continua sendo concentração no grafo, não complexidade ciclomática ou cognitiva.
 - [x] Cada campo proposto tem semântica e teste de aceitação definidos na proposta, incluindo precedência de `dep.not_allowed` sobre a regra de camada para não duplicar erro na mesma aresta.
-- [ ] Usuário revisar e aprovar a proposta antes da Etapa 3.5. Nenhum campo v2 deve ser considerado implementado ou documentado no README até que os testes passem.
+- [x] Usuário revisou e aprovou a proposta em 26/11/2026, com a resposta “Aprovar e iniciar 3.5 (Recommended)”. Somente depois disso os campos v2 foram implementados e documentados no README.
 
-### Etapas 3.5 a 3.7 — Pendentes
+### Etapa 3.5 — Implementação incremental do contrato v2 — Concluída em 26/11/2026
 
-- [ ] Após aprovação, executar as etapas seguintes do plano na ordem definida, começando pelos tipos internos normalizados do contrato v2.
+- [x] Parser e validador v2 com `architecture.layers[]` (`name`, `modules`, `allowed_dependencies`) submetidos como `8850a67`; regra `dep.layer_not_allowed` submetida como `38943b2`; normalização entre versões e mensagens de validação com caminho do campo submetidas como `4dc1640`.
+- [x] Testes de regressão escritos antes da implementação: schema zero com nome do campo, v1 com camadas, normalização v1/v2, ordem dos campos no TOML, ordem das camadas e mensagens que apontam `architecture.layers[i].name|modules|allowed_dependencies` e `architecture.modules[i].name|path`. Fase vermelha registrada com `exit code 101`.
+- [x] `Contract::normalized_layers()` devolve `None` para v1 e `Some(...)` para v2, inclusive lista vazia. V1 com `architecture.layers` é rejeitado; `auditor init` continua gerando v1 em `auditor.example.toml`, sem reescrever contratos existentes.
+- [x] `dep.not_allowed` tem precedência sobre `dep.layer_not_allowed` na mesma aresta; aresta não resolvida continua apenas `dep.unresolved`; ausência de mapeamento de camada em tempo de execução vira limitação explícita, sem `error` inventado. Identidade `dep.layer_not_allowed:{origem}:{destino}:{path}`, sem linha.
+- [x] Validação v2 cobre paths sobrepostos, camada duplicada, módulo sem camada, módulo em duas camadas, auto-dependência, destino desconhecido, dependência duplicada e ciclo entre camadas.
+- [x] Fixture ponta a ponta `tests/fixtures/projects/layer_boundaries`: 5 incluídos, 1 não incluído intencional, 5 arestas, 3 achados (2 erros e 1 revisão); os IDs de camada, de módulo e de não resolvida aparecem em texto, JSON e Markdown. `audit` retorna `1` pela presença de achados.
+- [x] Histórico gravou o novo `rule_id` como texto com `schema_version = 2`, sem migração: `record` duas vezes, `show` e `compare` com achado persistente. Desktop e extensão consomem o achado sem regra própria.
+- [x] Contratos v2 equivalentes ao contrato raiz e ao alvo sintético da Etapa 3.3 produziram o mesmo resumo, achados, limitações e cobertura; os arquivos originais não foram alterados. Relatório em [docs/validation/etapa-3/contract-v2.md](validation/etapa-3/contract-v2.md).
+- [x] Verificação completa: `cargo fmt --all`, `cargo fmt --check`, `cargo check --workspace`, `cargo test --workspace` (185 testes: 171 no núcleo, 10 na CLI e 4 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `npm test` da extensão (5 testes) e `git diff --check` retornaram `0`; o último emitiu apenas o aviso LF/CRLF esperado do OneDrive.
+
+### Etapas 3.6 e 3.7 — Pendentes
+
+- [ ] Etapa 3.6: cobertura estruturada no histórico somente se a necessidade for confirmada; nenhuma migração SQLite foi feita nesta entrega.
+- [ ] Etapa 3.7: validação manual ponta a ponta do desktop e da extensão VS Code, com checklist e comparação de resultados.

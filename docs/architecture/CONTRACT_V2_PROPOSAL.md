@@ -1,10 +1,10 @@
 # Proposta de contrato arquitetural v2
 
 Data: 26/11/2026
-Status: proposta escrita; aguardando revisão e aprovação antes da implementação
+Status: aprovada pelo usuário em 26/11/2026; implementada e verificada na Etapa 3.5
 Branch: `etapa-3/validacao-arquitetural`
 
-Este documento descreve o que será implementado na Etapa 3.5. Nenhum campo aqui é considerado disponível até que a proposta seja aprovada, os tipos sejam implementados e os testes de aceitação passem.
+Este documento descreve o que foi implementado na Etapa 3.5. Os campos aqui listados só passaram a ser considerados disponíveis depois da aprovação, da implementação e da passagem dos testes de aceitação.
 
 ## 1. Objetivo e princípios
 

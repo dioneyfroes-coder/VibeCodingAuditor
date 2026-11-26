@@ -182,6 +182,56 @@ mod tests {
         }
     }
 
+    /// Audita uma raiz com um contrato equivalente lido de outro caminho.
+    fn audit_with_contract(root: &Path, contract_path: &Path) -> AuditReport {
+        let loaded = contract::load_contract(contract_path).expect("contract must load");
+        let inventory = discovery::discover(root, &loaded).expect("discovery must succeed");
+        let analysis = analysis::analyze(root, &loaded, &inventory).expect("analysis must succeed");
+        let findings = rules::evaluate(&loaded, &inventory, &analysis);
+        AuditReport::from_pipeline(&loaded, &inventory, &analysis, findings)
+    }
+
+    /// Raiz do repositório, relativa ao crate do núcleo.
+    fn repository_root() -> std::path::PathBuf {
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+    }
+
+    /// Contrato v2 equivalente não altera o resultado da autoauditoria.
+    #[test]
+    fn v2_equivalent_self_audit_preserves_findings() {
+        let root = repository_root();
+        let current = audit_project(&root).expect("self audit must succeed");
+        let equivalent = audit_with_contract(
+            &root,
+            &root.join("docs/validation/etapa-3/self-audit-v2.toml"),
+        );
+
+        assert_eq!(equivalent.schema_version, 2);
+        assert_eq!(current.project, equivalent.project);
+        assert_eq!(current.summary, equivalent.summary);
+        assert_eq!(current.findings, equivalent.findings);
+        assert_eq!(current.limitations, equivalent.limitations);
+        assert_eq!(current.coverage, equivalent.coverage);
+    }
+
+    /// Contrato v2 equivalente não altera o resultado do alvo sintético.
+    #[test]
+    fn v2_equivalent_synthetic_target_preserves_findings() {
+        let root = repository_root().join("validation/targets/fake-order-service");
+        let current = audit_project(&root).expect("synthetic audit must succeed");
+        let equivalent = audit_with_contract(
+            &root,
+            &repository_root().join("docs/validation/etapa-3/fake-order-service-v2.toml"),
+        );
+
+        assert_eq!(equivalent.schema_version, 2);
+        assert_eq!(current.project, equivalent.project);
+        assert_eq!(current.summary, equivalent.summary);
+        assert_eq!(current.findings, equivalent.findings);
+        assert_eq!(current.limitations, equivalent.limitations);
+        assert_eq!(current.coverage, equivalent.coverage);
+    }
+
     /// Projeto sem violações, sem revisões pendentes e sem limitações.
     #[test]
     fn clean_fixture_has_no_findings_or_limitations() {

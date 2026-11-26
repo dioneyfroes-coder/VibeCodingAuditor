@@ -100,6 +100,21 @@ mod tests {
     }
 
     #[test]
+    fn audit_command_exposes_v2_layer_finding_without_adapter_rules() {
+        let root = project_fixture("layer_boundaries");
+        let from_command =
+            audit_project(root.to_string_lossy().into_owned()).expect("command must succeed");
+        let from_core = auditor_core::audit::audit_project(&root).expect("core must succeed");
+
+        assert_eq!(from_command, from_core);
+        assert!(from_command.findings.iter().any(|finding| {
+            finding.rule_id == "dep.layer_not_allowed"
+                && finding.id
+                    == "dep.layer_not_allowed:application:infrastructure:src/application/rules.rs"
+        }));
+    }
+
+    #[test]
     fn analyze_command_delegates_to_the_core() {
         let root = project_fixture("dependencies");
         let contract = load_contract(&root.join("auditor.toml")).expect("contract must load");

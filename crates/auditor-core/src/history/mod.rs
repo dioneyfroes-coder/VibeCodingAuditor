@@ -816,6 +816,7 @@ fn parse_severity(value: &str) -> Option<Severity> {
 mod tests {
     use super::*;
     use crate::audit::audit_project;
+    use crate::rules::RULE_LAYER_NOT_ALLOWED;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT_DATABASE: AtomicU64 = AtomicU64::new(0);
@@ -851,6 +852,12 @@ mod tests {
     /// Raiz da fixture de dependências, relativa ao crate.
     fn project_root() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/projects/dependencies")
+    }
+
+    /// Raiz da fixture de camadas, relativa ao crate.
+    fn layer_fixture_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/projects/layer_boundaries")
     }
 
     /// Relatório real da fixture, usado para gravar histórico nos testes.
@@ -924,6 +931,36 @@ mod tests {
         assert_eq!(detail.findings, expected_findings);
         assert_eq!(detail.limitations, expected_limitations);
         assert!(detail.run.project_root.ends_with("dependencies"));
+    }
+
+    #[test]
+    fn layer_rule_id_survives_record_and_compare_without_schema_change() {
+        let database = TestDatabase::new();
+        let root = layer_fixture_root();
+        let report = audit_project(&root).expect("v2 audit must succeed");
+        let layer_id = "dep.layer_not_allowed:application:infrastructure:src/application/rules.rs";
+        let mut history = database.open();
+        let first = history
+            .record(&root, &report)
+            .expect("first record must succeed");
+        let second = history
+            .record(&root, &report)
+            .expect("second record must succeed");
+
+        let detail = history.get(second).expect("get must succeed");
+        assert_eq!(detail.run.schema_version, 2);
+        assert!(detail.findings.iter().any(|finding| {
+            finding.id == layer_id && finding.rule_id == RULE_LAYER_NOT_ALLOWED
+        }));
+
+        let comparison = history
+            .compare(first, second)
+            .expect("compare must succeed");
+        assert!(comparison.new_findings.is_empty());
+        assert!(comparison.resolved_findings.is_empty());
+        assert!(comparison.persistent_findings.iter().any(|finding| {
+            finding.id == layer_id && finding.rule_id == RULE_LAYER_NOT_ALLOWED
+        }));
     }
 
     #[test]

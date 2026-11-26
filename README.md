@@ -2,7 +2,7 @@
 
 Ferramenta local para comparar a arquitetura pretendida de um projeto com a arquitetura realmente implementada. Cada achado deve apontar a regra violada, os arquivos envolvidos e, quando possível, as linhas relevantes. O contrato arquitetural (`auditor.toml`) pertence ao usuário e é versionado junto ao projeto auditado.
 
-**Status atual:** primeira fase do projeto concluída; Etapa 2 de confiabilidade concluída com os itens 2.1 (cobertura honesta dos arquivos), 2.2 (mapeamentos ambíguos sem conclusão definitiva), 2.3 (dependências externas Rust e caminhos relativos), 2.4 (globs em `workspace.members`), 2.5 (scanner TypeScript/JavaScript), 2.6 (detecção de ciclos por componentes fortemente conectados), 2.7 (motivos de exclusão no relatório) e 2.8 (verificação automatizada). Etapas 0–10 fechadas, com TypeScript/JavaScript na Etapa 10 e os trabalhos posteriores `R1`–`R6` (revisão do plano, Python, concentração, duplicação, código sem referências e Git diff). A CLI cria um modelo de `auditor.toml`, inventaria arquivos, imprime o grafo de dependências, aplica regras determinísticas, gera relatórios em texto, JSON ou Markdown e registra execuções em SQLite. A aplicação desktop e a extensão VS Code reutilizam o mesmo núcleo. Regras personalizadas, sugestões com IA e auditoria agendada ficam fora desta fase por decisão registrada. A Etapa 3 está em andamento: baseline registrado e resolução de dependências `path` do workspace concluída; autoauditoria e demais itens seguem pendentes.
+**Status atual:** primeira fase do projeto concluída; Etapa 2 de confiabilidade concluída com os itens 2.1 (cobertura honesta dos arquivos), 2.2 (mapeamentos ambíguos sem conclusão definitiva), 2.3 (dependências externas Rust e caminhos relativos), 2.4 (globs em `workspace.members`), 2.5 (scanner TypeScript/JavaScript), 2.6 (detecção de ciclos por componentes fortemente conectados), 2.7 (motivos de exclusão no relatório) e 2.8 (verificação automatizada). Etapas 0–10 fechadas, com TypeScript/JavaScript na Etapa 10 e os trabalhos posteriores `R1`–`R6` (revisão do plano, Python, concentração, duplicação, código sem referências e Git diff). A CLI cria um modelo de `auditor.toml`, inventaria arquivos, imprime o grafo de dependências, aplica regras determinísticas, gera relatórios em texto, JSON ou Markdown e registra execuções em SQLite. A aplicação desktop e a extensão VS Code reutilizam o mesmo núcleo. Regras personalizadas, sugestões com IA e auditoria agendada ficam fora desta fase por decisão registrada. Na Etapa 3, estão concluídos o baseline, a resolução de dependências `path` do workspace, a autoauditoria, o segundo alvo sintético, a identidade estável de achados e o contrato v2 com camadas; as subetapas 3.6 (cobertura estruturada no histórico, sujeita a confirmação de requisito) e 3.7 (validação manual ponta a ponta do desktop e da extensão) permanecem pendentes. Detalhes em [docs/validation/etapa-3](docs/validation/etapa-3).
 
 ## Documentação
 
@@ -55,14 +55,15 @@ cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D 
 
 ## Contrato arquitetural
 
-O contrato de um projeto auditado usa `schema_version = 1` e contém:
+O contrato de um projeto auditado usa `schema_version = 1` ou `2` e contém:
 
 - `[project] name`: nome do projeto.
 - `[scan] include` e `exclude`: padrões de caminho relativo, com `/` como separador.
 - `[architecture] style`: nesta versão, apenas `modular_monolith`.
 - `[[architecture.modules]]`: `name`, `path`, `responsibility` e `allowed_dependencies`.
+- `[[architecture.layers]]` (somente v2): `name`, `modules` e `allowed_dependencies`.
 
-Campos desconhecidos, nomes ou caminhos duplicados, referências a módulos inexistentes, caminhos absolutos e versões de schema não suportadas são rejeitados com mensagem explicativa. O modelo gerado pelo subcomando `init` (`cargo run -p auditor-cli -- init <diretorio>`) está em [`auditor.example.toml`](auditor.example.toml) e **precisa ser revisado e confirmado pelo usuário** antes de ser considerado aprovado.
+Campos desconhecidos, nomes ou caminhos duplicados, referências a módulos inexistentes, caminhos absolutos e versões de schema não suportadas são rejeitados com mensagem explicativa que nomeia o campo. No v2, cada módulo deve pertencer a exatamente uma camada quando `layers` é declarado; nomes de camada duplicados, lista vazia, auto-dependência, destino desconhecido, dependência duplicada, ciclo entre camadas e paths de módulos sobrepostos também são rejeitados. `responsibility` continua sendo descrição para humanos: o auditor não interpreta texto livre como regra. O modelo gerado pelo subcomando `init` (`cargo run -p auditor-cli -- init <diretorio>`) continua em v1, está em [`auditor.example.toml`](auditor.example.toml) e **precisa ser revisado e confirmado pelo usuário** antes de ser considerado aprovado. O auditor lê v1 e v2 no mesmo núcleo e nunca reescreve um contrato existente. Um exemplo v2 validado está em [`tests/fixtures/projects/layer_boundaries/auditor.toml`](tests/fixtures/projects/layer_boundaries/auditor.toml).
 
 ## Descoberta
 
@@ -105,6 +106,7 @@ O comando `audit <raiz>` reutiliza o mesmo pipeline do núcleo e aplica estas re
 | Regra | Severidade | Situação |
 |---|---|---|
 | `dep.not_allowed` | `error` | Destino é módulo declarado, mas ausente de `allowed_dependencies`. |
+| `dep.layer_not_allowed` | `error` | Aresta resolvida permitida pelo módulo, mas não pela camada de origem (contrato v2). |
 | `dep.unresolved` | `needs_review` | Destino não pôde ser associado de forma inequívoca a um módulo do contrato. |
 | `file.unmapped` | `needs_review` | Arquivo de código incluído não corresponde a nenhum módulo. |
 | `file.ambiguous_module` | `needs_review` | Arquivo corresponde a mais de um módulo do contrato. |
@@ -113,6 +115,8 @@ O comando `audit <raiz>` reutiliza o mesmo pipeline do núcleo e aplica estas re
 | `module.concentration` | `needs_review` | Módulo com 3 ou mais origens ou destinos distintos no grafo resolvido. |
 | `code.duplicated` | `needs_review` | Linha idêntica com 40 ou mais caracteres em dois ou mais arquivos. |
 | `module.unreferenced` | `needs_review` | Módulo com arquivos incluídos e zero arestas resolvidas incidentes. |
+
+Em contratos v2, `dep.not_allowed` tem precedência: se a lista do módulo já proíbe a aresta, a camada não gera segundo erro para a mesma ligação. O identificador de `dep.layer_not_allowed` é `dep.layer_not_allowed:{origem}:{destino}:{path}`, sem linha; a linha e a evidência continuam fora da identidade. Dependência não resolvida continua sendo apenas `dep.unresolved`, sem conclusão de camada. Se um mapeamento de camada faltar em tempo de execução apesar da validação, a ausência vira limitação explícita, nunca `error`.
 
 Cada achado contém `id`, `rule_id`, `severity`, `title`, `message`, `path`, `line_start`, `line_end`, `evidence`, `expected`, `suggestion` e `confidence`. Todas as regras são determinísticas, então `confidence` é sempre nulo; o auditor não inventa precisão numérica nem aplica sugestões automaticamente. Dependências não resolvidas, destinos ambíguos e arquivos não mapeados ou ambíguos são sinais para decisão humana, não violações comprovadas.
 

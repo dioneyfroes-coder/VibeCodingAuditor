@@ -98,3 +98,26 @@ test('diagnósticos preservam arquivo, regra e severidade do relatório', () => 
   assert.equal(descriptors[0].severity, 'warning');
   assert.equal(descriptors[0].range.startLine, 1);
 });
+
+test('nova regra de camada é convertida sem lógica específica na extensão', () => {
+  const layerFinding = finding({
+    id: 'dep.layer_not_allowed:web:infrastructure:src/web/lib.rs',
+    rule_id: 'dep.layer_not_allowed',
+    title: 'Dependência entre camadas não permitida: presentation -> infrastructure',
+    message: 'A camada presentation usa infrastructure.',
+    path: 'src/web/lib.rs',
+    line_start: 3,
+    line_end: 3,
+    evidence: 'use infrastructure::Database;',
+    expected: 'application',
+    suggestion: 'Revise o uso de infrastructure.',
+  });
+  const report = { ...reportWith('error'), findings: [layerFinding] };
+  const [descriptor] = buildDiagnostics(report);
+
+  assert.equal(descriptor.code, 'dep.layer_not_allowed');
+  assert.equal(descriptor.severity, 'error');
+  assert.equal(descriptor.range.startLine, 2);
+  assert.match(descriptor.message, /^\[dep\.layer_not_allowed:web:infrastructure:/);
+  assert.match(descriptor.message, /Evidência: use infrastructure::Database;/);
+});

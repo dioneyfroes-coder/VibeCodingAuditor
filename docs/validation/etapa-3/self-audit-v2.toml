@@ -1,0 +1,52 @@
+# Contrato v2 equivalente ao `auditor.toml` raiz, usado somente na validação.
+# Não substitui nem reescreve o contrato original.
+
+schema_version = 2
+
+[project]
+name = "vibe-coding-auditor"
+
+[scan]
+include = [
+  "crates/auditor-core/src/**/*.rs",
+  "crates/auditor-cli/src/**/*.rs",
+  "apps/desktop/src-tauri/src/**/*.rs",
+]
+exclude = [
+  "tests/fixtures/**",
+  "apps/desktop/src/**",
+  "extensions/vscode/src/**",
+  "target/**",
+  "node_modules/**",
+]
+
+[architecture]
+style = "modular_monolith"
+
+[[architecture.modules]]
+name = "core"
+path = "crates/auditor-core/src/**"
+responsibility = "Contrato, descoberta, análise, regras, relatórios e histórico local; não conhece adaptadores."
+allowed_dependencies = []
+
+[[architecture.modules]]
+name = "cli"
+path = "crates/auditor-cli/src/**"
+responsibility = "Comandos auditáveis que delegam toda regra ao núcleo."
+allowed_dependencies = ["core"]
+
+[[architecture.modules]]
+name = "desktop-backend"
+path = "apps/desktop/src-tauri/src/**"
+responsibility = "Comandos Tauri que delegam contrato, análise, auditoria e histórico ao núcleo."
+allowed_dependencies = ["core"]
+
+[[architecture.layers]]
+name = "core"
+modules = ["core"]
+allowed_dependencies = []
+
+[[architecture.layers]]
+name = "adapters"
+modules = ["cli", "desktop-backend"]
+allowed_dependencies = ["core"]

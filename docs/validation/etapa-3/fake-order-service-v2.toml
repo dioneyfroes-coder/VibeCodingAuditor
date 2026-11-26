@@ -1,0 +1,58 @@
+# Contrato v2 equivalente ao alvo sintético da Etapa 3.3.
+# Não substitui nem reescreve `validation/targets/fake-order-service/auditor.toml`.
+
+schema_version = 2
+
+[project]
+name = "fake-order-service"
+
+[scan]
+include = ["src/**/*.rs", "shared/**/*.rs", "web/src/**/*.ts", "tools/**/*.go"]
+exclude = []
+
+[architecture]
+style = "modular_monolith"
+
+[[architecture.modules]]
+name = "domain"
+path = "src/domain/**"
+responsibility = "Modelos e regras de pedido; não conhece adaptadores"
+allowed_dependencies = []
+
+[[architecture.modules]]
+name = "application"
+path = "src/application/**"
+responsibility = "Casos de uso e coordenação; depende somente do domínio"
+allowed_dependencies = ["domain"]
+
+[[architecture.modules]]
+name = "infrastructure"
+path = "src/infrastructure/**"
+responsibility = "Persistência e adaptadores externos"
+allowed_dependencies = ["domain", "application"]
+
+[[architecture.modules]]
+name = "webapi"
+path = "src/webapi/**"
+responsibility = "Rotas HTTP; não acessa infraestrutura diretamente"
+allowed_dependencies = ["application"]
+
+[[architecture.layers]]
+name = "domain"
+modules = ["domain"]
+allowed_dependencies = []
+
+[[architecture.layers]]
+name = "application"
+modules = ["application"]
+allowed_dependencies = ["domain"]
+
+[[architecture.layers]]
+name = "infrastructure"
+modules = ["infrastructure"]
+allowed_dependencies = ["domain", "application"]
+
+[[architecture.layers]]
+name = "presentation"
+modules = ["webapi"]
+allowed_dependencies = ["application"]

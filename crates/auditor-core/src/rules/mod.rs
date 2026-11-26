@@ -915,7 +915,7 @@ mod tests {
     }
 
     #[test]
-    fn many_cyclic_components_are_indexed_once() {
+    fn many_cyclic_components_are_indexed_once_in_bounded_time() {
         let (contract, inventory, mut analysis) = fixture_data();
         analysis.edges.clear();
         for index in 0..600 {
@@ -925,7 +925,9 @@ mod tests {
             analysis.edges.push(synthetic_edge(&right, &left));
         }
 
+        let started = Instant::now();
         let findings = evaluate(&contract, &inventory, &analysis);
+        let elapsed = started.elapsed();
         let cycles: Vec<&str> = findings
             .iter()
             .filter(|finding| finding.rule_id == RULE_DEPENDENCY_CYCLE)
@@ -935,6 +937,10 @@ mod tests {
         assert_eq!(cycles.len(), 600);
         assert_eq!(cycles.first(), Some(&"dep.cycle:par000a->par000b"));
         assert_eq!(cycles.last(), Some(&"dep.cycle:par599a->par599b"));
+        assert!(
+            elapsed < Duration::from_secs(10),
+            "SCC demorou {elapsed:?} em 600 componentes"
+        );
     }
 
     #[test]

@@ -755,6 +755,40 @@ mod tests {
     }
 
     #[test]
+    fn scanner_regression_keeps_real_edges_and_ignores_known_noise() {
+        let mut state = ScanState::default();
+        let mut masked_document = String::new();
+        let mut literals = Vec::new();
+        for line in [
+            "/* import \"falso-comentario\" */",
+            "const texto = \"import 'falso-texto'\";",
+            "const re = /import \"falso-regex\"/;",
+            "const meta = import.meta.url;",
+            "import {",
+            "  Servico",
+            "} from \"./domain/servico\";",
+            "export { Servico } from \"./domain/servico\";",
+            "const lazy = require(\"./domain/servico\");",
+        ] {
+            let (masked, mut line_literals) = mask_line(line, &mut state);
+            masked_document.push_str(&masked);
+            masked_document.push('\n');
+            literals.append(&mut line_literals);
+        }
+
+        let statements = parse_specifiers(&masked_document, &literals);
+        assert_eq!(
+            static_values(&statements),
+            vec!["./domain/servico", "./domain/servico", "./domain/servico"]
+        );
+        assert!(
+            statements
+                .iter()
+                .all(|statement| matches!(statement.specifier, ParsedSpecifier::Static(_)))
+        );
+    }
+
+    #[test]
     fn dynamic_specifiers_are_distinguished_from_static_ones() {
         let mut state = ScanState::default();
         let (masked, literals) = mask_line("const a = import(`modelo`);", &mut state);

@@ -1,0 +1,64 @@
+name: CI Windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fixar Rust 1.98.1
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal --component rustfmt --component clippy
+          rustup override set 1.98.1
+
+      - name: Configurar Node 24.19.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: |
+            apps/desktop/package-lock.json
+            extensions/vscode/package-lock.json
+
+      - name: Instalar dependências da desktop
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Instalar dependências da extensão
+        working-directory: extensions/vscode
+        run: npm ci
+
+      - name: Verificar formatação Rust
+        run: cargo fmt --check
+
+      - name: Compilar workspace Rust
+        run: cargo check --workspace
+
+      - name: Testar workspace Rust
+        run: cargo test --workspace
+
+      - name: Verificar avisos Rust
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Testar helpers da desktop
+        working-directory: apps/desktop
+        run: npm test
+
+      # O bundle Tauri está desativado; o CI valida o frontend e o crate, não empacotamento.
+      - name: Compilar frontend da desktop
+        working-directory: apps/desktop
+        run: npm run build
+
+      - name: Testar extensão VS Code
+        working-directory: extensions/vscode
+        run: npm test

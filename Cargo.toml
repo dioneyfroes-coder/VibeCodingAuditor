@@ -5,6 +5,7 @@ members = ["crates/auditor-core", "crates/auditor-cli", "apps/desktop/src-tauri"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.98.1"
 
 [workspace.dependencies]
 clap = { version = "4.6.10", features = ["derive"] }

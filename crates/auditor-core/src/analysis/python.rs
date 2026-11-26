@@ -532,6 +532,28 @@ mod tests {
     }
 
     #[test]
+    fn scanner_regression_ignores_comments_and_triple_strings() {
+        let mut state = ScanState::default();
+        let masked = [
+            "# from dominio.entidade import Falso",
+            "texto = \"\"\"",
+            "from infra.cliente import Falso",
+            "\"\"\"",
+            "from ..dominio.entidade import Verdadeiro;",
+            "import dominio.servico as servico;",
+        ]
+        .iter()
+        .map(|line| mask_line(line, &mut state))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+        assert_eq!(
+            parse_specifiers(&masked),
+            vec!["..dominio.entidade", "dominio.servico"]
+        );
+    }
+
+    #[test]
     fn ambiguous_python_target_is_unresolved_regardless_of_module_order() {
         let application = Module {
             name: "application".to_owned(),

@@ -16,6 +16,8 @@ Estado consolidado das Etapas 0–10 e dos trabalhos posteriores. Decisões e es
 | 9 | Criar a extensão VS Code | Concluída em 25/11/2026 — `.vsix` gerado; diagnósticos conferem com a CLI; 82 testes passaram |
 | 10 | Expandir linguagens e recursos | Concluída em 25/11/2026; extensões adicionais nesta rodada: TypeScript/JavaScript e Python no núcleo. Demais opções avaliadas e diferidas |
 
+Etapa 2 (confiabilidade do motor): concluída em 26/11/2026 — itens 2.1 a 2.8 verificados localmente no Windows e cobertos pelo workflow de CI.
+
 ## Critérios da Etapa 0
 
 - [x] Verificar `git`, `rustc`, `cargo`, `rustup`, `node` e `npm`
@@ -214,7 +216,7 @@ Estado consolidado das Etapas 0–10 e dos trabalhos posteriores. Decisões e es
 - [x] `docs/DECISIONS.md` registra a decisão `R7`; `docs/ROADMAP.md` registra o fechamento
 - [x] Verificação final repetida após os ajustes documentais; resultados em `docs/DECISIONS.md` (`R7`)
 
-## Etapa 2 — Confiabilidade do motor (em andamento)
+## Etapa 2 — Confiabilidade do motor (concluída em 26/11/2026)
 
 Ordem e critérios vêm de `RELATORIO_ETAPA_1_E_PLANO_ETAPA_2.md`, seção 8. Um item só é marcado como concluído depois que seus critérios de aceite são testados.
 
@@ -305,10 +307,31 @@ Ordem e critérios vêm de `RELATORIO_ETAPA_1_E_PLANO_ETAPA_2.md`, seção 8. Um
 - [x] Verificação: `cargo fmt --check`, `cargo test --workspace` (133 testes: 120 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `npm test` da extensão (4 testes), `npm test` da desktop (2 testes) e `npm run build` da desktop passaram
 - [x] Smoke: `simple` mostrou 14 entradas fora do inventário (10 ignoradas por padrão, 1 excluída, 3 fora do `include`), com 3 exemplos e `+7 outros` no maior motivo; `dependencies` manteve 5 achados e `typescript` manteve 8 arestas, 4 achados e 1 limitação
 
-### Item seguinte — Não iniciado
+### Item 2.8 — Reforçar a verificação automatizada — Concluído em 26/11/2026
 
-- [ ] 2.8 — Reforçar a verificação automatizada
+- [x] Criar `.github/workflows/ci.yml` para `windows-latest` em pushes para `main` e nos pull requests
+- [x] Executar `cargo fmt --check`, `cargo check --workspace`, `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `npm test` e `npm run build` da desktop e `npm test` da extensão, sempre após `npm ci`
+- [x] Declarar `rust-version = 1.98.1` no workspace e fixar Rust `1.98.1`/Node `24.19.0` no CI; documentar pré-requisitos reproduzíveis
+- [x] Reforçar o teste de desempenho do SCC com 600 componentes desconectados e limite de 10 s, mantendo o caso denso de 80 módulos/6400 arestas com limite de 5 s
+- [x] Adicionar testes de regressão combinados para os scanners TypeScript/JavaScript e Python
+- [x] Revisar paradigma, nomes descritivos, documentação de código e testes dos helpers
+- [x] Não habilitar o bundle Tauri: `bundle.active` continua `false` e o CI valida frontend e crate, sem gerar instalador
+- [x] Verificação local no Windows: `cargo fmt --check`, `cargo check --workspace`, `cargo test --workspace` (135 testes: 122 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `git diff --check`, `npm ci` nas duas pastas Node, `npm test` e `npm run build` da desktop (2 testes) e `npm test` da extensão (4 testes) passaram
+- [x] Smoke repetido nas fixtures anteriores sem mudança de contagens: `simple` com 14 não incluídos, `dependencies` com 5 achados e `typescript` com 8 arestas, 4 achados e 1 limitação
 
-A cobertura estruturada e o resumo de motivos ainda não são gravados em colunas próprias no histórico; a limitação textual continua sendo persistida. Isso foi reavaliado no item 2.7 e mantido fora do escopo: o item pedia transparência no relatório da execução, não mudança no esquema SQLite.
+### Fechamento da Etapa 2
 
-A validação do desktop foi feita por `tsc --noEmit`, build Vite e testes unitários dos helpers de apresentação. A janela Tauri não foi aberta para inspeção visual nesta entrega; isso segue como limitação explícita. Também não há fixture com symlink, permissão negada ou FIFO reais: esses motivos são exercitados com inventário em memória no construtor real do relatório, porque não são reproduzíveis de forma igual no Windows.
+- [x] Arquivos incluídos sem analisador geram cobertura parcial explícita
+- [x] Mapeamentos ambíguos não originam violações definitivas
+- [x] Dependências externas Rust declaradas são classificadas corretamente
+- [x] `self::` e `super::` não são descartados sem resolução ou revisão explícita
+- [x] Workspaces com glob são analisados ou recebem limitação clara e testada
+- [x] Imports TypeScript multilinha e `import.meta` têm comportamento coberto por testes
+- [x] Detecção de ciclos usa componentes fortemente conectados com testes densos e de muitos componentes
+- [x] Motivos de arquivos ignorados aparecem no relatório
+- [x] CLI, desktop e extensão continuam consumindo o mesmo modelo de achados
+- [x] Suíte Rust completa, fmt e clippy passaram localmente no Windows; o workflow repete isso no Windows automatizado
+- [x] Build TypeScript/React e testes da extensão passaram
+- [x] README, roadmap e decisões refletem somente o que foi efetivamente validado
+
+A cobertura estruturada e o resumo de motivos ainda não são gravados em colunas próprias no histórico; a limitação textual continua sendo persistida. Isso foi reavaliado no item 2.7 e mantido fora do escopo. A validação do desktop foi feita por tipos, build e testes dos helpers; a janela Tauri não foi inspecionada visualmente. Também não há fixture com symlink, permissão negada ou FIFO reais: esses motivos são exercitados com inventário em memória no construtor real do relatório. O empacotamento de instaladores continua desativado e o workflow não executa `tauri build`. A primeira execução do workflow no GitHub Actions ainda não foi observada neste ambiente.

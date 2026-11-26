@@ -78,6 +78,7 @@ pub fn audit_project(root: &Path) -> Result<AuditReport, AuditError> {
 mod tests {
     use super::*;
     use crate::findings::Severity;
+    use crate::report::ReportFormat;
     use crate::rules::{
         RULE_DEPENDENCY_CYCLE, RULE_DEPENDENCY_NOT_ALLOWED, RULE_DEPENDENCY_UNRESOLVED,
         RULE_FILE_AMBIGUOUS_MODULE, RULE_FILE_UNMAPPED, RULE_MODULE_WITHOUT_FILES,
@@ -197,6 +198,49 @@ mod tests {
         assert_eq!(report.coverage.code_files_not_analyzed, 1);
         assert!(report.coverage.partial);
         assert!(report.coverage.unsupported_code_extensions.is_empty());
+    }
+
+    /// A fixture de descoberta tem três motivos de exclusão e muitos exemplos repetidos.
+    #[test]
+    fn skip_reasons_are_visible_in_every_report_format() {
+        let report = audit_project(&project_fixture("simple")).expect("audit must succeed");
+        assert_eq!(report.summary.files_skipped, 14);
+
+        let text = report
+            .render(ReportFormat::Text)
+            .expect("text rendering cannot fail");
+        assert!(text.contains("Motivos dos não incluídos: 14"));
+        assert!(text.contains("padrão ignorado: 10"));
+        assert!(text.contains("excluído: 1"));
+        assert!(text.contains("fora do include: 3"));
+        assert!(text.contains("+7 outros"));
+        assert!(!text.contains("node_modules"));
+
+        let json = report
+            .render(ReportFormat::Json)
+            .expect("JSON rendering must succeed");
+        let value: serde_json::Value = serde_json::from_str(&json).expect("JSON must be valid");
+        assert_eq!(value["skip_summary"]["total"], 14);
+        assert_eq!(
+            value["skip_summary"]["reasons"][0]["reason"],
+            "default_ignored"
+        );
+        assert_eq!(value["skip_summary"]["reasons"][0]["count"], 10);
+        assert_eq!(
+            value["skip_summary"]["reasons"][0]["examples"]
+                .as_array()
+                .map(Vec::len),
+            Some(3)
+        );
+        assert_eq!(value["skip_summary"]["reasons"][0]["additional"], 7);
+
+        let markdown = report
+            .render(ReportFormat::Markdown)
+            .expect("Markdown rendering cannot fail");
+        assert!(markdown.contains("- Motivos dos não incluídos: 14"));
+        assert!(markdown.contains("padrão ignorado"));
+        assert!(markdown.contains("excluído"));
+        assert!(markdown.contains("fora do include"));
     }
 
     /// Projeto TypeScript/JavaScript com arestas permitidas, proibidas e ambíguas.

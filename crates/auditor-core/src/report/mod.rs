@@ -10,7 +10,7 @@ use serde::Serialize;
 
 use crate::analysis::{Analysis, AnalysisCoverage, describe_unsupported_code_extensions};
 use crate::contract::Contract;
-use crate::discovery::Inventory;
+use crate::discovery::{Inventory, SkipReason, SkippedEntry};
 use crate::findings::{Finding, Severity};
 
 /// Formato de saída de um relatório.
@@ -73,6 +73,85 @@ impl Error for ReportError {
     }
 }
 
+/// Quantidade máxima de caminhos de exemplo mostrados por motivo.
+const SKIP_EXAMPLE_LIMIT: usize = 3;
+
+/// Resumo estruturado das entradas que ficaram de fora do inventário.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct SkipReasonSummary {
+    /// Total de entradas não incluídas.
+    pub total: usize,
+    /// Entradas deixadas de fora por escolha explícita de escopo.
+    pub intentional: usize,
+    /// Entradas que impediram a varredura de cobrir o projeto por completo.
+    pub coverage_gaps: usize,
+    /// Contagens por motivo, em ordem estável de apresentação.
+    pub reasons: Vec<SkipReasonCount>,
+}
+
+impl SkipReasonSummary {
+    /// Resume entradas já ordenadas pela descoberta, limitando os exemplos.
+    pub fn from_entries(entries: &[SkippedEntry]) -> Self {
+        let mut reasons = Vec::new();
+
+        for reason in SkipReason::ALL {
+            let paths: Vec<&str> = entries
+                .iter()
+                .filter(|entry| entry.reason == reason)
+                .map(|entry| entry.path.as_str())
+                .collect();
+            if paths.is_empty() {
+                continue;
+            }
+
+            reasons.push(SkipReasonCount {
+                reason,
+                label: reason.label().to_owned(),
+                count: paths.len(),
+                examples: paths
+                    .iter()
+                    .take(SKIP_EXAMPLE_LIMIT)
+                    .map(|path| (*path).to_owned())
+                    .collect(),
+                additional: paths.len().saturating_sub(SKIP_EXAMPLE_LIMIT),
+                reduces_coverage: reason.reduces_coverage(),
+            });
+        }
+
+        let (intentional, coverage_gaps) = reasons.iter().fold((0, 0), |(chosen, gaps), entry| {
+            if entry.reduces_coverage {
+                (chosen, gaps + entry.count)
+            } else {
+                (chosen + entry.count, gaps)
+            }
+        });
+
+        Self {
+            total: entries.len(),
+            intentional,
+            coverage_gaps,
+            reasons,
+        }
+    }
+}
+
+/// Contagem e exemplos limitados de um motivo de exclusão.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SkipReasonCount {
+    /// Identificador estável do motivo.
+    pub reason: SkipReason,
+    /// Rótulo legível produzido pelo núcleo.
+    pub label: String,
+    /// Quantidade de entradas com esse motivo.
+    pub count: usize,
+    /// Primeiros caminhos, em ordem determinística.
+    pub examples: Vec<String>,
+    /// Quantidade de caminhos omitidos dos exemplos.
+    pub additional: usize,
+    /// Indica se o motivo reduziu a cobertura da auditoria.
+    pub reduces_coverage: bool,
+}
+
 /// Contagem determinística de um relatório.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct ReportSummary {
@@ -107,6 +186,8 @@ pub struct AuditReport {
     pub schema_version: u32,
     /// Contagens derivadas dos dados da execução.
     pub summary: ReportSummary,
+    /// Motivos pelos quais entradas ficaram de fora da varredura.
+    pub skip_summary: SkipReasonSummary,
     /// Achados ordenados por identificador.
     pub findings: Vec<Finding>,
     /// Limitações explícitas da análise, sem conclusões inventadas.
@@ -143,6 +224,7 @@ impl AuditReport {
                 infos,
                 needs_review,
             },
+            skip_summary: SkipReasonSummary::from_entries(&inventory.skipped),
             findings,
             limitations: analysis.limitations.clone(),
             coverage: analysis.coverage.clone(),
@@ -173,6 +255,7 @@ impl AuditReport {
                 infos,
                 needs_review,
             },
+            skip_summary: self.skip_summary.clone(),
             findings,
             limitations,
             coverage: self.coverage.clone(),
@@ -219,6 +302,15 @@ impl AuditReport {
             ),
             String::new(),
         ];
+
+        if self.skip_summary.total > 0 {
+            let mut skip_lines = vec![skip_summary_headline(&self.skip_summary)];
+            for reason in &self.skip_summary.reasons {
+                skip_lines.push(format!("  - {}", skip_reason_description(reason)));
+            }
+            let insertion = lines.len() - 1;
+            lines.splice(insertion..insertion, skip_lines);
+        }
 
         if self.findings.is_empty() {
             lines.push("Nenhum achado.".to_owned());
@@ -283,6 +375,18 @@ impl AuditReport {
             "## Achados".to_owned(),
         ];
 
+        if self.skip_summary.total > 0 {
+            let mut skip_lines = vec![format!("- {}", skip_summary_headline(&self.skip_summary))];
+            for reason in &self.skip_summary.reasons {
+                skip_lines.push(format!(
+                    "  - {}",
+                    markdown_text(&skip_reason_description(reason))
+                ));
+            }
+            let insertion = lines.len() - 2;
+            lines.splice(insertion..insertion, skip_lines);
+        }
+
         if self.findings.is_empty() {
             lines.push(String::new());
             lines.push("Nenhum achado.".to_owned());
@@ -346,6 +450,47 @@ fn coverage_line(coverage: &AnalysisCoverage) -> String {
     line
 }
 
+/// Cabeçalho comum das saídas legíveis para o resumo de entradas ignoradas.
+fn skip_summary_headline(summary: &SkipReasonSummary) -> String {
+    format!(
+        "Motivos dos não incluídos: {} ({} {}, {} {})",
+        summary.total,
+        summary.intentional,
+        if summary.intentional == 1 {
+            "intencional"
+        } else {
+            "intencionais"
+        },
+        summary.coverage_gaps,
+        if summary.coverage_gaps == 1 {
+            "reduz cobertura"
+        } else {
+            "reduzem cobertura"
+        }
+    )
+}
+
+/// Descreve um motivo sem listar todas as entradas correspondentes.
+fn skip_reason_description(reason: &SkipReasonCount) -> String {
+    let mut line = format!(
+        "{}: {} ({})",
+        reason.label,
+        reason.count,
+        if reason.reduces_coverage {
+            "reduz cobertura"
+        } else {
+            "intencional"
+        }
+    );
+    if !reason.examples.is_empty() {
+        line.push_str(&format!("; exemplos: {}", reason.examples.join(", ")));
+    }
+    if reason.additional > 0 {
+        line.push_str(&format!("; +{} outros", reason.additional));
+    }
+    line
+}
+
 /// Conta achados por severidade, usada em relatórios completos e recortados.
 fn severity_counts(findings: &[Finding]) -> (usize, usize, usize, usize) {
     let errors = findings
@@ -391,6 +536,7 @@ fn markdown_text(value: &str) -> String {
 mod tests {
     use super::*;
     use crate::analysis::{AnalysisCoverage, UnsupportedCodeExtension};
+    use crate::discovery::{SkipReason, SkippedEntry};
     use crate::findings::Severity;
 
     /// Achado mínimo usado para testar a renderização.
@@ -418,7 +564,7 @@ mod tests {
             schema_version: 1,
             summary: ReportSummary {
                 files_included: 4,
-                files_skipped: 2,
+                files_skipped: 3,
                 modules: 3,
                 packages: 2,
                 edges: 5,
@@ -428,6 +574,20 @@ mod tests {
                 infos: 0,
                 needs_review: 0,
             },
+            skip_summary: SkipReasonSummary::from_entries(&[
+                SkippedEntry {
+                    path: "build/artifact.rs".to_owned(),
+                    reason: SkipReason::DefaultIgnored,
+                },
+                SkippedEntry {
+                    path: "src/link.rs".to_owned(),
+                    reason: SkipReason::Symlink,
+                },
+                SkippedEntry {
+                    path: "src/locked.rs".to_owned(),
+                    reason: SkipReason::Inaccessible,
+                },
+            ]),
             findings: vec![sample_finding()],
             limitations: vec!["arquivo.rs não pôde ser analisado".to_owned()],
             coverage: AnalysisCoverage {
@@ -522,6 +682,78 @@ mod tests {
         assert!(output.contains("canal \\| linha<br>nova"));
         assert!(output.contains("**Evidência:** `use application::Service;`"));
         assert!(output.contains("## Limitações"));
+    }
+
+    #[test]
+    fn skip_summary_separates_intentional_exclusions_from_coverage_gaps() {
+        let report = sample_report();
+
+        assert_eq!(report.skip_summary.total, 3);
+        assert_eq!(report.skip_summary.intentional, 1);
+        assert_eq!(report.skip_summary.coverage_gaps, 2);
+        assert_eq!(
+            report.skip_summary.reasons[0].reason,
+            SkipReason::DefaultIgnored
+        );
+        assert_eq!(report.skip_summary.reasons[1].reason, SkipReason::Symlink);
+        assert_eq!(
+            report.skip_summary.reasons[2].reason,
+            SkipReason::Inaccessible
+        );
+
+        let text = report
+            .render(ReportFormat::Text)
+            .expect("text rendering cannot fail");
+        assert!(text.contains("Motivos dos não incluídos: 3 (1 intencional, 2 reduzem cobertura)"));
+        assert!(text.contains("padrão ignorado: 1 (intencional)"));
+        assert!(text.contains("link simbólico: 1 (reduz cobertura)"));
+        assert!(text.contains("inacessível: 1 (reduz cobertura)"));
+
+        let markdown = report
+            .render(ReportFormat::Markdown)
+            .expect("Markdown rendering cannot fail");
+        assert!(
+            markdown
+                .contains("- Motivos dos não incluídos: 3 (1 intencional, 2 reduzem cobertura)")
+        );
+        assert!(markdown.contains("link simbólico: 1 (reduz cobertura)"));
+    }
+
+    #[test]
+    fn json_report_exposes_bounded_skip_examples() {
+        let entry = SkipReasonSummary::from_entries(
+            &(0..20)
+                .map(|index| SkippedEntry {
+                    path: format!("build/artefato-{index:02}.rs"),
+                    reason: SkipReason::DefaultIgnored,
+                })
+                .collect::<Vec<_>>(),
+        );
+        let mut report = sample_report();
+        report.skip_summary = entry;
+        let output = report
+            .render(ReportFormat::Json)
+            .expect("JSON rendering must succeed");
+        let value: serde_json::Value = serde_json::from_str(&output).expect("JSON must be valid");
+
+        assert_eq!(value["skip_summary"]["total"], 20);
+        assert_eq!(value["skip_summary"]["intentional"], 20);
+        assert_eq!(value["skip_summary"]["coverage_gaps"], 0);
+        assert_eq!(
+            value["skip_summary"]["reasons"][0]["label"],
+            "padrão ignorado"
+        );
+        assert_eq!(
+            value["skip_summary"]["reasons"][0]["examples"]
+                .as_array()
+                .map(Vec::len),
+            Some(3)
+        );
+        assert_eq!(value["skip_summary"]["reasons"][0]["additional"], 17);
+        assert_eq!(
+            value["skip_summary"]["reasons"][0]["reduces_coverage"],
+            false
+        );
     }
 
     #[test]

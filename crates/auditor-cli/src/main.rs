@@ -344,7 +344,7 @@ mod tests {
     use super::dependency_kind_label;
     use auditor_core::analysis::{AnalysisCoverage, DependencyKind};
     use auditor_core::report::ReportFormat;
-    use auditor_core::report::{AuditReport, ReportSummary};
+    use auditor_core::report::{AuditReport, ReportSummary, SkipReasonSummary};
 
     #[test]
     fn help_flag_is_recognized() {
@@ -508,6 +508,7 @@ mod tests {
                 infos: 0,
                 needs_review: 0,
             },
+            skip_summary: SkipReasonSummary::default(),
             findings: Vec::new(),
             limitations: Vec::new(),
             coverage: AnalysisCoverage::default(),

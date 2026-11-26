@@ -293,9 +293,19 @@ Ordem e critérios vêm de `RELATORIO_ETAPA_1_E_PLANO_ETAPA_2.md`, seção 8. Um
 - [x] Verificação: `cargo fmt --check`, `cargo test --workspace` (129 testes: 116 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `npm test` da extensão (4 testes) e `npm run build` da desktop passaram
 - [x] Smoke: `dependencies` passou de 7 para 5 achados (2 erros, 1 aviso, 2 revisões), com um `dep.cycle:application->domain->infrastructure` e 5 arestas na evidência; `rust_dependencies` manteve 5 achados e 1 aviso de ciclo; teste denso com 80 módulos e 6400 arestas terminou em menos de 5 s com 1 achado
 
-### Itens seguintes — Não iniciados
+### Item 2.7 — Expor os motivos de exclusão e a cobertura no relatório — Concluído em 25/11/2026
 
-- [ ] 2.7 — Expor os motivos de exclusão e a cobertura no relatório
+- [x] Transportar `Inventory.skipped` para `AuditReport` em um campo aditivo `skip_summary`
+- [x] Expor contagem total, contagens intencionais/de cobertura e contagem por motivo com rótulo estável
+- [x] Distinguir exclusões intencionais de link simbólico, entrada inacessível e tipo não tratado
+- [x] Limitar a saída a 3 exemplos por motivo, com contagem dos demais, em texto, JSON, Markdown e desktop
+- [x] Preservar `auditor.toml` v1, `rule_id`, SQLite e o JSON consumido pela extensão; o campo no JSON é aditivo
+- [x] Revisar paradigma, nomes descritivos, documentação de código e testes dos helpers
+- [x] Verificação: `cargo fmt --check`, `cargo test --workspace` (132 testes: 119 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `npm test` da extensão (4 testes) e `npm run build` da desktop passaram
+- [x] Smoke: `simple` mostrou 14 entradas fora do inventário (10 ignoradas por padrão, 1 excluída, 3 fora do `include`), com 3 exemplos e `+7 outros` no maior motivo; `dependencies` manteve 5 achados e `typescript` manteve 8 arestas, 4 achados e 1 limitação
+
+### Item seguinte — Não iniciado
+
 - [ ] 2.8 — Reforçar a verificação automatizada
 
-A cobertura estruturada ainda não é gravada em coluna própria no histórico; a limitação textual continua sendo persistida. Isso será reavaliado no item 2.7, não neste item.
+A cobertura estruturada e o resumo de motivos ainda não são gravados em colunas próprias no histórico; a limitação textual continua sendo persistida. Isso foi reavaliado no item 2.7 e mantido fora do escopo: o item pedia transparência no relatório da execução, não mudança no esquema SQLite.

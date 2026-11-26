@@ -8,6 +8,8 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use serde::Serialize;
+
 use crate::contract::Contract;
 
 /// Diretórios ignorados por padrão, em qualquer profundidade.
@@ -57,7 +59,8 @@ pub struct SkippedEntry {
 }
 
 /// Motivo pelo qual uma entrada não entrou no inventário.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SkipReason {
     /// Diretório ignorado por padrão em qualquer profundidade.
     DefaultIgnored,
@@ -71,6 +74,38 @@ pub enum SkipReason {
     Inaccessible,
     /// Tipo de entrada não tratado pela varredura.
     Unsupported,
+}
+
+impl SkipReason {
+    /// Todos os motivos, em ordem estável de apresentação.
+    pub const ALL: [Self; 6] = [
+        Self::DefaultIgnored,
+        Self::Excluded,
+        Self::NotIncluded,
+        Self::Symlink,
+        Self::Inaccessible,
+        Self::Unsupported,
+    ];
+
+    /// Rótulo legível usado em relatórios e na interface.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::DefaultIgnored => "padrão ignorado",
+            Self::Excluded => "excluído",
+            Self::NotIncluded => "fora do include",
+            Self::Symlink => "link simbólico",
+            Self::Inaccessible => "inacessível",
+            Self::Unsupported => "tipo não tratado",
+        }
+    }
+
+    /// Indica se o motivo impediu a varredura de considerar uma entrada relevante.
+    ///
+    /// Diretórios ignorados, exclusões do contrato e arquivos fora de `include`
+    /// são escolhas explícitas de escopo, não falhas de cobertura.
+    pub fn reduces_coverage(self) -> bool {
+        matches!(self, Self::Symlink | Self::Inaccessible | Self::Unsupported)
+    }
 }
 
 /// Falha operacional que impede a varredura da raiz inteira.

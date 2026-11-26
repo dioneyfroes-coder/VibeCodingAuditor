@@ -33,6 +33,30 @@ interface AnalysisCoverage {
   partial: boolean;
 }
 
+type SkipReason =
+  | 'default_ignored'
+  | 'excluded'
+  | 'not_included'
+  | 'symlink'
+  | 'inaccessible'
+  | 'unsupported';
+
+interface SkipReasonCount {
+  reason: SkipReason;
+  label: string;
+  count: number;
+  examples: string[];
+  additional: number;
+  reduces_coverage: boolean;
+}
+
+interface SkipReasonSummary {
+  total: number;
+  intentional: number;
+  coverage_gaps: number;
+  reasons: SkipReasonCount[];
+}
+
 interface ReportSummary {
   files_included: number;
   files_skipped: number;
@@ -50,6 +74,7 @@ interface AuditReport {
   project: string;
   schema_version: number;
   summary: ReportSummary;
+  skip_summary: SkipReasonSummary;
   findings: Finding[];
   limitations: string[];
   coverage: AnalysisCoverage;
@@ -121,6 +146,13 @@ function coverageLabel(coverage: AnalysisCoverage): string {
         .join(', ')}`
     : '';
   return `${base}${partial}${unsupported}`;
+}
+
+/// Apresenta o cabeçalho do resumo de exclusões sem inventar regras de cobertura.
+function skipSummaryHeadline(summary: SkipReasonSummary): string {
+  const intentional = summary.intentional === 1 ? 'intencional' : 'intencionais';
+  const gaps = summary.coverage_gaps === 1 ? 'reduz cobertura' : 'reduzem cobertura';
+  return `Motivos dos não incluídos: ${summary.total} (${summary.intentional} ${intentional}, ${summary.coverage_gaps} ${gaps})`;
 }
 
 export default function App() {
@@ -272,6 +304,22 @@ export default function App() {
             {report.summary.edges} arestas
           </p>
           <p className="detail">{coverageLabel(report.coverage)}</p>
+          {report.skip_summary.total > 0 && (
+            <div>
+              <p className="detail">{skipSummaryHeadline(report.skip_summary)}</p>
+              <ul className="detail">
+                {report.skip_summary.reasons.map((reason) => (
+                  <li key={reason.reason}>
+                    {reason.label}: {reason.count} (
+                    {reason.reduces_coverage ? 'reduz cobertura' : 'intencional'})
+                    {reason.examples.length > 0 &&
+                      `; exemplos: ${reason.examples.join(', ')}`}
+                    {reason.additional > 0 && `; +${reason.additional} outros`}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <p className="summary">
             {report.summary.findings} achados ({report.summary.errors} erros,{' '}
             {report.summary.warnings} avisos, {report.summary.infos} informações,{' '}

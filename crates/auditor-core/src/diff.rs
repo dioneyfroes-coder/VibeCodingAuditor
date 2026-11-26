@@ -336,7 +336,9 @@ fn merge_ranges(ranges: Vec<LineRange>) -> Vec<LineRange> {
 mod tests {
     use super::*;
     use crate::analysis::AnalysisCoverage;
+    use crate::discovery::{SkipReason, SkippedEntry};
     use crate::findings::Severity;
+    use crate::report::SkipReasonSummary;
     use crate::report::{AuditReport, ReportSummary};
 
     /// Patch mínimo com duas linhas adicionadas consecutivas.
@@ -439,6 +441,10 @@ rename to src/new.rs\n";
                 infos: 0,
                 needs_review: 2,
             },
+            skip_summary: SkipReasonSummary::from_entries(&[SkippedEntry {
+                path: "vendor/lib.rs".to_owned(),
+                reason: SkipReason::Excluded,
+            }]),
             findings: vec![
                 finding("linha-2", "src/lib.rs", Some(2), Severity::Error),
                 finding("linha-9", "src/lib.rs", Some(9), Severity::Warning),
@@ -463,6 +469,8 @@ rename to src/new.rs\n";
         assert_eq!(scoped.summary.infos, 0);
         assert_eq!(scoped.summary.needs_review, 1);
         assert_eq!(scoped.summary.files_included, 3);
+        assert_eq!(scoped.skip_summary.total, 1);
+        assert_eq!(scoped.skip_summary.reasons[0].reason, SkipReason::Excluded);
         assert_eq!(scoped.limitations.len(), 1);
         assert!(scoped.limitations[0].contains("1 arquivo(s) alterado(s)"));
     }
@@ -484,6 +492,7 @@ rename to src/new.rs\n";
                 infos: 0,
                 needs_review: 1,
             },
+            skip_summary: SkipReasonSummary::default(),
             findings: vec![
                 finding("linha-1", "src/old.rs", Some(1), Severity::Error),
                 finding("sem-linha", "src/old.rs", None, Severity::NeedsReview),
@@ -524,6 +533,7 @@ rename to src/new.rs\n";
                 infos: 0,
                 needs_review: 1,
             },
+            skip_summary: SkipReasonSummary::default(),
             findings: vec![finding(
                 "modulo",
                 "crates/domain/**",

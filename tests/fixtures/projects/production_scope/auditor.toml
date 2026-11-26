@@ -1,0 +1,23 @@
+schema_version = 1
+
+[project]
+name = "projeto-escopo-producao"
+
+[scan]
+include = ["crates/**/src/**/*.rs"]
+exclude = []
+
+[architecture]
+style = "modular_monolith"
+
+[[architecture.modules]]
+name = "app"
+path = "crates/app/src/**"
+responsibility = "Adaptador que não pode consumir o domínio diretamente"
+allowed_dependencies = []
+
+[[architecture.modules]]
+name = "domain"
+path = "crates/domain/src/**"
+responsibility = "Regras centrais"
+allowed_dependencies = []

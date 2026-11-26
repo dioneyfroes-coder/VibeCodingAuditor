@@ -16,7 +16,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use serde::Serialize;
-use syn::{Item, UseTree};
+use syn::{Item, ItemMod, Meta, UseTree};
 
 use crate::contract::{Contract, Module};
 use crate::discovery::{Inventory, matches_pattern};
@@ -60,13 +60,54 @@ fn is_duplicate_candidate(line: &str) -> bool {
     .any(|marker| trimmed.starts_with(marker))
 }
 
+/// Indica se o módulo inline é exclusivo de teste (`#[cfg(test)]`).
+fn is_cfg_test_module(item_mod: &ItemMod) -> bool {
+    item_mod.attrs.iter().any(|attribute| {
+        let Meta::List(list) = &attribute.meta else {
+            return false;
+        };
+        list.path.is_ident("cfg") && list.tokens.to_string() == "test"
+    })
+}
+
+/// Registra as linhas ocupadas por módulos `#[cfg(test)]`, inclusive o atributo.
+fn collect_cfg_test_lines(items: &[Item], ignored: &mut BTreeSet<usize>) {
+    for item in items {
+        let Item::Mod(item_mod) = item else {
+            continue;
+        };
+        if is_cfg_test_module(item_mod) {
+            let start = item_mod.attrs.first().map_or_else(
+                || item_mod.mod_token.span.start().line,
+                |attribute| attribute.pound_token.span.start().line,
+            );
+            let end = item_mod
+                .content
+                .as_ref()
+                .map(|(brace, _)| brace.span.close().end().line)
+                .unwrap_or(start);
+            for line in start..=end {
+                ignored.insert(line);
+            }
+            continue;
+        }
+        if let Some((_, inner_items)) = &item_mod.content {
+            collect_cfg_test_lines(inner_items, ignored);
+        }
+    }
+}
+
 /// Registra linhas de código candidatas a duplicação por arquivo.
 fn collect_duplicate_lines(
     duplicates: &mut BTreeMap<String, BTreeSet<String>>,
     path: &str,
     text: &str,
+    ignored_lines: &BTreeSet<usize>,
 ) {
-    for line in text.lines().filter(|line| is_duplicate_candidate(line)) {
+    for (index, line) in text.lines().enumerate() {
+        if ignored_lines.contains(&(index + 1)) || !is_duplicate_candidate(line) {
+            continue;
+        }
         duplicates
             .entry(line.trim().to_owned())
             .or_default()
@@ -421,7 +462,6 @@ pub fn analyze(
             }
         };
 
-        collect_duplicate_lines(&mut duplicate_candidates, &file.path, &text);
         let module = module_for_file(contract, &file.path, &mut analysis);
 
         if extension == Some("rs") {
@@ -435,6 +475,15 @@ pub fn analyze(
                     continue;
                 }
             };
+
+            let mut ignored_test_lines = BTreeSet::new();
+            collect_cfg_test_lines(&parsed.items, &mut ignored_test_lines);
+            collect_duplicate_lines(
+                &mut duplicate_candidates,
+                &file.path,
+                &text,
+                &ignored_test_lines,
+            );
 
             let lines: Vec<&str> = text.lines().collect();
 
@@ -453,6 +502,12 @@ pub fn analyze(
             };
             visit_items(&parsed.items, &mut context);
         } else if typescript::is_supported_extension(extension) {
+            collect_duplicate_lines(
+                &mut duplicate_candidates,
+                &file.path,
+                &text,
+                &BTreeSet::new(),
+            );
             typescript::analyze_text(
                 contract,
                 &contract_names,
@@ -464,6 +519,12 @@ pub fn analyze(
                 &mut seen_edges,
             );
         } else {
+            collect_duplicate_lines(
+                &mut duplicate_candidates,
+                &file.path,
+                &text,
+                &BTreeSet::new(),
+            );
             python::analyze_text(
                 contract,
                 &contract_names,
@@ -552,6 +613,9 @@ fn visit_items(items: &[Item], context: &mut VisitContext<'_>) {
                 }
             }
             Item::Mod(item_mod) => {
+                if is_cfg_test_module(item_mod) {
+                    continue;
+                }
                 let (line, _) = source_location(
                     context.lines,
                     item_mod.mod_token.span,
@@ -1620,7 +1684,14 @@ mod tests {
 
     /// Análise completa da fixture de dependências.
     fn analyze_fixture() -> Analysis {
-        let root = project_root();
+        analyze_project("dependencies")
+    }
+
+    /// Análise completa de uma fixture pelo nome do diretório.
+    fn analyze_project(name: &str) -> Analysis {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/projects")
+            .join(name);
         let contract =
             load_contract(&root.join("auditor.toml")).expect("fixture contract must load");
         let inventory = discover(&root, &contract).expect("discovery must succeed");
@@ -1804,12 +1875,7 @@ mod tests {
     /// Um `use` dentro de função não deve deslocar a linha de um `use` de módulo.
     #[test]
     fn module_level_use_keeps_its_own_source_line() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../tests/fixtures/projects/source_lines");
-        let contract =
-            load_contract(&root.join("auditor.toml")).expect("fixture contract must load");
-        let inventory = discover(&root, &contract).expect("discovery must succeed");
-        let analysis = analyze(&root, &contract, &inventory).expect("analysis must succeed");
+        let analysis = analyze_project("source_lines");
 
         let edge = analysis
             .edges
@@ -1818,6 +1884,47 @@ mod tests {
             .expect("module-level edge must exist");
         assert_eq!(edge.line, Some(6));
         assert_eq!(edge.evidence.as_deref(), Some("use domain::Other;"));
+    }
+
+    /// Módulos `#[cfg(test)]` não fazem parte do escopo de produção do contrato.
+    #[test]
+    fn cfg_test_modules_are_outside_the_production_scope() {
+        let analysis = analyze_project("production_scope");
+
+        assert!(
+            analysis.edges.iter().any(|edge| edge.from == "app"
+                && edge.to == "domain"
+                && edge.evidence.as_deref() == Some("use domain::Value;")),
+            "a dependência de produção continua sendo avaliada"
+        );
+        assert!(
+            analysis
+                .edges
+                .iter()
+                .all(|edge| edge.evidence.as_deref() != Some("use domain::Other;")),
+            "o `use` dentro de `#[cfg(test)]` não vira aresta"
+        );
+        assert!(
+            analysis
+                .module_declarations
+                .iter()
+                .all(|declaration| declaration.name != "tests"),
+            "módulos de teste não entram no grafo"
+        );
+        assert!(
+            analysis
+                .duplicate_lines
+                .iter()
+                .any(|duplicate| duplicate.text.contains("repetida deliberadamente")),
+            "duplicação em produção continua visível"
+        );
+        assert!(
+            analysis
+                .duplicate_lines
+                .iter()
+                .all(|duplicate| !duplicate.text.contains("exclusivo entre testes")),
+            "linhas de teste não geram duplicação"
+        );
     }
 
     #[test]

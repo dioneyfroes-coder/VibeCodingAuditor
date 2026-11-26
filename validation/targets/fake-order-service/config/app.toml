@@ -1,0 +1,7 @@
+[service]
+name = "fake-order-service"
+environment = "validation"
+timeout_seconds = 30
+
+[logging]
+level = "info"

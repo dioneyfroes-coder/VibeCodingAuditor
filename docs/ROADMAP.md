@@ -337,7 +337,7 @@ Ordem e critérios vêm de `RELATORIO_ETAPA_1_E_PLANO_ETAPA_2.md`, seção 8. Um
 
 A cobertura estruturada e o resumo de motivos ainda não são gravados em colunas próprias no histórico; a limitação textual continua sendo persistida. Isso foi reavaliado no item 2.7 e mantido fora do escopo. A validação do desktop foi feita por tipos, build e testes dos helpers; a janela Tauri não foi inspecionada visualmente. Também não há fixture com symlink, permissão negada ou FIFO reais: esses motivos são exercitados com inventário em memória no construtor real do relatório. O empacotamento de instaladores continua desativado e o workflow não executa `tauri build`. A primeira execução do workflow no GitHub Actions foi observada em 26/11/2026: `CI Windows` #1, commit `7a07286`, `status: completed`, `conclusion: success`, com todas as etapas do job `verify` aprovadas em `windows-latest`.
 
-## Etapa 3 — Validação arquitetural (em andamento; 3.0, 3.1 e 3.2 concluídas)
+## Etapa 3 — Validação arquitetural (em andamento; 3.0, 3.1, 3.2 e 3.3 concluídas)
 
 ### Etapa 3.0 — Baseline reproduzível — Concluída em 26/11/2026
 
@@ -385,6 +385,16 @@ A cobertura estruturada e o resumo de motivos ainda não são gravados em coluna
 - [x] Smoke na CLI: `history record` nas variantes `before` e `after` gravou o mesmo `id` `dep.not_allowed:application:infrastructure:src/lib.rs`, com local atualizado de `src/lib.rs:1` para `src/lib.rs:4`; `history compare 1 2` retornou 0 novos, 0 resolvidos e 2 persistentes.
 - [x] Verificação final: `cargo fmt --check`, `cargo check --workspace`, `cargo test --workspace` (154 testes: 141 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` e `git diff --check` retornaram `0`; o último emitiu apenas o aviso LF/CRLF esperado do OneDrive.
 
-### Etapas 3.3 a 3.7 — Pendentes
+### Etapa 3.3 — Validação em segundo projeto sintético — Concluída em 26/11/2026
 
-- [ ] Executar as etapas seguintes do plano na ordem definida, começando pela validação em um segundo projeto real indicado pelo usuário.
+- [x] Atendendo ao pedido explícito do usuário, criado o alvo `validation/targets/fake-order-service`, com quatro módulos Rust, manifests próprios, teste, configuração, documentação de intenção e três dependências proibidas plantadas. O contrato foi criado nesse diretório novo; nenhum `auditor.toml` preexistente foi substituído.
+- [x] Classificação registrada: `domain` sem dependências, `application` depende de `domain`, `infrastructure` depende de `domain` e `application`, e `webapi` depende de `application`. `shared/legacy.rs`, `web/src/client.ts` e `tools/check.go` ficaram fora dos módulos por decisão explícita, para exercitar revisão e cobertura parcial.
+- [x] `scan` retornou `0` com 12 arquivos incluídos e 8 não incluídos, todos intencionais; `analyze` retornou `0` com 6 arestas, das quais 3 proibidas, e 2 revisões; `audit` retornou `1` com 7 achados: 3 erros, 1 aviso e 3 revisões. Os quatro achados arquiteturais plantados foram detectados; não houve falso positivo nem violação plantada não detectada.
+- [x] Censo manual dos 7 achados: 4 verdadeiros positivos, 3 revisões corretas, 0 falsos positivos. `11/12` arquivos de código analisados; o único não analisado foi `tools/check.go`, por ausência de analisador `.go`. Ruído `needs_review`: `3/7` (42,9%), todo esperado. Tempos medidos em uma execução cada: `scan` 1063 ms, `analyze` 875 ms, `audit --format json` 863 ms e `audit` texto 873 ms; não é benchmark estatístico.
+- [x] Limitações documentadas: cobertura parcial por `.go`, `import()` dinâmico sem aresta, pacotes npm não enumerados, duplicação por linha exata e identidade que não sobrevive à renomeação de arquivo. Nenhuma alteração no motor foi justificada pela evidência; a prioridade seguinte é o contrato v2 para expressar fronteiras de `shared` e frontend, não adicionar parser Go ou adivinhar imports dinâmicos.
+- [x] Integridade confirmada: SHA-256 dos 20 arquivos do alvo permaneceu idêntico antes e depois de segunda auditoria somente leitura. Relatório integral em [docs/validation/etapa-3/second-project-synthetic.md](validation/etapa-3/second-project-synthetic.md).
+- [x] Ressalva explícita: o alvo é sintético e criado nesta sessão, não um projeto de terceiros. A validação sai da arquitetura do auditor, mas não substitui uma repetição futura em projeto real disponível.
+
+### Etapas 3.4 a 3.7 — Pendentes
+
+- [ ] Executar as etapas seguintes do plano na ordem definida, começando pela proposta do contrato v2.

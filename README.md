@@ -240,6 +240,12 @@ O `auditor.toml` da raiz audita somente o código Rust de produção: `core`, `c
 
 Na execução corrente, `scan .` inventaria 15 arquivos Rust e 47 entradas não incluídas, todas intencionais. `analyze .` mostra 9 arestas `permitidas`, nenhuma `proibida` e 8 `não resolvidas`; `cli -> core` e `desktop-backend -> core` aparecem, e nenhuma crate externa declarada é falsamente classificada como módulo interno. `audit .` termina com 62 revisões (54 `code.duplicated` e 8 `dep.unresolved`), 0 erros, 0 avisos e 0 limitações, com cobertura 15/15. As 8 revisões remotas são `super::` em módulos de teste; a heurística de duplicação compara apenas linhas exatas.
 
+## Validação em alvo sintético (Etapa 3.3)
+
+O diretório `validation/targets/fake-order-service` é um projeto falso criado a pedido, com contrato v1 próprio e quatro módulos: `domain`, `application`, `infrastructure` e `webapi`. Três dependências proibidas e um ciclo foram plantados. A auditoria é somente leitura: os 20 arquivos do alvo tiveram o mesmo SHA-256 antes e depois de duas execuções.
+
+`scan` inventaria 12 arquivos incluídos e 8 entradas intencionais; `analyze` encontra 6 arestas, das quais 3 proibidas; `audit` gera 7 achados (3 erros, 1 aviso e 3 revisões). O censo manual classificou 4 verdadeiros positivos e 3 revisões corretas, sem falso positivo e sem violação plantada não detectada. `tools/check.go` não foi analisado por falta de analisador `.go`, e o `import()` dinâmico em `web/src/client.ts` não virou aresta. O relatório completo está em [docs/validation/etapa-3/second-project-synthetic.md](docs/validation/etapa-3/second-project-synthetic.md). Este alvo não substitui uma futura validação em projeto real de terceiros.
+
 ## Execução
 
 O executável `vibe-coding-auditor` responde a `--help`, `--version`, `init <diretorio>`, `scan <raiz>`, `analyze <raiz>`, `audit <raiz>` e `history <operacao>`. `init` cria `auditor.toml` sem sobrescrever arquivo existente; `scan` e `analyze` são somente leitura e servem para inspeção. `audit` produz achados e relatórios no formato escolhido. `history record` reutiliza a auditoria e grava o banco; `list`, `show` e `compare` apenas leem o banco.

@@ -2,7 +2,7 @@
 
 Data: 26/11/2026
 Branch: `etapa-3/validacao-arquitetural`
-Status: **paridade automatizada, feedback e checklist do desktop concluídos; checklist da extensão VS Code pendente**
+Status: **concluída em 26/11/2026; paridade automatizada e checklists manuais do desktop e da extensão VS Code confirmados pelo usuário**
 
 ## Método
 
@@ -73,7 +73,7 @@ Os textos de status vivem em `apps/desktop/src/status.ts`, sem regras de auditor
 
 ## Checklist manual
 
-Os itens do desktop exigiram observação da janela Tauri e foram confirmados pelo usuário em 26/11/2026, que respondeu: “agora todos botões tem função executada, visual ficou mais agradável”. Ao ser perguntado explicitamente, confirmou também filtros, grafo, contrato somente leitura, registro/consulta de histórico e erro operacional. Os itens da extensão não foram executados: o usuário respondeu que ainda não instalou nem testou o `.vsix`. Não houve automação gráfica neste ambiente nem capturas de tela.
+Os itens do desktop exigiram observação da janela Tauri e foram confirmados pelo usuário em 26/11/2026, que respondeu: “agora todos botões tem função executada, visual ficou mais agradável”. Ao ser perguntado explicitamente, confirmou também filtros, grafo, contrato somente leitura, registro/consulta de histórico e erro operacional. Os itens da extensão foram executados na host do VS Code e confirmados pelo usuário em 26/11/2026, depois da instalação do `.vsix` e da configuração do caminho da CLI. Não houve automação gráfica neste ambiente nem capturas de tela; as confirmações vieram do usuário e do estado persistido pela extensão.
 
 ### Desktop — concluído em 26/11/2026
 
@@ -96,25 +96,37 @@ Os itens do desktop exigiram observação da janela Tauri e foram confirmados pe
 
 O executável release foi recompilado depois das correções (`npm run tauri build` = `0`) e a auditoria do alvo sintético foi repetida: `audit` retornou `1` com 7 achados e `analyze` retornou `0` com 6 arestas. Nenhum arquivo do alvo foi alterado.
 
-### Extensão VS Code — pendente
+### Extensão VS Code — concluída em 26/11/2026
+
+Antes do teste, a CLI release foi compilada e o `.vsix` foi instalado na instância do VS Code do usuário. O comando `vibeCodingAuditor.cliPath` foi configurado no `settings.json` de usuário, fora do repositório, porque a pasta auditada não contém `target/release`. O usuário inicialmente procurou por um comando chamado “diagnóstico” e queixou-se de ausência de menu de contexto; esclarecido que o painel se chama **Problems** e que o menu aparece ao clicar com o botão direito em uma **pasta**, todos os itens foram conferidos.
 
 | Item verificado | Estado |
 |---|---|
-| Detecção de `auditor.toml` na pasta aberta | Pendente |
-| Comando de auditoria pela paleta e pelo menu de contexto | Pendente |
-| Diagnósticos aparecem no painel Problems | Pendente |
-| Severidade e `rule_id` conferem com a CLI | Pendente na host (conversão já conferida por teste) |
-| Clique no achado abre arquivo e linha corretos | Pendente |
-| Estado da última auditoria aparece na barra de status | Pendente |
-| Códigos de saída `0` e `1` são aceitos | Pendente na host (códigos já testados na CLI) |
+| Detecção de `auditor.toml` na pasta aberta | Concluído pelo usuário; a auditoria foi executada na raiz do alvo |
+| Comando de auditoria pela paleta e pelo menu de contexto | Concluído pelo usuário: `Vibe` na paleta e botão direito na pasta `src` |
+| Diagnósticos aparecem no painel Problems | Concluído pelo usuário: 7 itens na aba Problemas junto do terminal |
+| Severidade e `rule_id` conferem com a CLI | Concluído pelo usuário: 3 `dep.not_allowed`, 1 `dep.cycle`, 1 `code.duplicated` e 2 `file.unmapped` |
+| Clique no achado abre arquivo e linha corretos | Concluído pelo usuário |
+| Estado da última auditoria aparece na barra de status | Concluído pelo usuário: `VCA: 7 achados` |
+| Códigos de saída `0` e `1` são aceitos | Concluído na host: a CLI retornou `1` e a extensão concluiu sem erro operacional |
+
+Evidências automaticamente verificáveis:
+
+| Comando/arquivo | Resultado |
+|---|---|
+| `cargo build --release -p auditor-cli` | `0`; gerou `target/release/vibe-coding-auditor.exe` (5.760.512 bytes) |
+| `code --install-extension extensions\vscode\vibe-coding-auditor-0.1.0.vsix --force` | `0`; `code --list-extensions --show-versions` mostrou `dioneyfroes-coder.vibe-coding-auditor@0.1.0` |
+| `vibe-coding-auditor.exe audit validation/targets/fake-order-service --format json` | `1`; 7 achados (3 erros, 1 aviso, 3 revisões) |
+| `exthost.log` da janela do alvo | extensão ativada em `15:30:54` sem erro |
+| `workspaceStorage\27e98a66...\state.vscdb` | chave `dioneyfroes-coder.vibe-coding-auditor` com `lastAudit`: mesmo resumo da CLI |
 
 ## Limitações desta validação
 
-- Não houve automação gráfica nesta sessão; a janela Tauri foi conferida pelo usuário, sem capturas de tela.
-- A extensão não foi instalada na instância do VS Code do usuário; o pacote `.vsix` foi gerado mas não instalado nem testado.
+- Não houve automação gráfica nesta sessão; a janela Tauri e a host do VS Code foram conferidas pelo usuário, sem capturas de tela.
+- A extensão passou a ser instalada e testada na instância do VS Code do usuário; a configuração do caminho da CLI ficou no `settings.json` de usuário, fora do repositório.
 - Nenhuma captura de tela foi gerada, para não registrar dados locais do projeto.
-- Os testes provam paridade de dados, não eventos de clique, foco, diálogo nativo nem renderização efetiva no editor.
+- Os testes provam paridade de dados; os eventos de clique, foco, diálogo nativo e renderização efetiva foram confirmados pelo usuário, não por automação.
 
 ## Critério para concluir a Etapa 3.7
 
-O checklist do desktop foi preenchido e confirmado pelo usuário em 26/11/2026. A etapa só será marcada como concluída depois que o checklist da extensão também for preenchido, com as divergências registradas. Enquanto isso, a Etapa 3 permanece em andamento e a Etapa 3.6 continua pendente.
+Os dois checklists foram preenchidos e confirmados pelo usuário em 26/11/2026, com a divergência inicial registrada (termo “diagnóstico” e menu de contexto confundido com arquivo). A Etapa 3.7 está concluída. A Etapa 3 permanece em andamento apenas por causa da Etapa 3.6, que depende de confirmação de requisito.

@@ -419,7 +419,7 @@ A cobertura estruturada e o resumo de motivos ainda não são gravados em coluna
 
 - [ ] Somente se a necessidade de comparar cobertura entre execuções for confirmada; nenhuma migração SQLite foi feita nesta entrega.
 
-### Etapa 3.7 — Validação ponta a ponta do desktop e da extensão — Em andamento; desktop confirmado pelo usuário em 26/11/2026; extensão pendente
+### Etapa 3.7 — Validação ponta a ponta do desktop e da extensão — Concluída em 26/11/2026
 
 - [x] Relatório real da CLI sobre `layer_boundaries` capturado em UTF-8 via `--output` (`cargo run -q -p auditor-cli -- audit tests/fixtures/projects/layer_boundaries --format json --output ...`); saída `1` esperada por haver achados.
 - [x] Apresentação do desktop extraída para `apps/desktop/src/reportView.ts` e coberta por 5 testes Node que leem o mesmo JSON: resumo, filtros, opções, cobertura e lista de arestas (7 testes no total com os 2 de exclusões). Fase vermelha registrada com `ERR_MODULE_NOT_FOUND`.
@@ -428,4 +428,4 @@ A cobertura estruturada e o resumo de motivos ainda não são gravados em coluna
 - [x] Após o relato do usuário sobre a janela, a interface ganhou área de status com o resultado das seis ações, mensagem explícita para histórico vazio, dica do `auditor.toml` na raiz, rolagem até o painel gerado, badges de severidade, legenda do grafo e CSS com estados de botão. Helpers puros em `apps/desktop/src/status.ts` com 5 testes novos; fase vermelha registrada com `ERR_MODULE_NOT_FOUND`. O total de testes do desktop passou para 12.
 - [x] Relatório com a comparação e os checklists em [docs/validation/etapa-3/desktop-vscode.md](validation/etapa-3/desktop-vscode.md), incluindo o diagnóstico do erro de contrato ausente e as correções de feedback.
 - [x] Checklist visual da janela Tauri confirmado pelo usuário em 26/11/2026: todos os botões executam e o visual ficou mais agradável. Executável release recompilado em `target/release/auditor-desktop.exe` e auditoria do alvo sintético repetida pela CLI (`audit` = `1` com 7 achados; `analyze` = `0` com 6 arestas).
-- [ ] Checklist da host do VS Code preenchido pelo usuário: o `.vsix` não foi instalado nem testado. A Etapa 3.7 não foi declarada concluída.
+- [x] Checklist da host do VS Code confirmado pelo usuário em 26/11/2026: `.vsix` instalado com `code --install-extension ... --force` (`0`), CLI release compilada (`0`) e `vibeCodingAuditor.cliPath` configurado fora do repositório. Comando executado pela paleta e pelo menu de contexto; 7 diagnósticos no painel Problems com 3 erros, 1 aviso de ciclo e 3 revisões; clique abriu arquivo/linha; barra de status mostrou `VCA: 7 achados`; código `1` da CLI aceito sem erro operacional. O estado da janela registrou o mesmo relatório da CLI (7 achados, 3 erros, 1 aviso, 3 revisões). Etapa 3.7 concluída.

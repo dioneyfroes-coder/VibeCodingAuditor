@@ -335,9 +335,9 @@ Ordem e critérios vêm de `RELATORIO_ETAPA_1_E_PLANO_ETAPA_2.md`, seção 8. Um
 - [x] Build TypeScript/React e testes da extensão passaram
 - [x] README, roadmap e decisões refletem somente o que foi efetivamente validado
 
-A cobertura estruturada e o resumo de motivos ainda não são gravados em colunas próprias no histórico; a limitação textual continua sendo persistida. Isso foi reavaliado no item 2.7 e mantido fora do escopo. A validação do desktop foi feita por tipos, build e testes dos helpers; a janela Tauri não foi inspecionada visualmente. Também não há fixture com symlink, permissão negada ou FIFO reais: esses motivos são exercitados com inventário em memória no construtor real do relatório. O empacotamento de instaladores continua desativado e o workflow não executa `tauri build`. A primeira execução do workflow no GitHub Actions foi observada em 26/11/2026: `CI Windows` #1, commit `7a07286`, `status: completed`, `conclusion: success`, com todas as etapas do job `verify` aprovadas em `windows-latest`.
+A cobertura estruturada e o resumo de motivos passaram a ser gravados em tabelas próprias na Etapa 3.6 (schema SQLite v2), sem exemplos de caminho; a limitação textual continua sendo persistida. Isso havia sido reavaliado no item 2.7 e mantido fora de escopo até o usuário confirmar, em 26/11/2026, que comparar cobertura entre execuções históricas é requisito real. A validação do desktop foi feita por tipos, build e testes dos helpers, além da inspeção visual confirmada em `E3.10`. Também não há fixture com symlink, permissão negada ou FIFO reais: esses motivos são exercitados com inventário em memória no construtor real do relatório. O empacotamento de instaladores continua desativado e o workflow não executa `tauri build`. A primeira execução do workflow no GitHub Actions foi observada em 26/11/2026: `CI Windows` #1, commit `7a07286`, `status: completed`, `conclusion: success`, com todas as etapas do job `verify` aprovadas em `windows-latest`.
 
-## Etapa 3 — Validação arquitetural (em andamento; 3.0 a 3.5 e 3.7 concluídas; 3.6 pendente)
+## Etapa 3 — Validação arquitetural (concluída em 26/11/2026; subetapas 3.0 a 3.7 concluídas)
 
 ### Etapa 3.0 — Baseline reproduzível — Concluída em 26/11/2026
 
@@ -415,9 +415,15 @@ A cobertura estruturada e o resumo de motivos ainda não são gravados em coluna
 - [x] Contratos v2 equivalentes ao contrato raiz e ao alvo sintético da Etapa 3.3 produziram o mesmo resumo, achados, limitações e cobertura; os arquivos originais não foram alterados. Relatório em [docs/validation/etapa-3/contract-v2.md](validation/etapa-3/contract-v2.md).
 - [x] Verificação completa: `cargo fmt --all`, `cargo fmt --check`, `cargo check --workspace`, `cargo test --workspace` (185 testes: 171 no núcleo, 10 na CLI e 4 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `npm test` da extensão (5 testes) e `git diff --check` retornaram `0`; o último emitiu apenas o aviso LF/CRLF esperado do OneDrive.
 
-### Etapa 3.6 — Cobertura estruturada no histórico — Pendente
+### Etapa 3.6 — Cobertura estruturada no histórico — Concluída em 26/11/2026
 
-- [ ] Somente se a necessidade de comparar cobertura entre execuções for confirmada; nenhuma migração SQLite foi feita nesta entrega.
+- [x] O usuário confirmou em 26/11/2026 que comparar cobertura entre execuções é requisito real, não curiosidade. Proposta com motivo, alternativas e impacto registrada antecipadamente em `docs/architecture/HISTORY_COVERAGE_V2_PROPOSAL.md` e aprovada com “Aprovar e iniciar (Recommended)”.
+- [x] Testes de regressão escritos antes da implementação falharam na fase vermelha com `exit code 101` por campos e tabelas inexistentes; a suíte focada terminou com 22 testes aprovados após a implementação (incluindo 2 testes diretos dos helpers de renderização).
+- [x] Migração SQLite v2 aplicada em transação única: `audit_run_coverage` (contagens e `partial`), `audit_coverage_unsupported_extensions` (extensão e arquivos) e `audit_coverage_skip_reasons` (posição estável, rótulo, contagem e impacto). Nenhum exemplo de caminho ou conteúdo de arquivo é gravado.
+- [x] `migrate()` aplica versões pendentes em ordem e registra cada versão aplicada; bancos v1 são migrados preservando execuções, bancos v2 reabertos sem alteração, versões futuras continuam rejeitadas e uma falha de DDL reverte a versão registrada.
+- [x] `history show` exibe cobertura e motivos; `history compare` mostra coberturas, deltas de analisados/não analisados, extensões sem analisador e mudança nos motivos. Execuções anteriores à migração aparecem como `sem dados`, sem números inventados.
+- [x] Nenhuma mudança em `auditor.toml`, `rule_id` existente, formato de `findings`, comandos/códigos de saída da CLI, desktop ou extensão. Nenhuma dependência nova.
+- [x] Smoke real pela CLI com banco temporário: `record` nas fixtures `partial_coverage` e `clean`, `show 1` e `compare 1 2` retornaram `0` e exibiram os deltas esperados. Verificação completa: `cargo fmt --all`, `cargo fmt --check`, `cargo test --workspace` (193 testes: 179 no núcleo, 10 na CLI e 4 no desktop) e `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` retornaram `0`. Decisão em `E3.12`.
 
 ### Etapa 3.7 — Validação ponta a ponta do desktop e da extensão — Concluída em 26/11/2026
 
@@ -429,3 +435,8 @@ A cobertura estruturada e o resumo de motivos ainda não são gravados em coluna
 - [x] Relatório com a comparação e os checklists em [docs/validation/etapa-3/desktop-vscode.md](validation/etapa-3/desktop-vscode.md), incluindo o diagnóstico do erro de contrato ausente e as correções de feedback.
 - [x] Checklist visual da janela Tauri confirmado pelo usuário em 26/11/2026: todos os botões executam e o visual ficou mais agradável. Executável release recompilado em `target/release/auditor-desktop.exe` e auditoria do alvo sintético repetida pela CLI (`audit` = `1` com 7 achados; `analyze` = `0` com 6 arestas).
 - [x] Checklist da host do VS Code confirmado pelo usuário em 26/11/2026: `.vsix` instalado com `code --install-extension ... --force` (`0`), CLI release compilada (`0`) e `vibeCodingAuditor.cliPath` configurado fora do repositório. Comando executado pela paleta e pelo menu de contexto; 7 diagnósticos no painel Problems com 3 erros, 1 aviso de ciclo e 3 revisões; clique abriu arquivo/linha; barra de status mostrou `VCA: 7 achados`; código `1` da CLI aceito sem erro operacional. O estado da janela registrou o mesmo relatório da CLI (7 achados, 3 erros, 1 aviso, 3 revisões). Etapa 3.7 concluída.
+
+### Fechamento da Etapa 3
+
+- [x] Todas as subetapas 3.0 a 3.7 estão concluídas. A Etapa 3 é declarada concluída em 26/11/2026 com base nas evidências registradas nas seções anteriores e nas decisões `E3.1` a `E3.12`.
+- [x] Limitações que permanecem explícitas: a inspeção visual do desktop e da extensão dependeu da confirmação manual do usuário, sem captura de tela; não há fixture com symlink, permissão negada ou FIFO reais; empacotamento de instaladores segue desativado; o histórico cresce sem comando de limpeza; a comparação de cobertura não valida se as duas execuções pertencem ao mesmo projeto e continua disponível apenas na CLI.

@@ -501,25 +501,22 @@ Só iniciar depois de a proposta da Etapa 3.4 estar aprovada.
 
 ---
 
-# 9. Etapa 3.6 — Cobertura estruturada no histórico
+# 9. Etapa 3.6 — Cobertura estruturada no histórico — Concluída em 26/11/2026
 
-**Objetivo:** permitir comparar a cobertura de análise entre execuções históricas, caso a validação de uso confirme essa necessidade.
+**Objetivo:** permitir comparar a cobertura de análise entre execuções históricas.
 
-Atualmente, `coverage` e `skip_summary` são apresentados nos relatórios, mas o roadmap registra que o SQLite ainda guarda as limitações em texto, sem colunas/campos estruturados para esses resumos.
+O usuário confirmou que esse requisito é real, não apenas uma melhoria estética. A proposta com motivo, alternativas e impacto foi registrada em `docs/architecture/HISTORY_COVERAGE_V2_PROPOSAL.md` e aprovada antes da implementação. O roadmap passou a marcar esta subetapa e a Etapa 3 como concluídas; a decisão final está em `E3.12`.
 
-Antes de implementar, confirmar que comparar cobertura ao longo do tempo é um requisito real e não apenas uma melhoria estética.
+Execução aprovada:
 
-Se aprovado:
+- [x] migração SQLite versionada para `SCHEMA_VERSION = 2`, aplicando pendências em ordem em uma transação e registrando a versão real de cada migração;
+- [x] `audit_run_coverage` com contagens de arquivos de código incluídos, analisados e não analisados e o indicador `partial`;
+- [x] `audit_coverage_unsupported_extensions` com extensão e quantidade de arquivos;
+- [x] `audit_coverage_skip_reasons` com posição estável, rótulo, contagem e impacto na cobertura, sem exemplos de caminho e sem conteúdo integral de arquivos;
+- [x] `history show` e `history compare` apresentando cobertura, deltas e mudanças nos motivos; execuções antigas sinalizadas como `sem dados`;
+- [x] testes de banco v1 migrado, banco já migrado, rollback transacional em falha, versão futura rejeitada, gravação/recarga e comparação com coberturas diferentes.
 
-- projetar migração SQLite versionada;
-- armazenar cobertura agregada por execução;
-- armazenar motivos de exclusão com rótulos estáveis e contagens;
-- evitar armazenar conteúdo integral de arquivos;
-- manter exemplos limitados e não aumentar o volume do banco desnecessariamente;
-- permitir comparar alterações de cobertura entre duas execuções;
-- testar banco antigo, migração, rollback transacional em falha e banco já migrado.
-
-Se não aprovado, manter a limitação documentada e não alterar o banco nesta etapa.
+Verificação registrada no roadmap: fase vermelha com `exit code 101`, 20 testes focados aprovados, suíte completa com 191 testes, `cargo fmt --check` e clippy com `-D warnings` retornando `0`, e smoke real pela CLI com banco temporário. Nenhuma mudança em contrato, `rule_id`, formato de `findings`, desktop ou extensão.
 
 ---
 

@@ -129,4 +129,4 @@ Evidências automaticamente verificáveis:
 
 ## Critério para concluir a Etapa 3.7
 
-Os dois checklists foram preenchidos e confirmados pelo usuário em 26/11/2026, com a divergência inicial registrada (termo “diagnóstico” e menu de contexto confundido com arquivo). A Etapa 3.7 está concluída. A Etapa 3 permanece em andamento apenas por causa da Etapa 3.6, que depende de confirmação de requisito.
+Os dois checklists foram preenchidos e confirmados pelo usuário em 26/11/2026, com a divergência inicial registrada (termo “diagnóstico” e menu de contexto confundido com arquivo). A Etapa 3.7 está concluída. A Etapa 3.6 foi concluída posteriormente, com aprovação registrada em `E3.12`; a Etapa 3 foi declarada concluída em 26/11/2026.

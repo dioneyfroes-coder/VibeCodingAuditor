@@ -11,6 +11,19 @@ import {
   reportSummaryPhrase,
 } from './reportView';
 import {
+  auditStatus,
+  cancelledSelectionStatus,
+  contractStatus,
+  errorStatus,
+  graphStatus,
+  historyStatus,
+  recordStatus,
+  selectionStatus,
+  statusLine,
+  type ActionName,
+  type ActionStatus,
+} from './status';
+import {
   skipSummaryHeadline,
   skipSummaryLine,
   type SkipReasonSummary,
@@ -129,16 +142,25 @@ export default function App() {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [severityFilter, setSeverityFilter] = useState('all');
   const [ruleFilter, setRuleFilter] = useState('all');
-  const [error, setError] = useState<string | null>(null);
+  const [statuses, setStatuses] = useState<ActionStatus[]>([]);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const execute = async (operation: () => Promise<void>) => {
+  const pushStatus = (status: ActionStatus) =>
+    setStatuses((current) => [status, ...current].slice(0, 5));
+
+  /// Leva o usuário ao painel gerado pela ação, depois da atualização da tela.
+  const reveal = (id: string) =>
+    requestAnimationFrame(() => {
+      document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+
+  const execute = async (action: ActionName, operation: () => Promise<void>) => {
     setBusy(true);
-    setError(null);
     try {
       await operation();
     } catch (failure) {
-      setError(String(failure));
+      pushStatus(errorStatus(action, failure));
     } finally {
       setBusy(false);
     }
@@ -151,39 +173,54 @@ export default function App() {
       limit: 50,
     });
     setRuns(history);
+    setHistoryLoaded(true);
+    pushStatus(historyStatus(history.length));
   };
 
   const selectProject = () =>
-    execute(async () => {
+    execute('select', async () => {
       const selected = await open({ directory: true, multiple: false });
       if (typeof selected === 'string') {
         setProjectPath(selected);
+        pushStatus(selectionStatus(selected));
+      } else {
+        pushStatus(cancelledSelectionStatus());
       }
     });
 
   const runAudit = () =>
-    execute(async () => {
+    execute('audit', async () => {
       const result = await invoke<AuditReport>('audit_project', { path: projectPath });
       setReport(result);
       setAnalysis(null);
       setSeverityFilter('all');
       setRuleFilter('all');
+      pushStatus(auditStatus(reportSummaryPhrase(result.summary)));
+      reveal('painel-relatorio');
     });
 
   const showGraph = () =>
-    execute(async () => {
-      setAnalysis(await invoke<Analysis>('analyze_project', { path: projectPath }));
+    execute('graph', async () => {
+      const result = await invoke<Analysis>('analyze_project', { path: projectPath });
+      setAnalysis(result);
+      pushStatus(graphStatus(result.modules.length, result.edges.length));
+      reveal('painel-grafo');
     });
 
   const openContract = () =>
-    execute(async () => {
-      setContractText(await invoke<string>('read_contract', { path: projectPath }));
+    execute('contract', async () => {
+      const text = await invoke<string>('read_contract', { path: projectPath });
+      setContractText(text);
+      pushStatus(contractStatus(text));
+      reveal('painel-contrato');
     });
 
   const recordRun = () =>
-    execute(async () => {
-      await invoke<number>('history_record', { path: projectPath, database });
+    execute('record', async () => {
+      const id = await invoke<number>('history_record', { path: projectPath, database });
+      pushStatus(recordStatus(id));
       await refreshHistory();
+      reveal('painel-historico');
     });
 
   // Filtros apenas apresentam o relatório recebido; nenhuma regra é avaliada aqui.
@@ -200,8 +237,27 @@ export default function App() {
 
   return (
     <main>
-      <h1>Vibe Coding Auditor</h1>
-      <p className="subtitle">Auditoria local de arquitetura. Nenhuma operação é automática.</p>
+      <header className="cabecalho">
+        <h1>Vibe Coding Auditor</h1>
+        <p className="subtitle">Auditoria local de arquitetura. Nenhuma operação é automática.</p>
+      </header>
+
+      <section className="panel" aria-label="Status das ações">
+        <h2>Status</h2>
+        {statuses.length === 0 ? (
+          <p className="detail">Nenhuma ação executada nesta sessão.</p>
+        ) : (
+          <ul className="status-list">
+            {statuses.map((status, index) => (
+              <li key={`${status.action}-${index}`} className={`status-${status.kind}`}>
+                <span className="status-kind">{status.kind === 'error' ? 'falha' : status.kind}</span>
+                {statusLine(status)}
+              </li>
+            ))}
+          </ul>
+        )}
+        {busy && <p className="detail">Operação em andamento…</p>}
+      </section>
 
       <section className="panel">
         <h2>Projeto</h2>
@@ -213,11 +269,20 @@ export default function App() {
             placeholder="C:\caminho\do\projeto"
           />
         </label>
+        <p className="detail hint">
+          Selecione a pasta que contém o <code>auditor.toml</code> na raiz. A aplicação nunca cria
+          nem altera esse arquivo.
+        </p>
+        {projectPath && (
+          <p className="detail">
+            Contrato esperado: <code>{`${projectPath}\\auditor.toml`}</code>
+          </p>
+        )}
         <div className="actions">
-          <button type="button" disabled={busy} onClick={selectProject}>
+          <button type="button" className="primario" disabled={busy} onClick={selectProject}>
             Selecionar pasta
           </button>
-          <button type="button" disabled={busy || !projectPath} onClick={runAudit}>
+          <button type="button" className="primario" disabled={busy || !projectPath} onClick={runAudit}>
             Auditar
           </button>
           <button type="button" disabled={busy || !projectPath} onClick={showGraph}>
@@ -229,11 +294,10 @@ export default function App() {
           <button type="button" disabled={busy || !projectPath} onClick={recordRun}>
             Registrar execução
           </button>
-          <button type="button" disabled={busy} onClick={() => execute(refreshHistory)}>
+          <button type="button" disabled={busy} onClick={() => execute('history', refreshHistory)}>
             Atualizar histórico
           </button>
         </div>
-        {error && <p className="error">Falha operacional: {error}</p>}
       </section>
 
       <section className="panel">
@@ -253,7 +317,7 @@ export default function App() {
       </section>
 
       {report && (
-        <section className="panel">
+        <section className="panel" id="painel-relatorio">
           <h2>Relatório: {report.project}</h2>
           <p>
             Schema v{report.schema_version} · {report.summary.files_included} arquivos incluídos ·{' '}
@@ -305,7 +369,10 @@ export default function App() {
               {visibleFindings.map((finding) => (
                 <li key={finding.id}>
                   <strong>
-                    [{SEVERITY_LABELS[finding.severity]}] {finding.title}
+                    <span className={`badge severidade-${finding.severity}`}>
+                      {SEVERITY_LABELS[finding.severity]}
+                    </span>{' '}
+                    {finding.title}
                   </strong>
                   <div className="detail">id: {finding.id}</div>
                   <div className="detail">
@@ -335,9 +402,14 @@ export default function App() {
       )}
 
       {analysis && (
-        <section className="panel">
+        <section className="panel" id="painel-grafo">
           <h2>Grafo de dependências</h2>
           <p className="detail">{coverageLabel(analysis.coverage)}</p>
+          <ul className="legenda">
+            <li><span className="linha-legenda" style={{ background: EDGE_COLORS.allowed }} /> permitida</li>
+            <li><span className="linha-legenda" style={{ background: EDGE_COLORS.forbidden }} /> proibida</li>
+            <li><span className="linha-legenda" style={{ background: EDGE_COLORS.unresolved }} /> não resolvida</li>
+          </ul>
           {graphNodes.length === 0 ? (
             <p>Nenhum módulo declarado no contrato.</p>
           ) : (
@@ -418,23 +490,28 @@ export default function App() {
       )}
 
       {contractText !== null && (
-        <section className="panel">
+        <section className="panel" id="painel-contrato">
           <h2>Contrato do projeto</h2>
           <p>Visualização somente leitura; a interface não altera o contrato.</p>
           <pre>{contractText}</pre>
         </section>
       )}
 
-      {runs.length > 0 && (
-        <section className="panel">
+      {historyLoaded && (
+        <section className="panel" id="painel-historico">
           <h2>Histórico local</h2>
-          <ol>
-            {runs.map((run) => (
-              <li key={run.id}>
-                #{run.id} — {run.recorded_at} — {run.project_name} — {run.summary.findings} achados
-              </li>
-            ))}
-          </ol>
+          {runs.length === 0 ? (
+            <p className="detail">Nenhuma execução registrada neste banco.</p>
+          ) : (
+            <ol className="historico">
+              {runs.map((run) => (
+                <li key={run.id}>
+                  <strong>#{run.id}</strong> — {run.recorded_at} — {run.project_name} —{' '}
+                  {run.summary.findings} achados
+                </li>
+              ))}
+            </ol>
+          )}
         </section>
       )}
     </main>

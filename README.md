@@ -211,9 +211,9 @@ npm run tauri dev
 npm run tauri build
 ```
 
-O `npm test` compila `src/skipSummary.ts` e `src/reportView.ts` e executa 7 testes Node puros, sem dependência nova: 2 sobre os textos do resumo de exclusões e 5 sobre a apresentação do relatório (resumo, filtros, opções, cobertura e arestas), todos com o mesmo JSON real produzido pela CLI.
+O `npm test` compila `src/skipSummary.ts`, `src/reportView.ts` e `src/status.ts` e executa 12 testes Node puros, sem dependência nova: 2 sobre os textos do resumo de exclusões, 5 sobre a apresentação do relatório (resumo, filtros, opções, cobertura e arestas) e 5 sobre o status das ações. Os testes de apresentação e status usam o mesmo JSON real produzido pela CLI.
 
-Telas disponíveis: seleção nativa da pasta do projeto, auditoria com resumo e filtros por severidade/regra, grafo de dependências em SVG com as classificações feitas pelo núcleo, visualizador somente leitura do `auditor.toml`, histórico local com registro explícito e painel de configurações do caminho do banco.
+Telas disponíveis: área de status com o resultado de cada ação executada (incluindo falhas operacionais), seleção nativa da pasta do projeto, auditoria com resumo e filtros por severidade/regra, grafo de dependências em SVG com as classificações feitas pelo núcleo, visualizador somente leitura do `auditor.toml`, histórico local com registro explícito e painel de configurações do caminho do banco. A interface informa a pasta selecionada, o caminho esperado do contrato, o resultado de cada botão e quando o histórico está vazio; após cada ação, a tela rola até o painel gerado. O erro de contrato ausente continua vindo do núcleo: selecione a raiz que contém `auditor.toml`.
 
 Segurança: apenas `core:default` e `dialog:allow-open` foram concedidos à janela principal; não há plugin de filesystem, CSP foi definido explicitamente e não há execução automática em segundo plano. O contrato nunca é editado pela interface — uma futura edição exigiria confirmação explícita.
 

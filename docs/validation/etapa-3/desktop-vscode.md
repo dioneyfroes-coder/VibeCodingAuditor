@@ -2,7 +2,7 @@
 
 Data: 26/11/2026
 Branch: `etapa-3/validacao-arquitetural`
-Status: **paridade automatizada concluída; checklist manual ainda pendente de execução humana**
+Status: **paridade automatizada e feedback da interface concluídos; checklist manual ainda pendente de execução humana**
 
 ## Método
 
@@ -46,6 +46,31 @@ Diferenças de apresentação são esperadas: a extensão agrupa `needs_review` 
 
 A verificação completa foi repetida depois das edições finais: `cargo fmt --all`, `cargo fmt --check`, `cargo check --workspace`, `cargo test --workspace` (185 testes: 171 núcleo, 10 CLI, 4 desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `npm test` e `npm run build` do desktop (7 testes), `npm test` da extensão (7 testes) e `git diff --check` retornaram `0`. O `.vscodeignore` foi ajustado para manter as exclusões originais e acrescentar `tests/**`, evitando incluir fontes de teste no pacote.
 
+## Diagnóstico do relato do usuário e correções
+
+Após abrir o executável diretamente e selecionar um projeto, o usuário relatou três problemas. Eles foram investigados no código e nos comandos reais:
+
+1. **“Não encontra o arquivo `auditor.toml`”** — comportamento esperado do núcleo, não falha do executável. O contrato precisa estar na raiz da pasta selecionada; `apps/desktop` não contém `auditor.toml`. Reprodução:
+
+   ```powershell
+   cargo run -q -p auditor-cli -- audit apps/desktop
+   ```
+
+   Saída `2`: `Falha operacional: contrato: não foi possível ler apps\desktop\auditor.toml: O sistema não pode encontrar o arquivo especificado. (os error 2)`. O mesmo comando na raiz do repositório retornou resumo com 15 arquivos incluídos, 3 módulos e 17 arestas. A interface agora mostra o caminho esperado do contrato ao selecionar uma pasta; nenhum arquivo é criado ou alterado.
+
+2. **“Só o botão auditar faz algo”** — os cinco comandos Tauri eram chamados corretamente, mas o feedback ficava longe dos botões: erros apenas no topo, grafo e contrato no fim da janela, e histórico vazio não renderizava nada. Foi acrescentada uma área de status com as seis ações e o resultado de cada uma, além de rolagem até o painel gerado.
+
+3. **“UI simples, sem cor”** — o CSS original não estilizava botões nem severidades. Foram adicionados estados de botão, badges coloridos por severidade, legenda do grafo e hierarquia visual. Nenhuma dependência nova foi introduzida.
+
+Os textos de status vivem em `apps/desktop/src/status.ts`, sem regras de auditoria. A fase vermelha falhou com `ERR_MODULE_NOT_FOUND`; a importação de `reportView` dentro de `status.ts` também quebrou em Node ESM e foi substituída por um argumento com a frase já pronta do resumo.
+
+| Comando | Código | Resultado |
+|---|---:|---|
+| `cargo run -q -p auditor-cli -- audit apps/desktop` | `2` | reproduziu o erro de contrato ausente |
+| `node --test tests/status.test.mjs`, antes da implementação | `1` | `ERR_MODULE_NOT_FOUND` para `out/status.js` |
+| `npm test` em `apps/desktop` | `0` | 12 testes passaram |
+| `npm run build` em `apps/desktop` | `0` | frontend compilado com o novo CSS |
+
 ## Checklist manual — pendente
 
 Os itens abaixo exigem observação da janela Tauri ou da host do VS Code. Não houve automação gráfica neste ambiente; portanto **não foram marcados como concluídos**.
@@ -62,8 +87,12 @@ Os itens abaixo exigem observação da janela Tauri ou da host do VS Code. Não 
 | Grafo mostra as mesmas arestas do núcleo | Pendente na tela (dados já conferidos por teste Rust) |
 | Contrato exibido somente para leitura | Pendente |
 | Registrar e consultar histórico por ação explícita | Pendente |
-| Erro operacional aparece sem travar a janela | Pendente |
+| Erro operacional aparece sem travar a janela | Pendente na tela (agora exibido na área de status com o rótulo da ação) |
 | Caminho do banco pode ser configurado | Pendente |
+| Área de status mostra o resultado de cada ação | Pendente na tela (5 testes dos helpers passaram) |
+| Contrato esperado é informado após selecionar a pasta | Pendente na tela (caminho montado sem criar arquivo) |
+| Histórico vazio mostra mensagem explícita | Pendente na tela (teste do helper passou) |
+| A tela rola até o painel gerado pela ação | Pendente na tela |
 
 ### Extensão VS Code
 

@@ -5,5 +5,5 @@
     "rootDir": "src",
     "outDir": "out"
   },
-  "include": ["src/skipSummary.ts", "src/reportView.ts"]
+  "include": ["src/skipSummary.ts", "src/reportView.ts", "src/status.ts"]
 }

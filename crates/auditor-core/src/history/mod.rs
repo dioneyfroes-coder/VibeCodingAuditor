@@ -878,6 +878,232 @@ mod tests {
         legacy
     }
 
+    /// Raiz da fixture com extensões de código sem analisador.
+    fn partial_coverage_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/projects/partial_coverage")
+    }
+
+    /// Relatório real com cobertura parcial, usado nos testes de migração.
+    fn partial_coverage_report() -> AuditReport {
+        audit_project(&partial_coverage_root()).expect("partial fixture audit must succeed")
+    }
+
+    /// Cria um banco já no schema v1 com uma execução simples.
+    fn create_version_one_database(path: &Path) -> i64 {
+        let connection = Connection::open(path).expect("legacy database must open");
+        connection
+            .execute_batch(MIGRATION_V1)
+            .expect("legacy schema must be created");
+        connection
+            .execute(
+                "INSERT INTO schema_migrations (version, applied_at_unix) VALUES (1, 0)",
+                [],
+            )
+            .expect("legacy version must be registered");
+        connection
+            .execute(
+                "INSERT INTO audit_runs (
+                    recorded_at_unix, project_name, project_root, schema_version,
+                    files_included, files_skipped, modules, packages, edges,
+                    findings, errors, warnings, infos, needs_review
+                 ) VALUES (1700000000, 'legado', 'C:/projeto', 1, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0)",
+                [],
+            )
+            .expect("legacy run must be inserted");
+        connection.last_insert_rowid()
+    }
+
+    /// Lê a versão de schema sem abrir o histórico.
+    fn applied_schema_version(path: &Path) -> i64 {
+        let connection = Connection::open(path).expect("database must open");
+        connection
+            .query_row("SELECT MAX(version) FROM schema_migrations", [], |row| {
+                row.get::<_, Option<i64>>(0)
+            })
+            .expect("schema version must be readable")
+            .expect("schema version must exist")
+    }
+
+    /// Conta execuções diretamente no banco, sem abrir o histórico.
+    fn legacy_run_count(path: &Path) -> i64 {
+        let connection = Connection::open(path).expect("database must open");
+        connection
+            .query_row("SELECT COUNT(*) FROM audit_runs", [], |row| row.get(0))
+            .expect("run count must be readable")
+    }
+
+    #[test]
+    fn version_one_database_is_migrated_to_version_two_without_losing_runs() {
+        let database = TestDatabase::new();
+        let run_id = create_version_one_database(&database.path);
+
+        {
+            let mut history = database.open();
+            let detail = history
+                .get(run_id)
+                .expect("legacy run must remain readable after migration");
+            assert!(detail.coverage.is_none());
+        }
+        drop(database.open());
+
+        assert_eq!(applied_schema_version(&database.path), 2);
+        assert_eq!(legacy_run_count(&database.path), 1);
+        assert_eq!(
+            database
+                .open()
+                .list(None, 10)
+                .expect("migrated database must list runs")
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn recorded_coverage_and_skip_reasons_are_reloaded() {
+        let database = TestDatabase::new();
+        let root = partial_coverage_root();
+        let report = partial_coverage_report();
+        let mut history = database.open();
+        let id = history
+            .record_at(&root, &report, 1_700_000_000)
+            .expect("record must succeed");
+
+        let detail = history.get(id).expect("recorded run must be readable");
+        let coverage = detail
+            .coverage
+            .as_ref()
+            .expect("coverage must be persisted");
+        assert_eq!(coverage.code_files_included, 4);
+        assert_eq!(coverage.code_files_analyzed, 2);
+        assert_eq!(coverage.code_files_not_analyzed, 2);
+        assert!(coverage.partial);
+        assert_eq!(coverage.unsupported_extensions.len(), 2);
+        assert_eq!(coverage.unsupported_extensions[0].extension, "go");
+        assert_eq!(coverage.unsupported_extensions[0].files, 1);
+        assert_eq!(coverage.unsupported_extensions[1].extension, "rb");
+        assert_eq!(coverage.unsupported_extensions[1].files, 1);
+        assert_eq!(coverage.skip_reasons.len(), 1);
+        assert_eq!(coverage.skip_reasons[0].label, "fora do include");
+        assert_eq!(coverage.skip_reasons[0].count, 1);
+        assert!(!coverage.skip_reasons[0].reduces_coverage);
+    }
+
+    #[test]
+    fn rendered_run_detail_includes_structured_coverage() {
+        let database = TestDatabase::new();
+        let mut history = database.open();
+        let id = history
+            .record_at(
+                &partial_coverage_root(),
+                &partial_coverage_report(),
+                1_700_000_000,
+            )
+            .expect("record must succeed");
+        let rendered = render_run_detail(&history.get(id).expect("run must be readable"));
+
+        assert!(rendered.contains(
+            "Cobertura do código: 2 de 4 arquivo(s) analisados (parcial); sem analisador: .go (1), .rb (1)"
+        ));
+        assert!(rendered.contains(
+            "Motivos dos não incluídos: 1 (1 intencional, 0 reduzem cobertura)"
+        ));
+        assert!(rendered.contains("  - fora do include: 1 (intencional)"));
+    }
+
+    #[test]
+    fn comparison_reports_coverage_changes_between_runs() {
+        let database = TestDatabase::new();
+        let root = partial_coverage_root();
+        let before = partial_coverage_report();
+        let mut after = before.clone();
+        after.coverage.code_files_analyzed += 1;
+        after.coverage.code_files_not_analyzed -= 1;
+        after.coverage.unsupported_code_extensions.remove(0);
+        after.limitations.clear();
+
+        let mut history = database.open();
+        let before_id = history
+            .record_at(&root, &before, 1_700_000_000)
+            .expect("first record must succeed");
+        let after_id = history
+            .record_at(&root, &after, 1_700_000_100)
+            .expect("second record must succeed");
+        let comparison = history
+            .compare(before_id, after_id)
+            .expect("comparison must succeed");
+
+        assert_eq!(
+            comparison
+                .before_coverage
+                .as_ref()
+                .expect("before coverage must exist")
+                .code_files_analyzed,
+            2
+        );
+        assert_eq!(
+            comparison
+                .after_coverage
+                .as_ref()
+                .expect("after coverage must exist")
+                .code_files_analyzed,
+            3
+        );
+
+        let rendered = render_comparison(&comparison);
+        assert!(rendered.contains(
+            "Cobertura: 2 de 4 analisados (parcial); sem analisador: .go (1), .rb (1)"
+        ));
+        assert!(rendered.contains(
+            "        -> 3 de 4 analisados (parcial); sem analisador: .rb (1)"
+        ));
+        assert!(rendered.contains("  analisados: 2 -> 3 (+1)"));
+        assert!(rendered.contains("  não analisados: 2 -> 1 (-1)"));
+        assert!(rendered.contains(
+            "  sem analisador: .go (1), .rb (1) -> .rb (1)"
+        ));
+        assert!(rendered.contains("  motivos de exclusão: fora do include 1 -> 1"));
+    }
+
+    #[test]
+    fn comparison_marks_legacy_runs_without_coverage_as_missing_data() {
+        let database = TestDatabase::new();
+        let legacy_id = create_version_one_database(&database.path);
+        let mut history = database.open();
+        let current_id = history
+            .record_at(
+                &partial_coverage_root(),
+                &partial_coverage_report(),
+                1_700_000_100,
+            )
+            .expect("record must succeed after migration");
+
+        let comparison = history
+            .compare(legacy_id, current_id)
+            .expect("comparison must succeed");
+        assert!(comparison.before_coverage.is_none());
+        assert!(comparison.after_coverage.is_some());
+        assert!(render_comparison(&comparison).contains("Cobertura: sem dados ->"));
+    }
+
+    #[test]
+    fn failed_version_two_migration_rolls_back_schema_version() {
+        let database = TestDatabase::new();
+        create_version_one_database(&database.path);
+        let connection = Connection::open(&database.path).expect("database must open");
+        connection
+            .execute("CREATE TABLE audit_run_coverage (incompatible INTEGER)", [])
+            .expect("conflicting table must be created");
+        drop(connection);
+
+        let error = History::open(&database.path)
+            .err()
+            .expect("conflicting table must fail migration");
+        assert!(matches!(error, HistoryError::Database { .. }));
+        assert_eq!(applied_schema_version(&database.path), 1);
+        assert_eq!(legacy_run_count(&database.path), 1);
+    }
+
     #[test]
     fn windows_extended_prefix_is_hidden_for_display() {
         assert_eq!(
@@ -1101,7 +1327,7 @@ mod tests {
         let connection = Connection::open(&database.path).expect("database must exist");
         connection
             .execute(
-                "UPDATE schema_migrations SET version = 2 WHERE version = 1",
+                "UPDATE schema_migrations SET version = 3 WHERE version = 1",
                 [],
             )
             .expect("schema version must be changed");
@@ -1113,8 +1339,8 @@ mod tests {
         assert!(matches!(
             error,
             HistoryError::UnsupportedSchema {
-                found: 2,
-                supported: 1
+                found: 3,
+                supported: 2
             }
         ));
     }

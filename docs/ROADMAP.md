@@ -318,6 +318,7 @@ Ordem e critérios vêm de `RELATORIO_ETAPA_1_E_PLANO_ETAPA_2.md`, seção 8. Um
 - [x] Não habilitar o bundle Tauri: `bundle.active` continua `false` e o CI valida frontend e crate, sem gerar instalador
 - [x] Verificação local no Windows: `cargo fmt --check`, `cargo check --workspace`, `cargo test --workspace` (135 testes: 122 no núcleo, 10 na CLI e 3 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `git diff --check`, `npm ci` nas duas pastas Node, `npm test` e `npm run build` da desktop (2 testes) e `npm test` da extensão (4 testes) passaram
 - [x] Smoke repetido nas fixtures anteriores sem mudança de contagens: `simple` com 14 não incluídos, `dependencies` com 5 achados e `typescript` com 8 arestas, 4 achados e 1 limitação
+- [x] Acompanhamento remoto: execuções #1 e #2 passaram; o aviso de Node.js 20 nas actions foi corrigido com `@v5` e a execução #3 passou sem ele
 
 ### Fechamento da Etapa 2
 

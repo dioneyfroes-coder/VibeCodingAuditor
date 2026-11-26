@@ -2,7 +2,7 @@
 
 Data: 26/11/2026
 Branch: `etapa-3/validacao-arquitetural`
-Status: **paridade automatizada e feedback da interface concluídos; checklist manual ainda pendente de execução humana**
+Status: **paridade automatizada, feedback e checklist do desktop concluídos; checklist da extensão VS Code pendente**
 
 ## Método
 
@@ -71,30 +71,32 @@ Os textos de status vivem em `apps/desktop/src/status.ts`, sem regras de auditor
 | `npm test` em `apps/desktop` | `0` | 12 testes passaram |
 | `npm run build` em `apps/desktop` | `0` | frontend compilado com o novo CSS |
 
-## Checklist manual — pendente
+## Checklist manual
 
-Os itens abaixo exigem observação da janela Tauri ou da host do VS Code. Não houve automação gráfica neste ambiente; portanto **não foram marcados como concluídos**.
+Os itens do desktop exigiram observação da janela Tauri e foram confirmados pelo usuário em 26/11/2026, que respondeu: “agora todos botões tem função executada, visual ficou mais agradável”. Ao ser perguntado explicitamente, confirmou também filtros, grafo, contrato somente leitura, registro/consulta de histórico e erro operacional. Os itens da extensão não foram executados: o usuário respondeu que ainda não instalou nem testou o `.vsix`. Não houve automação gráfica neste ambiente nem capturas de tela.
 
-### Desktop
+### Desktop — concluído em 26/11/2026
 
 | Item verificado | Estado |
 |---|---|
-| Aplicação inicia sem erro (`npm run tauri dev` em `apps/desktop`) | Pendente |
-| Selecionar pasta pelo diálogo nativo | Pendente |
-| Iniciar auditoria manualmente sobre `tests/fixtures/projects/layer_boundaries` | Pendente |
-| Resumo, cobertura, exclusões e achados na tela conferem com o JSON da CLI | Pendente na tela (dados já conferidos por teste) |
-| Filtros de severidade e regra funcionam | Pendente na tela (lógica já conferida por teste) |
-| Grafo mostra as mesmas arestas do núcleo | Pendente na tela (dados já conferidos por teste Rust) |
-| Contrato exibido somente para leitura | Pendente |
-| Registrar e consultar histórico por ação explícita | Pendente |
-| Erro operacional aparece sem travar a janela | Pendente na tela (agora exibido na área de status com o rótulo da ação) |
-| Caminho do banco pode ser configurado | Pendente |
-| Área de status mostra o resultado de cada ação | Pendente na tela (5 testes dos helpers passaram) |
-| Contrato esperado é informado após selecionar a pasta | Pendente na tela (caminho montado sem criar arquivo) |
-| Histórico vazio mostra mensagem explícita | Pendente na tela (teste do helper passou) |
-| A tela rola até o painel gerado pela ação | Pendente na tela |
+| Aplicação inicia sem erro (`npm run tauri dev` em `apps/desktop`) | Concluído pelo usuário |
+| Selecionar pasta pelo diálogo nativo | Concluído pelo usuário |
+| Iniciar auditoria manualmente sobre `tests/fixtures/projects/layer_boundaries` | Concluído pelo usuário (alvo sintético também auditado) |
+| Resumo, cobertura, exclusões e achados na tela conferem com o JSON da CLI | Concluído pelo usuário; dados também conferidos por teste |
+| Filtros de severidade e regra funcionam | Concluído pelo usuário; lógica também conferida por teste |
+| Grafo mostra as mesmas arestas do núcleo | Concluído pelo usuário; dados também conferidos por teste Rust |
+| Contrato exibido somente para leitura | Concluído pelo usuário |
+| Registrar e consultar histórico por ação explícita | Concluído pelo usuário |
+| Erro operacional aparece sem travar a janela | Concluído pelo usuário |
+| Caminho do banco pode ser configurado | Concluído pelo usuário |
+| Área de status mostra o resultado de cada ação | Concluído pelo usuário; helpers cobertos por 5 testes |
+| Contrato esperado é informado após selecionar a pasta | Concluído pelo usuário |
+| Histórico vazio mostra mensagem explícita | Concluído pelo usuário; helper coberto por teste |
+| A tela rola até o painel gerado pela ação | Concluído pelo usuário |
 
-### Extensão VS Code
+O executável release foi recompilado depois das correções (`npm run tauri build` = `0`) e a auditoria do alvo sintético foi repetida: `audit` retornou `1` com 7 achados e `analyze` retornou `0` com 6 arestas. Nenhum arquivo do alvo foi alterado.
+
+### Extensão VS Code — pendente
 
 | Item verificado | Estado |
 |---|---|
@@ -108,11 +110,11 @@ Os itens abaixo exigem observação da janela Tauri ou da host do VS Code. Não 
 
 ## Limitações desta validação
 
-- Não há ferramenta de automação gráfica nesta sessão; a janela Tauri não foi inspecionada visualmente.
-- A extensão não foi instalada na instância do VS Code do usuário; o pacote `.vsix` foi gerado mas não instalado.
+- Não houve automação gráfica nesta sessão; a janela Tauri foi conferida pelo usuário, sem capturas de tela.
+- A extensão não foi instalada na instância do VS Code do usuário; o pacote `.vsix` foi gerado mas não instalado nem testado.
 - Nenhuma captura de tela foi gerada, para não registrar dados locais do projeto.
 - Os testes provam paridade de dados, não eventos de clique, foco, diálogo nativo nem renderização efetiva no editor.
 
 ## Critério para concluir a Etapa 3.7
 
-A etapa só será marcada como concluída depois que os dois checklists forem preenchidos pelo usuário, com as divergências registradas. Enquanto isso, a Etapa 3 permanece em andamento e a Etapa 3.6 continua pendente.
+O checklist do desktop foi preenchido e confirmado pelo usuário em 26/11/2026. A etapa só será marcada como concluída depois que o checklist da extensão também for preenchido, com as divergências registradas. Enquanto isso, a Etapa 3 permanece em andamento e a Etapa 3.6 continua pendente.

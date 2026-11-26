@@ -419,7 +419,7 @@ A cobertura estruturada e o resumo de motivos ainda não são gravados em coluna
 
 - [ ] Somente se a necessidade de comparar cobertura entre execuções for confirmada; nenhuma migração SQLite foi feita nesta entrega.
 
-### Etapa 3.7 — Validação ponta a ponta do desktop e da extensão — Em andamento; paridade automatizada concluída em 26/11/2026
+### Etapa 3.7 — Validação ponta a ponta do desktop e da extensão — Em andamento; desktop confirmado pelo usuário em 26/11/2026; extensão pendente
 
 - [x] Relatório real da CLI sobre `layer_boundaries` capturado em UTF-8 via `--output` (`cargo run -q -p auditor-cli -- audit tests/fixtures/projects/layer_boundaries --format json --output ...`); saída `1` esperada por haver achados.
 - [x] Apresentação do desktop extraída para `apps/desktop/src/reportView.ts` e coberta por 5 testes Node que leem o mesmo JSON: resumo, filtros, opções, cobertura e lista de arestas (7 testes no total com os 2 de exclusões). Fase vermelha registrada com `ERR_MODULE_NOT_FOUND`.
@@ -427,4 +427,5 @@ A cobertura estruturada e o resumo de motivos ainda não são gravados em coluna
 - [x] Build do desktop passou após corrigir `TS7053` no retorno de `availableSeverities`; comandos Tauri já eram comparados com o núcleo nos testes Rust, incluindo a regra de camada. `npm run package` da extensão gerou `.vsix` com 7 arquivos, sem fontes de teste.
 - [x] Após o relato do usuário sobre a janela, a interface ganhou área de status com o resultado das seis ações, mensagem explícita para histórico vazio, dica do `auditor.toml` na raiz, rolagem até o painel gerado, badges de severidade, legenda do grafo e CSS com estados de botão. Helpers puros em `apps/desktop/src/status.ts` com 5 testes novos; fase vermelha registrada com `ERR_MODULE_NOT_FOUND`. O total de testes do desktop passou para 12.
 - [x] Relatório com a comparação e os checklists em [docs/validation/etapa-3/desktop-vscode.md](validation/etapa-3/desktop-vscode.md), incluindo o diagnóstico do erro de contrato ausente e as correções de feedback.
-- [ ] Checklists visuais da janela Tauri e da host do VS Code preenchidos pelo usuário. Sem automação gráfica nesta sessão, a Etapa 3.7 não foi declarada concluída.
+- [x] Checklist visual da janela Tauri confirmado pelo usuário em 26/11/2026: todos os botões executam e o visual ficou mais agradável. Executável release recompilado em `target/release/auditor-desktop.exe` e auditoria do alvo sintético repetida pela CLI (`audit` = `1` com 7 achados; `analyze` = `0` com 6 arestas).
+- [ ] Checklist da host do VS Code preenchido pelo usuário: o `.vsix` não foi instalado nem testado. A Etapa 3.7 não foi declarada concluída.

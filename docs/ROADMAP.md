@@ -337,7 +337,7 @@ Ordem e critérios vêm de `RELATORIO_ETAPA_1_E_PLANO_ETAPA_2.md`, seção 8. Um
 
 A cobertura estruturada e o resumo de motivos ainda não são gravados em colunas próprias no histórico; a limitação textual continua sendo persistida. Isso foi reavaliado no item 2.7 e mantido fora do escopo. A validação do desktop foi feita por tipos, build e testes dos helpers; a janela Tauri não foi inspecionada visualmente. Também não há fixture com symlink, permissão negada ou FIFO reais: esses motivos são exercitados com inventário em memória no construtor real do relatório. O empacotamento de instaladores continua desativado e o workflow não executa `tauri build`. A primeira execução do workflow no GitHub Actions foi observada em 26/11/2026: `CI Windows` #1, commit `7a07286`, `status: completed`, `conclusion: success`, com todas as etapas do job `verify` aprovadas em `windows-latest`.
 
-## Etapa 3 — Validação arquitetural (em andamento; 3.0, 3.1, 3.2 e 3.3 concluídas)
+## Etapa 3 — Validação arquitetural (em andamento; 3.0 a 3.3 concluídas; proposta 3.4 aguardando aprovação)
 
 ### Etapa 3.0 — Baseline reproduzível — Concluída em 26/11/2026
 
@@ -395,6 +395,14 @@ A cobertura estruturada e o resumo de motivos ainda não são gravados em coluna
 - [x] Integridade confirmada: SHA-256 dos 20 arquivos do alvo permaneceu idêntico antes e depois de segunda auditoria somente leitura. Relatório integral em [docs/validation/etapa-3/second-project-synthetic.md](validation/etapa-3/second-project-synthetic.md).
 - [x] Ressalva explícita: o alvo é sintético e criado nesta sessão, não um projeto de terceiros. A validação sai da arquitetura do auditor, mas não substitui uma repetição futura em projeto real disponível.
 
-### Etapas 3.4 a 3.7 — Pendentes
+### Etapa 3.4 — Especificação do contrato v2 — Em andamento; aguardando aprovação
 
-- [ ] Executar as etapas seguintes do plano na ordem definida, começando pela proposta do contrato v2.
+- [x] Proposta escrita em [docs/architecture/CONTRACT_V2_PROPOSAL.md](architecture/CONTRACT_V2_PROPOSAL.md), antes de qualquer alteração de código. Problemas concretos dos dois pilotos: ausência de campo de camada na autoauditoria, dois arquivos `file.unmapped` no alvo sintético por falta de fronteira `shared`/frontend, risco de ampliar permissão globalmente para expressar exceção e paths sobrepostos que hoje só viram revisão em tempo de análise.
+- [x] Escopo proposto: Leitura de v1 e v2 com normalização interna, sem reescrever arquivos; `architecture.layers[]` com `name`, `modules` e `allowed_dependencies`; nova regra `dep.layer_not_allowed`; validação de sobreposição de paths e de ciclo entre camadas. `responsibility` permanece descrição para humanos.
+- [x] Capacidades avaliadas: camadas incluídas; domínios e exceções adiados por falta de evidência nos pilotos; linguagem genérica de regras, limiares de métrica, migração automática, novos parsers e dependências rejeitados. `module.concentration` continua sendo concentração no grafo, não complexidade ciclomática ou cognitiva.
+- [x] Cada campo proposto tem semântica e teste de aceitação definidos na proposta, incluindo precedência de `dep.not_allowed` sobre a regra de camada para não duplicar erro na mesma aresta.
+- [ ] Usuário revisar e aprovar a proposta antes da Etapa 3.5. Nenhum campo v2 deve ser considerado implementado ou documentado no README até que os testes passem.
+
+### Etapas 3.5 a 3.7 — Pendentes
+
+- [ ] Após aprovação, executar as etapas seguintes do plano na ordem definida, começando pelos tipos internos normalizados do contrato v2.

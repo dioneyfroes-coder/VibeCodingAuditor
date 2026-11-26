@@ -1,0 +1,23 @@
+schema_version = 1
+
+[project]
+name = "projeto-caminhos-qualificados"
+
+[scan]
+include = ["crates/**/src/**/*.rs"]
+exclude = []
+
+[architecture]
+style = "modular_monolith"
+
+[[architecture.modules]]
+name = "app"
+path = "crates/app/src/**"
+responsibility = "Adaptador que usa o domínio por caminho qualificado"
+allowed_dependencies = ["domain"]
+
+[[architecture.modules]]
+name = "domain"
+path = "crates/domain/src/**"
+responsibility = "Regras centrais"
+allowed_dependencies = []

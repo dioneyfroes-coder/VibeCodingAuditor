@@ -16,6 +16,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use serde::Serialize;
+use syn::visit::{self, Visit};
 use syn::{Item, ItemMod, Meta, UseTree};
 
 use crate::contract::{Contract, Module};
@@ -501,6 +502,10 @@ pub fn analyze(
                 seen_edges: &mut seen_edges,
             };
             visit_items(&parsed.items, &mut context);
+            QualifiedPathVisitor {
+                context: &mut context,
+            }
+            .visit_file(&parsed);
         } else if typescript::is_supported_extension(extension) {
             collect_duplicate_lines(
                 &mut duplicate_candidates,
@@ -641,6 +646,67 @@ fn visit_items(items: &[Item], context: &mut VisitContext<'_>) {
             }
             _ => {}
         }
+    }
+}
+
+/// Visita caminhos qualificados em expressões, tipos e padrões do código Rust.
+///
+/// Declarações `use` são classificadas por `visit_items`; os nós `syn::UseTree`
+/// não passam por `visit_path`, então não há duplicação. Módulos `#[cfg(test)]`
+/// são ignorados para manter o escopo de produção do contrato.
+struct QualifiedPathVisitor<'ast, 'ctx> {
+    context: &'ctx mut VisitContext<'ast>,
+}
+
+impl<'ast> Visit<'ast> for QualifiedPathVisitor<'ast, '_> {
+    fn visit_item_mod(&mut self, item_mod: &'ast ItemMod) {
+        if is_cfg_test_module(item_mod) {
+            return;
+        }
+        visit::visit_item_mod(self, item_mod);
+    }
+
+    fn visit_path(&mut self, path: &'ast syn::Path) {
+        // Um identificador isolado é um tipo ou valor local, não uma referência
+        // a outro crate; classificá-lo geraria revisões falsas.
+        if path.segments.len() < 2 {
+            return;
+        }
+        let Some(segment) = path.segments.first() else {
+            return;
+        };
+        let leaf: Vec<String> = path
+            .segments
+            .iter()
+            .map(|segment| segment.ident.to_string())
+            .collect();
+        // Um caminho qualificado só cruza uma fronteira arquitetural quando a
+        // primeira parte é `crate`/`self`/`super`, um módulo do contrato ou uma
+        // dependência local declarada. Nomes de tipos (`Vec::new`) e apelidos
+        // de biblioteca padrão (`fs::read`) não são dependências de módulo.
+        let first = leaf
+            .first()
+            .expect("multi-segment path has a first segment");
+        let is_root = first == "crate"
+            || first == "self"
+            || first == "super"
+            || self.context.contract_names.contains(first)
+            || self.context.local_dependencies.contains_key(first);
+        if !is_root {
+            visit::visit_path(self, path);
+            return;
+        }
+        let (line, evidence) = source_location(
+            self.context.lines,
+            segment.ident.span(),
+            self.context.path,
+            "caminho qualificado",
+            &mut *self.context.analysis,
+        );
+        if self.context.contract_module.is_some() {
+            classify_use(self.context, &leaf, line, evidence);
+        }
+        visit::visit_path(self, path);
     }
 }
 
@@ -1924,6 +1990,42 @@ mod tests {
                 .iter()
                 .all(|duplicate| !duplicate.text.contains("exclusivo entre testes")),
             "linhas de teste não geram duplicação"
+        );
+    }
+
+    /// Caminhos qualificados em expressões e tipos também são dependências reais.
+    #[test]
+    fn qualified_paths_in_production_become_edges() {
+        let analysis = analyze_project("qualified_paths");
+
+        let expression = analysis
+            .edges
+            .iter()
+            .find(|edge| edge.from == "app" && edge.to == "domain" && edge.line == Some(2))
+            .expect("caminho qualificado em expressão deve virar aresta");
+        assert_eq!(
+            expression.evidence.as_deref(),
+            Some("let _ = domain::Value;")
+        );
+        assert_eq!(expression.kind, DependencyKind::Allowed);
+
+        assert!(
+            analysis
+                .edges
+                .iter()
+                .any(|edge| edge.from == "app" && edge.to == "domain" && edge.line == Some(3)),
+            "caminho qualificado em tipo deve virar aresta"
+        );
+        assert!(
+            analysis.edges.iter().all(|edge| edge.to != "std"),
+            "a biblioteca padrão não é dependência arquitetural"
+        );
+        assert!(
+            analysis
+                .edges
+                .iter()
+                .all(|edge| edge.evidence.as_deref() != Some("use domain::Secret;")),
+            "código de teste continua fora do escopo"
         );
     }
 

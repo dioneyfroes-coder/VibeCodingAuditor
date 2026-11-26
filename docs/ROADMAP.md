@@ -15,6 +15,7 @@ Estado consolidado das Etapas 0–10 e dos trabalhos posteriores. Decisões e es
 | 8 | Criar a aplicação desktop com Tauri | Concluída em 25/11/2026 — Tauri/React compilados e iniciados; 78 testes passaram |
 | 9 | Criar a extensão VS Code | Concluída em 25/11/2026 — `.vsix` gerado; diagnósticos conferem com a CLI; 82 testes passaram |
 | 10 | Expandir linguagens e recursos | Concluída em 25/11/2026; extensões adicionais nesta rodada: TypeScript/JavaScript e Python no núcleo. Demais opções avaliadas e diferidas |
+| 4 (nova fase) | Descoberta automática e Architecture Builder | Em andamento — Etapa 4.0 concluída em 26/11/2026; nenhuma funcionalidade implementada ainda |
 
 Etapa 2 (confiabilidade do motor): concluída em 26/11/2026 — itens 2.1 a 2.8 verificados localmente no Windows e cobertos pelo workflow de CI, cuja primeira execução remota (`CI Windows` #1, commit `7a07286`) terminou com sucesso.
 
@@ -451,3 +452,28 @@ A cobertura estruturada e o resumo de motivos passaram a ser gravados em tabelas
 - [x] Incremento C (`04c976a`): caminhos qualificados em expressões e tipos passaram a ser classificados quando a raiz é `crate`, `self`, `super`, módulo do contrato ou dependência local declarada. Sem esse incremento, excluir testes revelou falso negativo (`module.unreferenced:cli`) porque o CLI usa `auditor_core::...` sem `use`. Teste em `tests/fixtures/projects/qualified_paths` falhou antes por ausência da aresta. Uma versão intermediária sem filtro de raiz gerou 444 revisões falsas e foi corrigida antes do commit.
 - [x] Estado final: `analyze .` = `0` com 22 arestas, 0 revisões, 15/15 arquivos analisados e 0 limitações; `audit .` = `1` com 32 achados, todos `code.duplicated`, sem erros, avisos ou informações. Nenhum `rule_id`, `auditor.toml`, formato de `findings`, comando da CLI, desktop, extensão ou schema SQLite mudou; nenhum pacote novo foi instalado.
 - [x] Verificação final: `cargo fmt --all`, `cargo fmt --all --check`, `cargo check --workspace`, `cargo test --workspace` (194 testes: 180 no núcleo, 10 na CLI e 4 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`, `git diff --check`, `npm --prefix apps/desktop test` (12), `npm --prefix apps/desktop run build` e `npm --prefix extensions/vscode test` (7) retornaram `0`. Decisão em `E3.13`; relatório em [docs/validation/etapa-3/self-audit-correcao.md](validation/etapa-3/self-audit-correcao.md).
+
+## Etapa 4 — Descoberta automática e Architecture Builder
+
+Nova fase iniciada em 26/11/2026 a partir de `PLANO_ETAPA_4_DESCOBERTA_E_ARCHITECTURE_BUILDER.md`. O número 4 é reutilizado para a nova fase; a Etapa 4 original da primeira fase permanece registrada na tabela e nos critérios acima como histórico. Regra de andamento: uma subetapa por vez, com aprovação explícita antes de implementar.
+
+### Etapa 4.0 — Baseline e proposta técnica — Concluída em 26/11/2026
+
+- [x] Estado real conferido: `main` em `84192bf`, duas mudanças locais do usuário preservadas (`PLANO_ETAPA_3_MODIFICACOES_E_EXECUCOES.md` deletado e `PLANO_ETAPA_4_DESCOBERTA_E_ARCHITECTURE_BUILDER.md` sem tracking). Nada foi restaurado, commitado ou sobrescrito.
+- [x] Documentos e scripts lidos: `AGENTS.md`, `README.md`, `docs/ROADMAP.md`, `docs/DECISIONS.md`, plano da Etapa 4, `package.json` da desktop e da extensão, `.github/workflows/ci.yml` e pontos públicos do núcleo, CLI, Tauri, React e extensão.
+- [x] Baseline verde registrado: `cargo fmt --all --check`, `cargo check --workspace`, `cargo test --workspace` (194 testes), Clippy com e sem `--config 'build.incremental=false'`, `npm ci`/`npm test`/`npm run build` da desktop (12 testes), `npm ci`/`npm test`/`npm run package` da extensão (7 testes) e `git diff --check`, todos com código `0`. Relatório em [docs/validation/etapa-4/baseline.md](validation/etapa-4/baseline.md).
+- [x] Decisão `E4.0` registrada antes de qualquer mudança arquitetural: contrato opcional, modos separados, TOML inválido como erro, descoberta sem falsas violações, nenhuma aprovação automática de dependências, perfis limitados ao schema suportado e núcleo como fonte única da verdade. A implementação depende de aprovação.
+- [x] Proposta técnica escrita em [docs/architecture/DISCOVERY_MODE_PROPOSAL.md](architecture/DISCOVERY_MODE_PROPOSAL.md), incluindo APIs afetadas, formato de descoberta, agrupamento de candidatos, compatibilidade CLI/JSON/SQLite, mudanças previstas no desktop e riscos.
+
+### Etapa 4.1 a 4.8 — Não iniciadas
+
+- [ ] 4.1 — descoberta sem contrato no núcleo.
+- [ ] 4.2 — módulos candidatos e relações observadas.
+- [ ] 4.3 — CLI e contrato do relatório.
+- [ ] 4.4 — modelo do Architecture Builder.
+- [ ] 4.5 — interface visual do Builder.
+- [ ] 4.6 — gravação segura, validação final e segunda auditoria.
+- [ ] 4.7 — consistência entre CLI, VS Code e histórico.
+- [ ] 4.8 — fixtures, validação manual e fechamento.
+
+Nenhuma subetapa de 4.1 a 4.8 foi iniciada. Esta seção será atualizada somente com evidência de testes e comportamentos realmente implementados.

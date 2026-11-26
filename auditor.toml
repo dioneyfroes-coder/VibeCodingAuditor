@@ -1,0 +1,49 @@
+# Contrato de autoauditoria do Vibe Coding Auditor.
+# Escopo da primeira execução: somente o código Rust de produção.
+# A interface React e a extensão VS Code ficam fora deste contrato porque o
+# grafo atual não observa a comunicação entre TypeScript e o backend Tauri.
+
+schema_version = 1
+
+[project]
+name = "vibe-coding-auditor"
+
+[scan]
+include = [
+  "crates/auditor-core/src/**/*.rs",
+  "crates/auditor-cli/src/**/*.rs",
+  "apps/desktop/src-tauri/src/**/*.rs",
+]
+# Exclusões intencionais: fixtures não são produto; UI/extensão usam analisador
+# separado; diretórios gerados nunca entram na auditoria.
+exclude = [
+  "tests/fixtures/**",
+  "apps/desktop/src/**",
+  "extensions/vscode/src/**",
+  "target/**",
+  "node_modules/**",
+]
+
+[architecture]
+style = "modular_monolith"
+
+# Núcleo determinístico: não depende da CLI, de Tauri nem da interface.
+[[architecture.modules]]
+name = "core"
+path = "crates/auditor-core/src/**"
+responsibility = "Contrato, descoberta, análise, regras, relatórios e histórico local; não conhece adaptadores."
+allowed_dependencies = []
+
+# Adaptador de terminal: interpreta argumentos e imprime modelos do núcleo.
+[[architecture.modules]]
+name = "cli"
+path = "crates/auditor-cli/src/**"
+responsibility = "Comandos auditáveis que delegam toda regra ao núcleo."
+allowed_dependencies = ["core"]
+
+# Adaptador Tauri: expõe comandos ao frontend sem conter regras de auditoria.
+[[architecture.modules]]
+name = "desktop-backend"
+path = "apps/desktop/src-tauri/src/**"
+responsibility = "Comandos Tauri que delegam contrato, análise, auditoria e histórico ao núcleo."
+allowed_dependencies = ["core"]

@@ -69,9 +69,13 @@ pub fn audit_project(root: &Path) -> Result<AuditReport, AuditError> {
     let inventory = discovery::discover(root, &contract)?;
     let analysis = analysis::analyze(root, &contract, &inventory)?;
     let findings = rules::evaluate(&contract, &inventory, &analysis);
-    Ok(AuditReport::from_pipeline(
-        &contract, &inventory, &analysis, findings,
-    ))
+    let mut report = AuditReport::from_pipeline(&contract, &inventory, &analysis, findings);
+    for limitation in rules::layer_mapping_limitations(&contract, &analysis) {
+        if !report.limitations.contains(&limitation) {
+            report.limitations.push(limitation);
+        }
+    }
+    Ok(report)
 }
 
 #[cfg(test)]

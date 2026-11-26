@@ -199,8 +199,22 @@ pub fn example_contract() -> &'static str {
 }
 
 impl Contract {
+    /// Devolve as camadas ativas após a normalização entre versões.
+    ///
+    /// Contratos v1 não possuem camadas; contratos v2 podem declarar uma lista
+    /// vazia quando só usam módulos.
+    pub fn normalized_layers(&self) -> Option<&[Layer]> {
+        (self.schema_version >= 2).then_some(self.architecture.layers.as_slice())
+    }
+
     /// Valida campos obrigatórios, caminhos, referências e camadas.
     fn validate(&self) -> Result<(), ContractError> {
+        if self.schema_version < 2 && !self.architecture.layers.is_empty() {
+            return Err(ContractError::Validation(
+                "architecture.layers exige schema_version = 2".to_owned(),
+            ));
+        }
+
         require_non_empty("project.name", &self.project.name)?;
 
         if self.scan.include.is_empty() {
@@ -276,10 +290,10 @@ impl Contract {
 
         let modules = &self.architecture.modules;
         for (index, left) in modules.iter().enumerate() {
-            for right in modules.iter().skip(index + 1) {
+            for (right_index, right) in modules.iter().enumerate().skip(index + 1) {
                 if patterns_overlap(&left.path, &right.path) {
                     return Err(ContractError::Validation(format!(
-                        "paths de módulos sobrepostos: {} ({}) e {} ({})",
+                        "paths de módulos sobrepostos: {} (architecture.modules[{index}].path = {}) e {} (architecture.modules[{right_index}].path = {})",
                         left.name, left.path, right.name, right.path
                     )));
                 }
@@ -302,14 +316,13 @@ impl Contract {
             require_non_empty(&format!("{label}.name"), &layer.name)?;
             if !layer_names.insert(layer.name.as_str()) {
                 return Err(ContractError::Validation(format!(
-                    "nome de camada duplicado: {}",
+                    "nome de camada duplicado em {label}.name: {}",
                     layer.name
                 )));
             }
             if layer.modules.is_empty() {
                 return Err(ContractError::Validation(format!(
-                    "camada {} deve conter ao menos um módulo",
-                    layer.name
+                    "{label}.modules deve conter ao menos um módulo"
                 )));
             }
 
@@ -318,14 +331,14 @@ impl Contract {
                 require_non_empty(&format!("{label}.modules"), module)?;
                 if !module_names.contains(module.as_str()) {
                     return Err(ContractError::Validation(format!(
-                        "camada {} referencia módulo desconhecido: {}",
-                        layer.name, module
+                        "{label}.modules referencia módulo desconhecido: {}",
+                        module
                     )));
                 }
                 if !seen_modules.insert(module.as_str()) {
                     return Err(ContractError::Validation(format!(
-                        "módulo duplicado na camada {}: {}",
-                        layer.name, module
+                        "{label}.modules repete o módulo {}",
+                        module
                     )));
                 }
             }
@@ -335,42 +348,50 @@ impl Contract {
         for layer in layers {
             for module in &layer.modules {
                 if let Some(previous) = module_layers.insert(module.as_str(), layer.name.as_str()) {
+                    let module_label = self
+                        .architecture
+                        .modules
+                        .iter()
+                        .position(|candidate| candidate.name.as_str() == module.as_str())
+                        .map(|index| format!("architecture.modules[{index}].name"))
+                        .unwrap_or_else(|| "architecture.modules[].name".to_owned());
                     return Err(ContractError::Validation(format!(
-                        "módulo {} aparece em duas camadas: {} e {}",
-                        module, previous, layer.name
+                        "{module_label} aparece em duas camadas: {} e {}",
+                        previous, layer.name
                     )));
                 }
             }
         }
-        for module in &self.architecture.modules {
+        for (index, module) in self.architecture.modules.iter().enumerate() {
             if !module_layers.contains_key(module.name.as_str()) {
                 return Err(ContractError::Validation(format!(
-                    "módulo {} está sem camada",
+                    "architecture.modules[{index}].name está sem camada: {}",
                     module.name
                 )));
             }
         }
 
-        for layer in layers {
+        for (index, layer) in layers.iter().enumerate() {
+            let label = format!("architecture.layers[{index}].allowed_dependencies");
             let mut seen = HashSet::new();
             for dependency in &layer.allowed_dependencies {
-                require_non_empty("allowed_dependencies", dependency)?;
+                require_non_empty(&label, dependency)?;
                 if dependency == &layer.name {
                     return Err(ContractError::Validation(format!(
-                        "camada {} não pode depender de si mesma",
+                        "{label} não pode depender de si mesma: {}",
                         layer.name
                     )));
                 }
                 if !layer_names.contains(dependency.as_str()) {
                     return Err(ContractError::Validation(format!(
-                        "camada {} referencia camada desconhecida: {}",
-                        layer.name, dependency
+                        "{label} referencia camada desconhecida: {}",
+                        dependency
                     )));
                 }
                 if !seen.insert(dependency.as_str()) {
                     return Err(ContractError::Validation(format!(
-                        "dependência duplicada na camada {}: {}",
-                        layer.name, dependency
+                        "{label} tem dependência duplicada: {}",
+                        dependency
                     )));
                 }
             }
@@ -391,12 +412,12 @@ impl Contract {
             .collect();
         let mut visiting = BTreeSet::new();
         let mut visited = BTreeSet::new();
-        for layer in layers {
+        for (index, layer) in layers.iter().enumerate() {
             if let Some(cycle) =
                 find_layer_cycle(layer.name.as_str(), &graph, &mut visiting, &mut visited)
             {
                 return Err(ContractError::Validation(format!(
-                    "ciclo entre camadas: {}",
+                    "ciclo entre camadas em architecture.layers[{index}].allowed_dependencies: {}",
                     cycle.join(" -> ")
                 )));
             }
@@ -710,6 +731,163 @@ allowed_dependencies = ["domain"]
         let error = parse_contract(&text).expect_err("overlapping paths must be rejected");
 
         assert!(error.to_string().contains("sobrepostos"));
+    }
+
+    #[test]
+    fn v2_rejects_schema_zero_with_field_name() {
+        let text = v2_contract().replace("schema_version = 2", "schema_version = 0");
+        let error = parse_contract(&text).expect_err("schema v0 must be rejected");
+
+        assert!(matches!(
+            error,
+            ContractError::UnsupportedSchemaVersion { found: 0 }
+        ));
+        assert!(error.to_string().contains("schema_version"));
+    }
+
+    #[test]
+    fn v1_contract_cannot_declare_layers() {
+        let text = v2_contract().replace("schema_version = 2", "schema_version = 1");
+        let error = parse_contract(&text).expect_err("v1 must not declare layers");
+
+        assert!(error.to_string().contains("architecture.layers"));
+        assert!(error.to_string().contains("schema_version = 2"));
+    }
+
+    #[test]
+    fn normalized_layers_distinguish_v1_from_v2() {
+        let v2 = parse_contract(v2_contract()).expect("v2 contract must load");
+        let v1_text = v2_contract()
+            .split("[[architecture.layers]]")
+            .next()
+            .expect("prefix must exist")
+            .replace("schema_version = 2", "schema_version = 1");
+        let v1 = parse_contract(&v1_text).expect("v1 contract must load");
+
+        assert!(v1.normalized_layers().is_none());
+        assert_eq!(v2.normalized_layers().map(<[Layer]>::len), Some(2));
+    }
+
+    #[test]
+    fn v2_field_order_does_not_change_the_normalized_contract() {
+        let reordered = r#"
+schema_version = 2
+
+[scan]
+include = ["src/**/*.rs"]
+exclude = []
+
+[project]
+name = "contrato-v2"
+
+[architecture]
+style = "modular_monolith"
+
+[[architecture.modules]]
+name = "domain"
+path = "src/domain/**"
+responsibility = "Domínio"
+allowed_dependencies = []
+
+[[architecture.modules]]
+name = "application"
+path = "src/application/**"
+responsibility = "Aplicação"
+allowed_dependencies = ["domain"]
+
+[[architecture.layers]]
+name = "domain"
+modules = ["domain"]
+allowed_dependencies = []
+
+[[architecture.layers]]
+name = "application"
+modules = ["application"]
+allowed_dependencies = ["domain"]
+"#;
+        let first = parse_contract(v2_contract()).expect("canonical contract must load");
+        let second = parse_contract(reordered).expect("reordered contract must load");
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn v2_layer_errors_name_the_field_path() {
+        let cases = [
+            (
+                v2_contract().replace(
+                    "name = \"domain\"\nmodules = [\"domain\"]",
+                    "name = \"\"\nmodules = [\"domain\"]",
+                ),
+                "architecture.layers[0].name",
+            ),
+            (
+                v2_contract().replace(
+                    "name = \"application\"\nmodules = [\"application\"]",
+                    "name = \"domain\"\nmodules = [\"application\"]",
+                ),
+                "architecture.layers[1].name",
+            ),
+            (
+                v2_contract().replace("modules = [\"domain\"]", "modules = [\"missing\"]"),
+                "architecture.layers[0].modules",
+            ),
+            (
+                v2_contract().replace(
+                    "modules = [\"domain\"]",
+                    "modules = [\"domain\", \"domain\"]",
+                ),
+                "architecture.layers[0].modules",
+            ),
+            (
+                v2_contract()
+                    .split("[[architecture.layers]]\nname = \"application\"")
+                    .next()
+                    .expect("prefix must exist")
+                    .to_owned(),
+                "architecture.modules[1].name",
+            ),
+            (
+                v2_contract().replace(
+                    "name = \"application\"\nmodules = [\"application\"]\nallowed_dependencies = [\"domain\"]",
+                    "name = \"application\"\nmodules = [\"application\"]\nallowed_dependencies = [\"application\"]",
+                ),
+                "architecture.layers[1].allowed_dependencies",
+            ),
+            (
+                v2_contract().replace(
+                    "name = \"application\"\nmodules = [\"application\"]\nallowed_dependencies = [\"domain\"]",
+                    "name = \"application\"\nmodules = [\"application\"]\nallowed_dependencies = [\"missing\"]",
+                ),
+                "architecture.layers[1].allowed_dependencies",
+            ),
+            (
+                v2_contract().replace(
+                    "name = \"application\"\nmodules = [\"application\"]\nallowed_dependencies = [\"domain\"]",
+                    "name = \"application\"\nmodules = [\"application\"]\nallowed_dependencies = [\"domain\", \"domain\"]",
+                ),
+                "architecture.layers[1].allowed_dependencies",
+            ),
+            (
+                v2_contract().replace(
+                    "name = \"domain\"\nmodules = [\"domain\"]\nallowed_dependencies = []",
+                    "name = \"domain\"\nmodules = [\"domain\"]\nallowed_dependencies = [\"application\"]",
+                ),
+                "architecture.layers[0].allowed_dependencies",
+            ),
+            (
+                v2_contract().replace("path = \"src/application/**\"", "path = \"src/**\""),
+                "architecture.modules[1].path",
+            ),
+        ];
+
+        for (text, field) in cases {
+            let error = parse_contract(&text).expect_err("invalid v2 contract must be rejected");
+            assert!(
+                error.to_string().contains(field),
+                "{field} missing from: {error}"
+            );
+        }
     }
 
     #[test]

@@ -112,7 +112,9 @@ fn forbidden_dependency_findings(contract: &Contract, analysis: &Analysis) -> Ve
 
 /// Converte arestas permitidas pelo módulo, mas proibidas pela camada.
 fn layer_dependency_findings(contract: &Contract, analysis: &Analysis) -> Vec<Finding> {
-    let layers = &contract.architecture.layers;
+    let Some(layers) = contract.normalized_layers() else {
+        return Vec::new();
+    };
     if layers.is_empty() {
         return Vec::new();
     }
@@ -176,6 +178,42 @@ fn layer_dependency_findings(contract: &Contract, analysis: &Analysis) -> Vec<Fi
             })
         })
         .collect()
+}
+
+/// Registra arestas resolvidas cujos módulos não puderam ser associados a camadas.
+///
+/// A validação do contrato torna essa situação uma configuração inválida. Quando
+/// ela ainda aparece em tempo de execução, a ausência é informada como
+/// limitação: nenhuma conclusão de camada é inventada.
+pub fn layer_mapping_limitations(contract: &Contract, analysis: &Analysis) -> Vec<String> {
+    let Some(layers) = contract.normalized_layers() else {
+        return Vec::new();
+    };
+    if layers.is_empty() {
+        return Vec::new();
+    }
+
+    let mapped_modules: BTreeSet<&str> = layers
+        .iter()
+        .flat_map(|layer| layer.modules.iter().map(String::as_str))
+        .collect();
+    let mut limitations = BTreeSet::new();
+    for edge in analysis
+        .edges
+        .iter()
+        .filter(|edge| edge.kind != DependencyKind::Unresolved)
+    {
+        if !mapped_modules.contains(edge.from.as_str())
+            || !mapped_modules.contains(edge.to.as_str())
+        {
+            limitations.insert(format!(
+                "aresta {} -> {} em {} não pôde ser associada a camadas; nenhuma conclusão de camada foi emitida",
+                edge.from, edge.to, edge.path
+            ));
+        }
+    }
+
+    limitations.into_iter().collect()
 }
 
 /// Converte arestas não resolvidas em revisão necessária.
@@ -1019,6 +1057,62 @@ allowed_dependencies = ["application"]
                 "dep.layer_not_allowed:web:infrastructure:src/web-infrastructure.rs",
             ]
         );
+    }
+
+    #[test]
+    fn layer_order_does_not_change_findings() {
+        let contract = layer_contract();
+        let mut reordered = contract.clone();
+        reordered.architecture.layers.reverse();
+        let inventory = contract_inventory(&contract);
+        let analysis = analysis_with_edges(vec![
+            typed_edge("web", "infrastructure", DependencyKind::Allowed),
+            typed_edge("web", "domain", DependencyKind::Allowed),
+        ]);
+
+        assert_eq!(
+            evaluate(&contract, &inventory, &analysis),
+            evaluate(&reordered, &inventory, &analysis)
+        );
+    }
+
+    #[test]
+    fn missing_layer_mapping_is_a_limitation_not_an_error() {
+        let mut contract = layer_contract();
+        contract
+            .architecture
+            .layers
+            .retain(|layer| layer.name != "infrastructure");
+        let analysis = analysis_with_edges(vec![typed_edge(
+            "web",
+            "infrastructure",
+            DependencyKind::Allowed,
+        )]);
+        let findings = evaluate(&contract, &contract_inventory(&contract), &analysis);
+
+        assert!(
+            findings
+                .iter()
+                .all(|finding| finding.rule_id != RULE_LAYER_NOT_ALLOWED)
+        );
+        assert_eq!(
+            layer_mapping_limitations(&contract, &analysis),
+            [
+                "aresta web -> infrastructure em src/web-infrastructure.rs não pôde ser associada a camadas; nenhuma conclusão de camada foi emitida"
+            ]
+        );
+    }
+
+    #[test]
+    fn v1_contract_has_no_layer_mapping_limitations() {
+        let (contract, _, _) = fixture_data();
+        let analysis = analysis_with_edges(vec![typed_edge(
+            "application",
+            "infrastructure",
+            DependencyKind::Allowed,
+        )]);
+
+        assert!(layer_mapping_limitations(&contract, &analysis).is_empty());
     }
 
     #[test]

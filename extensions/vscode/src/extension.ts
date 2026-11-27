@@ -49,7 +49,20 @@ let extensionContext!: vscode.ExtensionContext;
 let diagnosticCollection!: vscode.DiagnosticCollection;
 let statusBar!: vscode.StatusBarItem;
 let outputChannel!: vscode.OutputChannel;
+let outputLines: string[] = [];
 let lastRun: StoredRun | undefined;
+
+/// Superfície mínima de observação para testes E2E; não avalia regras nem altera estado.
+export interface VcaExtensionApi {
+  getOutputLog(): string;
+  getLastRunMode(): 'discovery' | 'compliance' | undefined;
+}
+
+/// Registra no canal e mantém uma cópia em memória para inspeção em testes E2E.
+function appendOutput(line: string): void {
+  outputLines.push(line);
+  outputChannel.appendLine(line);
+}
 
 /// Raiz da primeira pasta aberta no workspace.
 function workspaceRoot(): string | undefined {
@@ -217,9 +230,10 @@ async function runAudit(target?: vscode.Uri): Promise<void> {
     if (run.mode === 'discovery') {
       const messages = discoveryMessages(run);
       outputChannel.clear();
-      outputChannel.appendLine(`[${recordedAt}] descoberta em ${root}`);
+      outputLines = [];
+      appendOutput(`[${recordedAt}] descoberta em ${root}`);
       for (const message of messages) {
-        outputChannel.appendLine(`- ${message}`);
+        appendOutput(`- ${message}`);
       }
       const action = await vscode.window.showInformationMessage(
         'VCA · Descoberta concluída: nenhuma regra de conformidade foi avaliada. Observações no canal de saída.',
@@ -235,7 +249,7 @@ async function runAudit(target?: vscode.Uri): Promise<void> {
     }
   } catch (error) {
     const detail = cliFailureMessage(error);
-    outputChannel.appendLine(`[${new Date().toISOString()}] falha em ${root}: ${detail}`);
+    appendOutput(`[${new Date().toISOString()}] falha em ${root}: ${detail}`);
     const action = await vscode.window.showErrorMessage(
       `Falha na auditoria: ${detail}`,
       'Ver detalhes',
@@ -313,7 +327,7 @@ function restoreRun(value: unknown): StoredRun | undefined {
 }
 
 /// Registra comandos, restaura o último estado e atualiza a barra de status.
-export function activate(context: vscode.ExtensionContext): void {
+export function activate(context: vscode.ExtensionContext): VcaExtensionApi {
   extensionContext = context;
   diagnosticCollection = vscode.languages.createDiagnosticCollection('vibe-coding-auditor');
   statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
@@ -336,6 +350,11 @@ export function activate(context: vscode.ExtensionContext): void {
     applyRun(previous.root, previous.run, previous.recordedAt);
   }
   updateStatus();
+
+  return {
+    getOutputLog: () => outputLines.join('\n'),
+    getLastRunMode: () => lastRun?.run.mode,
+  };
 }
 
 /// Limpa diagnósticos quando a extensão é desativada.

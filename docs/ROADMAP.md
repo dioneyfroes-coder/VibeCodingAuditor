@@ -251,10 +251,13 @@ Objetivo: cobrir os fluxos que os testes atuais não exercitam em host real, sem
 - [x] Asserções incluem stdout/stderr/código de saída; logs são exibidos pelo runner do Node em falha.
 - [x] Verificação: `node --test tests/e2e/cli/cli.e2e.test.mjs` = `0` (8 testes). O harness usa `target/release` quando presente, senão `target/debug`; exige build prévio da CLI.
 
-### 5.2 — Extensão VS Code E2E (planejada)
-- [ ] Adicionar `@vscode/test-electron` e runner E2E na extensão, isolado de `npm test` puro atual.
-- [ ] Cobrir cenários 5.0/Extensão em host real.
-- [ ] Publicar logs do Extension Host em falha.
+### 5.2 — Extensão VS Code E2E (concluída em 27/11/2026)
+- [x] Adicionar `@vscode/test-electron@3.1.0` (devDependency fixada) e `npm run test:e2e`, isolado do `npm test` puro.
+- [x] Runner em `extensions/vscode/src/e2e/runner.ts` ativa a extensão em host real, usa workspace temporário com fixtures reais e cobre: descoberta sem contrato (observações no canal e zero diagnósticos), contrato com diagnósticos no Problems preserving código da regra, `Abrir achado...` com navegação no editor, `Ocultar diagnósticos` e CLI ausente com orientação de `vibeCodingAuditor.cliPath`.
+- [x] Expor API mínima de observação (`getOutputLog`, `getLastRunMode`) apenas para testes; nenhuma regra é avaliada na superfície de teste.
+- [x] Falhas incluem o conteúdo do canal `Vibe Coding Auditor`; logs do Extension Host são herdados pelo stdout e capturados pelo CI.
+- [x] Verificação: `npm --prefix extensions/vscode test` = `0` (18 testes) e `npm --prefix extensions/vscode run test:e2e` = `0` (host VS Code 1.146.0 fixo por `VCA_VSCODE_VERSION`).
+- [ ] Limitação conhecida: contagem exata de popups (`um único aviso` com ação “Ver observações”) não é observável pela API do host; permanece no checklist manual já validado pelo usuário.
 
 ### 5.3 — Desktop Tauri E2E (planejada)
 - [ ] Adicionar `tauri-driver`/WebDriverIO e scripts de build+test.

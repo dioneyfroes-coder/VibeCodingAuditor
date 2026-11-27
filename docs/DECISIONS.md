@@ -803,3 +803,13 @@ Não foram criados `Cargo.toml`, `auditor.example.toml`, `.gitignore`, diretóri
 - **Alternativas rejeitadas:** ampliar testes Rust de integração existentes — a camada E2E pedida deve ser separada e executável fora do `cargo test`; Playwright — desnecessário para CLI; adicionar biblioteca de teste — sem justificativa.
 - **Impacto:** novo arquivo de teste, sem mudança em runtime, contrato, schema, CI ou dependências.
 - **Verificação:** `node --test tests/e2e/cli/cli.e2e.test.mjs` = `0` (8 testes). Caso o binário não exista, o teste falha com instrução de executar `cargo build --release -p auditor-cli`.
+
+## E5.2 — Extensão E2E em host real do VS Code
+
+- **Data:** 27/11/2026
+- **Decisão:** adicionar `@vscode/test-electron@3.1.0` como devDependency da extensão e criar `extensions/vscode/src/e2e/runner.ts` + `extensions/vscode/e2e/runTests.mjs`, com script `npm run test:e2e` separado do `npm test`.
+- **Motivo:** cobrir ativação, comandos, diagnósticos, canal de saída e falha de CLI em host real sem duplicar regras e sem tornar a suíte determinística dependente de download do VS Code.
+- **Alternativas rejeitadas:** `@vscode/test-cli` — runner próprio já atende e evita outra dependência; simular a API `vscode` — não cobre host real; ampliar `npm test` com E2E — tornaria o ciclo rápido lento e instável.
+- **Impacto:** uma devDependency fixada, um runner de teste, uma API mínima de observação na extensão e ignores para `.vscode-test`. Nenhuma regra, contrato, runtime da CLI ou desktop foi alterado. O npm reportou 2 vulnerabilidades moderadas em dependências transitivas do pacote de teste; registradas como limite conhecido, sem `npm audit fix --force` (mudança quebrável e fora do escopo).
+- **Limitação:** o runner não consegue contar popups do VS Code pela API; a ação “Ver observações” e o aviso único continuam validados manualmente, como em E4.9.1.
+- **Verificação:** `npm --prefix extensions/vscode test` = `0` (18 testes); `npm --prefix extensions/vscode run test:e2e` = `0` com VS Code 1.146.0. Falhas anexam o log do canal da extensão; stdout do host é preservado para artefatos de CI.

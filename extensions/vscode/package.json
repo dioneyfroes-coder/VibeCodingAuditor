@@ -57,11 +57,13 @@
   "scripts": {
     "compile": "tsc -p ./",
     "test": "npm run compile && node --test out/model.test.js tests/cliPath.test.mjs tests/manifest.test.mjs tests/parity.test.mjs",
+    "test:e2e": "npm run compile && node e2e/runTests.mjs",
     "package": "npm run compile && vsce package --no-dependencies --out vibe-coding-auditor-0.1.0.vsix"
   },
   "devDependencies": {
     "@types/node": "24.9.2",
     "@types/vscode": "1.146.0",
+    "@vscode/test-electron": "3.1.0",
     "@vscode/vsce": "4.1.1",
     "typescript": "7.0.2"
   }

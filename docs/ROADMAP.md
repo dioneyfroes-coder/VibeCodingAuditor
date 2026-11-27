@@ -278,7 +278,11 @@ Objetivo: cobrir os fluxos que os testes atuais não exercitam em host real, sem
 - [x] Limitar retries a duas tentativas apenas na instalação do driver; asserções funcionais rodam uma vez. Timeout do job: 45 minutos.
 - [x] Publicar screenshots/logs em falha por 7 dias com `actions/upload-artifact@v4`.
 - [x] Verificação local: YAML interpretado com `js-yaml` (2 jobs, `needs: verify`, 19 passos); `cargo install tauri-driver --version 2.1.0 --locked` = `0` em root temporário; script de instalação do MSEdgeDriver = `0` para as versões 157 e 158 (inclusive reaproveitamento); E2E desktop = `0` (5 testes) com `VCA_EDGEDRIVER_DIR` explícito, execução de integridade média e download automático forçado a falhar; helper propagou códigos `0` e `7`.
-- [ ] Limitação conhecida: a estabilidade do job no GitHub Actions depende do quinto run remoto, após a de-elevação do E2E desktop.
+- [x] Verificação remota: run `46067832029` (commit `4ceeab2`) com `verify` e `E2E Windows` verdes; E2E desktop = 5 testes com WebView2 157.0.4341.60 em `windows-latest`.
+
+### Fechamento da Etapa 5 (concluída em 27/11/2026)
+- [x] Suítes 5.1–5.4 verde localmente e no job `E2E Windows`; nenhuma regra de auditoria foi movida para a interface.
+- [x] Limitações mantidas: contagem exata do popup da extensão e diálogo nativo de pasta permanecem smoke manual; vulnerabilidades transitivas em devDependencies registradas, sem `npm audit fix --force`.
 
 ## Fechamento da primeira fase
 

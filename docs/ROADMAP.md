@@ -501,9 +501,20 @@ Nova fase iniciada em 26/11/2026 a partir de `PLANO_ETAPA_4_DESCOBERTA_E_ARCHITE
 - [x] Verificação final: `cargo fmt --all --check` = `0`, `cargo check --workspace` = `0`, `cargo test --workspace` = `0` (220 testes: 201 no núcleo, 10 unitários na CLI, 5 de integração na CLI e 4 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` = `0`, `git diff --check` = `0` (apenas avisos LF/CRLF do OneDrive), `npm --prefix apps/desktop test` = `0` (12), `npm --prefix apps/desktop run build` = `0` e `npm --prefix extensions/vscode test` = `0` (7).
 - [x] Limitações explícitas: desktop, extensão e histórico ainda não mostram modo nem candidatos (Etapas 4.5 e 4.7); `init` continua gerando v1; os candidatos ainda não leem `package.json`, `pyproject.toml` nem `go.mod`; `--diff` em descoberta apenas valida o patch; `ProjectRun` mantém uma exceção documentada do Clippy para variantes grandes.
 
-### Etapa 4.4 a 4.8 — Não iniciadas
+### Etapa 4.4 — Modelo do Architecture Builder — Concluída em 26/11/2026
 
-- [ ] 4.4 — modelo do Architecture Builder.
+- [x] Após o usuário responder “prossiga”, as mudanças ficaram restritas ao núcleo e à documentação. Nenhuma dependência Rust ou npm foi adicionada; Tauri, React, CLI, extensão, SQLite e contratos de exemplo não mudaram em comportamento.
+- [x] Novo módulo `builder` no núcleo, sem dependência de Tauri, com `ContractDraft`, `DraftModule`, `DraftLayer`, `PendingDecision` e `AmbiguityResolution`. O rascunho cobre nome do projeto, `include`/`exclude`, estilo, módulos com um `path`, responsabilidade descritiva, dependências permitidas e rejeitadas, camadas e decisões pendentes.
+- [x] `empty_draft()` atende projeto novo ou vazio: sem módulos, sem camadas e sem pendências. `draft_from_discovery()` importa candidatos como sugestões editáveis (`needs_confirmation`), preserva evidências e cria decisões para cada relação observada e ambiguidade, sem aprovar dependências.
+- [x] `validate_draft()` usa os fatos da descoberta como fonte de verdade: módulos precisam ser confirmados, ambiguidades e relações sem módulo de origem único exigem escolha registrada, e cada relação observada exige `allowed_dependencies` ou `rejected_dependencies`. Limpar `pending_decisions` não burla a validação.
+- [x] Perfis: monólito modular sem camadas e em camadas. O perfil em camadas exige exatamente uma camada por módulo; o perfil sem camadas rejeita `layers`. Sobreposição de paths, nomes duplicados e demais regras estruturais continuam sendo fiscalizadas pelo validador oficial do contrato.
+- [x] Novas configurações usam `schema_version = 2` por padrão. `render_contract()` deriva `Serialize` dos tipos existentes e produz TOML determinístico; `contract_identity()` gera hash estável de 16 dígitos da forma canônica. `validate_draft()` valida o TOML gerado com `parse_contract()`, garantindo round-trip rascunho → TOML → contrato equivalente. Nenhum campo exclusivo do rascunho (`needs_confirmation`, `rejected_dependencies`, `pending_decisions`, `evidence`) é gravado no contrato.
+- [x] Projetos vazios e paths planejados ainda inexistentes são válidos: o validador do contrato já aceita módulos sem arquivos no inventário, e o Builder não exige que o path exista no disco.
+- [x] Testes escritos antes da implementação falharam na fase vermelha por tipos e funções inexistentes. Durante a revisão, o Clippy apontou import não usado, `if` aninhável e comparação de tamanho; a validação foi reforçada para não depender da lista de pendências.
+- [x] Limitações explícitas: não há interface, backend Tauri ou comando CLI para o Builder nesta etapa (4.5); `auditor init` continua gerando v1; `responsibility` é texto livre, sem interpretação por regras; um módulo aceita apenas um `path`; não há resolução automática de ambiguidades nem leitura de `package.json`, `pyproject.toml` ou `go.mod`.
+
+### Etapa 4.5 a 4.8 — Não iniciadas
+
 - [ ] 4.5 — interface visual do Builder.
 - [ ] 4.6 — gravação segura, validação final e segunda auditoria.
 - [ ] 4.7 — consistência entre CLI, VS Code e histórico.

@@ -9,7 +9,7 @@ use std::fmt;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Versões de schema aceitas por esta versão do auditor.
 pub const SUPPORTED_SCHEMA_VERSIONS: [u32; 2] = [1, 2];
@@ -27,7 +27,7 @@ fn supported_versions_label() -> String {
 pub const EXAMPLE_CONTRACT: &str = include_str!("../../../../auditor.example.toml");
 
 /// Contrato arquitetural completo de um projeto auditado.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Contract {
     /// Versão do schema usada no arquivo.
@@ -41,7 +41,7 @@ pub struct Contract {
 }
 
 /// Identificação do projeto auditado.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Project {
     /// Nome legível do projeto.
@@ -49,7 +49,7 @@ pub struct Project {
 }
 
 /// Padrões de inclusão e exclusão usados na descoberta de arquivos.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Scan {
     /// Padrões que precisam corresponder para um arquivo entrar no inventário.
@@ -59,7 +59,7 @@ pub struct Scan {
 }
 
 /// Organização desejada do projeto.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Architecture {
     /// Estilo arquitetural declarado.
@@ -72,7 +72,7 @@ pub struct Architecture {
 }
 
 /// Estilos arquiteturais reconhecidos pelo schema v1.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ArchitectureStyle {
     /// Monólito modular, único estilo aceito nesta versão.
@@ -80,7 +80,7 @@ pub enum ArchitectureStyle {
 }
 
 /// Módulo declarado no contrato.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Module {
     /// Nome usado em `allowed_dependencies` e nas arestas do grafo.
@@ -95,7 +95,7 @@ pub struct Module {
 }
 
 /// Camada arquitetural declarada no contrato v2.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Layer {
     /// Nome usado em `allowed_dependencies` das camadas.
@@ -126,6 +126,8 @@ pub enum ContractError {
     },
     /// Contrato sintaticamente válido, mas semanticamente inválido.
     Validation(String),
+    /// Falha ao serializar um contrato em memória.
+    Serialize(toml::ser::Error),
 }
 
 impl fmt::Display for ContractError {
@@ -145,6 +147,7 @@ impl fmt::Display for ContractError {
                 supported_versions_label()
             ),
             Self::Validation(message) => write!(formatter, "contrato inválido: {message}"),
+            Self::Serialize(source) => write!(formatter, "falha ao serializar contrato: {source}"),
         }
     }
 }
@@ -155,6 +158,7 @@ impl Error for ContractError {
             Self::Io { source, .. } => Some(source),
             Self::Parse(source) => Some(source),
             Self::Validation(_) | Self::UnsupportedSchemaVersion { .. } => None,
+            Self::Serialize(source) => Some(source),
         }
     }
 }
@@ -196,6 +200,32 @@ pub fn parse_contract(text: &str) -> Result<Contract, ContractError> {
 /// Retorna o modelo inicial usado por `auditor init`.
 pub fn example_contract() -> &'static str {
     EXAMPLE_CONTRACT
+}
+
+/// Serializa um contrato em TOML determinístico, na ordem dos campos das structs.
+///
+/// A saída é uma prévia: esta função não grava arquivos nem altera o projeto.
+pub fn render_contract(contract: &Contract) -> Result<String, ContractError> {
+    toml::to_string_pretty(contract).map_err(ContractError::Serialize)
+}
+
+/// Identidade curta e determinística da forma canônica do contrato.
+///
+/// Usa o TOML produzido por `render_contract` para que a mesma configuração
+/// tenha sempre o mesmo identificador, sem depender de caminhos de arquivo.
+pub fn contract_identity(contract: &Contract) -> String {
+    let text = render_contract(contract).expect("contrato tipado deve serializar");
+    format!("{:016x}", stable_identity_hash(&text))
+}
+
+/// Hash FNV-1a de 64 bits, estável entre versões do Rust.
+fn stable_identity_hash(text: &str) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in text.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
 }
 
 impl Contract {
@@ -548,6 +578,33 @@ mod tests {
     #[test]
     fn example_contract_is_valid() {
         parse_contract(example_contract()).expect("the generated example must be valid");
+    }
+
+    #[test]
+    fn rendered_contract_round_trips_through_the_parser() {
+        for source in [example_contract().to_owned(), v2_contract().to_owned()] {
+            let contract = parse_contract(&source).expect("fixture must be valid");
+            let text = render_contract(&contract).expect("contract must serialize");
+            assert_eq!(
+                parse_contract(&text).expect("rendered TOML must be valid"),
+                contract
+            );
+            assert_eq!(render_contract(&contract).expect("must re-render"), text);
+        }
+    }
+
+    #[test]
+    fn contract_identity_is_stable_and_canonical() {
+        let first = parse_contract(v2_contract()).expect("first contract must load");
+        let reordered = v2_contract()
+            .replace(
+                "[project]\nname = \"contrato-v2\"\n\n[scan]\ninclude = [\"src/**/*.rs\"]\nexclude = []",
+                "[scan]\ninclude = [\"src/**/*.rs\"]\nexclude = []\n\n[project]\nname = \"contrato-v2\"",
+            );
+        let second = parse_contract(&reordered).expect("reordered contract must load");
+
+        assert_eq!(contract_identity(&first), contract_identity(&second));
+        assert_eq!(contract_identity(&first).len(), 16);
     }
 
     #[test]

@@ -7,6 +7,7 @@
 
 pub mod analysis;
 pub mod audit;
+pub mod builder;
 pub mod contract;
 pub mod diff;
 pub mod discovery;

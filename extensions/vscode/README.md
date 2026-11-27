@@ -1,20 +1,20 @@
 # Vibe Coding Auditor para VS Code
 
-Extensão que mostra no painel **Problems** os achados determinísticos produzidos pelo núcleo do Vibe Coding Auditor. Ela não avalia regras: executa o CLI `vibe-coding-auditor-cli audit <pasta> --format json` e converte o relatório recebido. Em conformidade, os achados viram diagnósticos; em descoberta, as observações do núcleo aparecem como mensagens informativas.
+Extensão que mostra no painel **Problems** os achados determinísticos produzidos pelo núcleo do Vibe Coding Auditor. Ela não avalia regras: executa o CLI `vibe-coding-auditor-cli audit <pasta> --format json` e converte o relatório recebido. Em conformidade, os achados viram diagnósticos; em descoberta, as observações e limitações do núcleo aparecem como mensagens informativas.
 
 ## Uso
 
 1. Abra no VS Code a pasta do projeto; `auditor.toml` é opcional.
-2. Execute **Vibe Coding Auditor: Auditar projeto** na paleta de comandos (ou no menu de contexto da pasta).
+2. Execute **Vibe Coding Auditor: Auditar ou descobrir projeto** na paleta de comandos ou no menu de contexto da pasta. O `auditor.toml` é opcional: sem contrato, a extensão mostra observações de descoberta; com contrato, mostra achados de conformidade.
 3. Clique em um diagnóstico para abrir o arquivo e a linha do achado.
 4. Use **Vibe Coding Auditor: Abrir achado...** para escolher um achado pela Paleta rápida.
 5. Use **Vibe Coding Auditor: Ocultar diagnósticos** para limpar o painel sem apagar o estado da última auditoria.
 
-A barra de status mostra `VCA: sem auditor.toml`, `VCA: sem auditoria` ou a quantidade de achados da última execução. Esse estado é restaurado ao reabrir o workspace.
+A barra de status mostra `VCA: descoberta disponível`, `VCA: sem auditoria` ou o resumo da última execução. Esse estado é restaurado ao reabrir o workspace.
 
 ## Configuração
 
-`vibeCodingAuditor.cliPath` define o executável. O padrão `vibe-coding-auditor-cli` procura no `PATH` e, se não encontrar, tenta `target/release/` e `target/debug/` dentro da pasta aberta. Para instalações fora do `PATH`, configure um caminho absoluto.
+`vibeCodingAuditor.cliPath` define o executável. O padrão `vibe-coding-auditor-cli` procura no `PATH`, depois em `target/release/` e `target/debug/` da pasta aberta e, por fim, nos mesmos caminhos do repositório que contém a extensão. Para instalações fora desses locais, configure um caminho absoluto.
 
 A CLI retorna `0` sem achados e `1` com achados. A extensão aceita ambos; somente códigos maiores que `1` são tratados como falha operacional.
 

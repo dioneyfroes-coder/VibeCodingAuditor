@@ -11,6 +11,7 @@ import { spawn } from 'node:child_process';
 
 import * as vscode from 'vscode';
 
+import { cliCandidates, cliFailureMessage, DEFAULT_CLI_NAME } from './cliPath';
 import {
   CliRun,
   ComplianceRun,
@@ -73,10 +74,12 @@ function updateStatus(): void {
   if (!lastRun) {
     const root = workspaceRoot();
     const configured = root ? existsSync(path.join(root, 'auditor.toml')) : false;
-    statusBar.text = configured ? '$(shield) VCA: sem auditoria' : '$(warning) VCA: sem auditor.toml';
+    statusBar.text = configured
+      ? '$(shield) VCA: sem auditoria'
+      : '$(search) VCA: descoberta disponível';
     statusBar.tooltip = configured
-      ? 'Execute “Vibe Coding Auditor: Auditar projeto”.'
-      : 'A pasta aberta não contém auditor.toml. Use a paleta para executar a descoberta.';
+      ? 'Execute “Vibe Coding Auditor: Auditar ou descobrir projeto”.'
+      : 'Pasta sem auditor.toml: o comando Auditar ou descobrir projeto usa descoberta, sem regras de conformidade.';
   } else {
     const run = lastRun.run;
     const label = modeLabel(run);
@@ -149,34 +152,21 @@ function applyRun(root: string, run: CliRun, recordedAt: string): void {
   }
 }
 
-/// Reflete a presença de `auditor.toml` no contexto de comandos do VS Code.
-async function refreshContext(): Promise<void> {
-  const root = workspaceRoot();
-  const configured = root ? existsSync(path.join(root, 'auditor.toml')) : false;
-  await vscode.commands.executeCommand('setContext', 'vibeCodingAuditor.projectConfigured', configured);
-  updateStatus();
-}
-
-/// Resolve o executável da CLI a partir da configuração ou do workspace.
+/// Resolve o executável da CLI pela configuração, pelo projeto ou pelo repositório da extensão.
 async function resolveCli(root: string): Promise<string> {
   const configured =
     vscode.workspace.getConfiguration('vibeCodingAuditor').get<string>('cliPath') ??
-    'vibe-coding-auditor-cli';
-  if (configured !== 'vibe-coding-auditor-cli' || path.isAbsolute(configured)) {
-    return configured;
-  }
-
-  const executable =
-    process.platform === 'win32' ? 'vibe-coding-auditor-cli.exe' : 'vibe-coding-auditor-cli';
-  for (const candidate of [
-    path.join(root, 'target', 'release', executable),
-    path.join(root, 'target', 'debug', executable),
-  ]) {
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-  }
-  return configured;
+    DEFAULT_CLI_NAME;
+  const candidates = cliCandidates(
+    configured,
+    root,
+    extensionContext.extensionPath,
+    process.platform,
+  );
+  return (
+    candidates.find((candidate) => candidate === DEFAULT_CLI_NAME || existsSync(candidate)) ??
+    configured
+  );
 }
 
 /// Executa a CLI sem tratar o código 1 como falha: ele significa “há achados”.
@@ -237,7 +227,7 @@ async function runAudit(target?: vscode.Uri): Promise<void> {
       );
     }
   } catch (error) {
-    vscode.window.showErrorMessage(`Falha na auditoria: ${errorMessage(error)}`);
+    vscode.window.showErrorMessage(`Falha na auditoria: ${cliFailureMessage(error)}`);
   }
 }
 
@@ -307,7 +297,7 @@ function restoreRun(value: unknown): StoredRun | undefined {
   }
 }
 
-/// Registra comandos, restaura o último estado e detecta o contrato na abertura.
+/// Registra comandos, restaura o último estado e atualiza a barra de status.
 export function activate(context: vscode.ExtensionContext): void {
   extensionContext = context;
   diagnosticCollection = vscode.languages.createDiagnosticCollection('vibe-coding-auditor');
@@ -320,7 +310,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('vibeCodingAuditor.openFinding', () => openFinding()),
     vscode.commands.registerCommand('vibeCodingAuditor.clearDiagnostics', clearDiagnostics),
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
-      void refreshContext();
+      updateStatus();
     }),
   );
 
@@ -329,7 +319,7 @@ export function activate(context: vscode.ExtensionContext): void {
   if (previous) {
     applyRun(previous.root, previous.run, previous.recordedAt);
   }
-  void refreshContext();
+  updateStatus();
 }
 
 /// Limpa diagnósticos quando a extensão é desativada.

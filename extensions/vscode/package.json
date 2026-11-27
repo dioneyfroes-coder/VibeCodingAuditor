@@ -38,7 +38,7 @@
       "explorer/context": [
         {
           "command": "vibeCodingAuditor.audit",
-          "when": "explorerResourceIsFolder && vibeCodingAuditor.projectConfigured",
+          "when": "explorerResourceIsFolder",
           "group": "navigation"
         }
       ]
@@ -56,7 +56,7 @@
   },
   "scripts": {
     "compile": "tsc -p ./",
-    "test": "npm run compile && node --test out/model.test.js tests/parity.test.mjs",
+    "test": "npm run compile && node --test out/model.test.js tests/cliPath.test.mjs tests/manifest.test.mjs tests/parity.test.mjs",
     "package": "npm run compile && vsce package --no-dependencies --out vibe-coding-auditor-0.1.0.vsix"
   },
   "devDependencies": {

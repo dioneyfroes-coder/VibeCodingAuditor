@@ -1,11 +1,11 @@
 # Vibe Coding Auditor para VS Code
 
-Extensão que mostra no painel **Problems** os achados determinísticos produzidos pelo núcleo do Vibe Coding Auditor. Ela não avalia regras: executa o CLI `vibe-coding-auditor-cli audit <pasta> --format json` e converte o relatório recebido. Em conformidade, os achados viram diagnósticos; em descoberta, as observações e limitações do núcleo aparecem como mensagens informativas.
+Extensão que mostra no painel **Problems** os achados determinísticos produzidos pelo núcleo do Vibe Coding Auditor. Ela não avalia regras: executa o CLI `vibe-coding-auditor-cli audit <pasta> --format json` e converte o relatório recebido. Em conformidade, os achados viram diagnósticos; em descoberta, as observações e limitações do núcleo são registradas no canal de saída **Vibe Coding Auditor** e a extensão exibe um único aviso informativo.
 
 ## Uso
 
 1. Abra no VS Code a pasta do projeto; `auditor.toml` é opcional.
-2. Execute **Vibe Coding Auditor: Auditar ou descobrir projeto** na paleta de comandos ou no menu de contexto da pasta. O `auditor.toml` é opcional: sem contrato, a extensão mostra observações de descoberta; com contrato, mostra achados de conformidade.
+2. Execute **Vibe Coding Auditor: Auditar ou descobrir projeto** na paleta de comandos ou no menu de contexto da pasta. O `auditor.toml` é opcional: sem contrato, a extensão registra observações de descoberta no canal de saída; com contrato, mostra achados de conformidade.
 3. Clique em um diagnóstico para abrir o arquivo e a linha do achado.
 4. Use **Vibe Coding Auditor: Abrir achado...** para escolher um achado pela Paleta rápida.
 5. Use **Vibe Coding Auditor: Ocultar diagnósticos** para limpar o painel sem apagar o estado da última auditoria.

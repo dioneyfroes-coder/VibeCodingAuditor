@@ -579,6 +579,12 @@ Nova fase iniciada em 26/11/2026 a partir de `PLANO_ETAPA_4_DESCOBERTA_E_ARCHITE
 - [x] Validação da extensão na host real do VS Code — confirmada pelo usuário em 27/11/2026 após reinstalar `extensions/vscode/vibe-coding-auditor-0.1.0.vsix` e atualizar `vibeCodingAuditor.cliPath` para `vibe-coding-auditor-cli` (o valor antigo apontava para `vibe-coding-auditor.exe`, removido). O usuário confirmou: comando aparece sem `auditor.toml`; descoberta sem violações de conformidade no Problems; barra de status/resumo de descoberta; auditoria com contrato válido exibe diagnósticos no Problems. Ressalva de UX: observações de descoberta são exibidas como múltiplos popups informativos.
 - [x] Etapa 4 declarada concluída com ressalvas documentadas, após confirmação explícita das validações manuais desktop e VS Code.
 
+### Ajuste pós-4.9 — Ruído de popups na extensão — 27/11/2026
+
+- [x] Motivo: na validação manual da host real do VS Code, a descoberta sem contrato gerou vários popups informativos. Impacto: apenas `extensions/vscode`; nenhuma regra, schema, contrato, SQLite, CLI Rust ou desktop alterado.
+- [x] Descoberta passou a escrever observações/limitações no canal de saída `Vibe Coding Auditor` e mostrar um único popup com ação “Ver observações”. Falhas operacionais também oferecem “Ver detalhes” e registram no canal.
+- [x] `npm --prefix extensions/vscode test` = `0` (18) e `npm --prefix extensions/vscode run package` = `0`. Pendente nova confirmação manual na host real do VS Code após reinstalar o `.vsix`.
+
 ### Ajuste pós-4.8 — Nome da CLI e ajuda sem argumentos — 27/11/2026
 
 - [x] Após o usuário relatar que o executável “não abria”, foi confirmado que ele abriu `vibe-coding-auditor.exe`, uma CLI de terminal que terminava em silêncio sem argumentos. O binário foi renomeado para `vibe-coding-auditor-cli`, no `Cargo.toml`, no nome do Clap, nos testes `CARGO_BIN_EXE_*`, na documentação e no padrão `vibeCodingAuditor.cliPath` da extensão. Os binários antigos de `target/release` e `target/debug` foram removidos após o novo build.

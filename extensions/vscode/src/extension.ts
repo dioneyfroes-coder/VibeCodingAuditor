@@ -48,6 +48,7 @@ interface FindingPick extends vscode.QuickPickItem {
 let extensionContext!: vscode.ExtensionContext;
 let diagnosticCollection!: vscode.DiagnosticCollection;
 let statusBar!: vscode.StatusBarItem;
+let outputChannel!: vscode.OutputChannel;
 let lastRun: StoredRun | undefined;
 
 /// Raiz da primeira pasta aberta no workspace.
@@ -215,19 +216,33 @@ async function runAudit(target?: vscode.Uri): Promise<void> {
     await extensionContext.workspaceState.update('lastRun', { root, run, recordedAt });
     if (run.mode === 'discovery') {
       const messages = discoveryMessages(run);
+      outputChannel.clear();
+      outputChannel.appendLine(`[${recordedAt}] descoberta em ${root}`);
       for (const message of messages) {
-        void vscode.window.showInformationMessage(`VCA · ${message}`);
+        outputChannel.appendLine(`- ${message}`);
       }
-      void vscode.window.showInformationMessage(
-        `VCA · conclusão: nenhuma regra de conformidade foi avaliada. ${messages[messages.length - 1]}`,
+      const action = await vscode.window.showInformationMessage(
+        'VCA · Descoberta concluída: nenhuma regra de conformidade foi avaliada. Observações no canal de saída.',
+        'Ver observações',
       );
+      if (action === 'Ver observações') {
+        outputChannel.show(true);
+      }
     } else {
       vscode.window.showInformationMessage(
         `Auditoria concluída: ${run.summary.findings} achado(s) no painel Problems.`,
       );
     }
   } catch (error) {
-    vscode.window.showErrorMessage(`Falha na auditoria: ${cliFailureMessage(error)}`);
+    const detail = cliFailureMessage(error);
+    outputChannel.appendLine(`[${new Date().toISOString()}] falha em ${root}: ${detail}`);
+    const action = await vscode.window.showErrorMessage(
+      `Falha na auditoria: ${detail}`,
+      'Ver detalhes',
+    );
+    if (action === 'Ver detalhes') {
+      outputChannel.show(true);
+    }
   }
 }
 
@@ -303,7 +318,8 @@ export function activate(context: vscode.ExtensionContext): void {
   diagnosticCollection = vscode.languages.createDiagnosticCollection('vibe-coding-auditor');
   statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   statusBar.command = 'vibeCodingAuditor.openFinding';
-  context.subscriptions.push(diagnosticCollection, statusBar);
+  outputChannel = vscode.window.createOutputChannel('Vibe Coding Auditor');
+  context.subscriptions.push(diagnosticCollection, statusBar, outputChannel);
 
   context.subscriptions.push(
     vscode.commands.registerCommand('vibeCodingAuditor.audit', (uri?: vscode.Uri) => runAudit(uri)),

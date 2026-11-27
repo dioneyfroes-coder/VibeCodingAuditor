@@ -760,4 +760,13 @@ Não foram criados `Cargo.toml`, `auditor.example.toml`, `.gitignore`, diretóri
 - **Evidência reportada pelo usuário:** comando disponível sem `auditor.toml`; execução em modo descoberta sem violações de conformidade no Problems; barra de status/resumo de descoberta; auditoria com contrato válido exibiu diagnósticos no Problems. Observações de descoberta apareceram como múltiplos popups informativos.
 - **Alternativas rejeitadas:** declarar conclusão sem confirmação — proibido pelo plano; tratar popups informativos como bloqueio funcional — o usuário confirmou os critérios do checklist; o ruído de UX foi registrado como ressalva.
 - **Impacto:** documentação e status do roadmap atualizados. Nenhum código, regra, contrato, schema ou dependência alterado.
-- **Ressalvas:** observações de descoberta geram vários popups informativos na extensão (ruído de UX). Ajustes de apresentação do desktop permanecem fora desta etapa, conforme pedido do usuário.
+- **Ressalvas:** ajustes de apresentação do desktop permanecem fora desta etapa, conforme pedido do usuário.
+
+## E4.9.4 — Ruído de popups na extensão VS Code
+
+- **Data:** 27/11/2026
+- **Decisão:** em descoberta, registrar observações/limitações no canal de saída `Vibe Coding Auditor` e exibir um único `showInformationMessage` com ação “Ver observações”. Erros operacionais exibem um único `showErrorMessage` com ação “Ver detalhes” e são registrados no canal.
+- **Motivo:** o usuário confirmou que a descoberta sem contrato funcionou, mas gerou vários popups informativos, dificultando o uso.
+- **Alternativas rejeitadas:** manter popups por observação — ruído confirmado; remover todo aviso — esconderia o resultado; usar apenas status bar — perderia acesso fácil ao detalhe.
+- **Impacto:** apenas `extensions/vscode/src/extension.ts` e README da extensão; sem mudanças em regras, contrato, JSON, SQLite, CLI ou desktop. O `.vsix` foi reempacotado.
+- **Verificação:** `npm --prefix extensions/vscode test` = `0` (18) e `npm --prefix extensions/vscode run package` = `0`. Validação manual na host real do VS Code pendente após reinstalar o `.vsix`.

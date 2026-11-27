@@ -16,7 +16,7 @@ Estado consolidado das Etapas 0–10 e dos trabalhos posteriores. Decisões e es
 | 9 | Criar a extensão VS Code | Concluída em 25/11/2026 — `.vsix` gerado; diagnósticos conferem com a CLI; 82 testes passaram |
 | 10 | Expandir linguagens e recursos | Concluída em 25/11/2026; extensões adicionais nesta rodada: TypeScript/JavaScript e Python no núcleo. Demais opções avaliadas e diferidas |
 | 4 (nova fase) | Descoberta automática e Architecture Builder | Concluída em 27/11/2026 — descoberta, Builder, consistência, validação automatizada e validação manual desktop/VS Code confirmadas; ressalvas e UX registrados |
-| 5 (nova fase) | Suíte de testes E2E dedicada | Planejada — após fechamento da Etapa 4 |
+| 5 (nova fase) | Suíte de testes E2E dedicada | Concluída em 27/11/2026 — CLI, extensão, desktop e CI Windows verdes no run `46067832029` |
 
 Etapa 2 (confiabilidade do motor): concluída em 26/11/2026 — itens 2.1 a 2.8 verificados localmente no Windows e cobertos pelo workflow de CI, cuja primeira execução remota (`CI Windows` #1, commit `7a07286`) terminou com sucesso.
 
@@ -257,7 +257,7 @@ Objetivo: cobrir os fluxos que os testes atuais não exercitam em host real, sem
 - [x] Expor API mínima de observação (`getOutputLog`, `getLastRunMode`) apenas para testes; nenhuma regra é avaliada na superfície de teste.
 - [x] Falhas incluem o conteúdo do canal `Vibe Coding Auditor`; logs do Extension Host são herdados pelo stdout e capturados pelo CI.
 - [x] Verificação: `npm --prefix extensions/vscode test` = `0` (18 testes) e `npm --prefix extensions/vscode run test:e2e` = `0` (host VS Code 1.146.0 fixo por `VCA_VSCODE_VERSION`).
-- [ ] Limitação conhecida: contagem exata de popups (`um único aviso` com ação “Ver observações”) não é observável pela API do host; permanece no checklist manual já validado pelo usuário.
+- [x] Limitação conhecida: contagem exata de popups (`um único aviso` com ação “Ver observações”) não é observável pela API do host; permanece no checklist manual já validado pelo usuário.
 
 ### 5.3 — Desktop Tauri E2E (concluída em 27/11/2026)
 - [x] Adicionar WebDriverIO 9.33.1, `@wdio/tauri-service` 1.5.1 e script `npm --prefix apps/desktop run test:e2e`, separado do teste determinístico.
@@ -633,7 +633,7 @@ Nova fase iniciada em 26/11/2026 a partir de `PLANO_ETAPA_4_DESCOBERTA_E_ARCHITE
 - [x] Verificação final: `cargo fmt --all --check` = `0`, `cargo check --workspace` = `0`, `cargo test --workspace` = `0` (265 testes: 234 no núcleo, 10 unitários na CLI, 6 de integração na CLI e 15 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` = `0`, `git diff --check` = `0` (somente avisos LF/CRLF do OneDrive), `npm --prefix apps/desktop test` = `0` (33), `npm --prefix apps/desktop run build` = `0` e `npm --prefix extensions/vscode test` = `0` (12). Testes focados: `cargo test -p auditor-core --lib history::tests` = `0` (29), `cargo test -p auditor-cli --test cli history_` = `0` (2) e `cargo test -p auditor-desktop --lib` = `0` (15).
 - [x] Limitações explícitas: comparação entre duas descobertas é recusada; execuções legadas com identidade desconhecida não são comparáveis; o modo legado `compliance` decorre da origem histórica do registro; a extensão mostra observações como mensagens, sem painel próprio; `auditor init` continua gerando v1; os candidatos ainda não leem `package.json`, `pyproject.toml` ou `go.mod`.
 
-### Etapa 4.8 — Validação automatizada concluída em 26/11/2026; validação manual pendente
+### Etapa 4.8 — Validação automatizada e manual concluídas em 27/11/2026
 
 - [x] Após o usuário responder “prossiga”, dez fixtures foram criadas sob `tests/fixtures/projects/`: `discovery_rust_no_contract`, `discovery_ts_no_contract`, `discovery_python_no_contract`, `discovery_workspace`, `discovery_ambiguous`, `discovery_empty_project`, `builder_existing_project`, `builder_contract_v1`, `builder_contract_v2` e `builder_write_safety`. Nenhuma dependência Rust ou npm foi adicionada.
 - [x] `crates/auditor-cli/tests/fixtures.rs` executa a CLI como processo real duas vezes por fixture. Todas as saídas são determinísticas, trazem `mode: discovery`, `status: missing` e `findings: []`, não contêm `dep.not_allowed`/`dep.layer_not_allowed`, e a árvore de arquivos permanece idêntica. Hash SHA-256 agregado foi recalculado externamente antes/depois da auditoria nas sete fixtures de descoberta, com igualdade em todas.

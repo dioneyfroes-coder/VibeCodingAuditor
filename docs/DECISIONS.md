@@ -769,4 +769,4 @@ Não foram criados `Cargo.toml`, `auditor.example.toml`, `.gitignore`, diretóri
 - **Motivo:** o usuário confirmou que a descoberta sem contrato funcionou, mas gerou vários popups informativos, dificultando o uso.
 - **Alternativas rejeitadas:** manter popups por observação — ruído confirmado; remover todo aviso — esconderia o resultado; usar apenas status bar — perderia acesso fácil ao detalhe.
 - **Impacto:** apenas `extensions/vscode/src/extension.ts` e README da extensão; sem mudanças em regras, contrato, JSON, SQLite, CLI ou desktop. O `.vsix` foi reempacotado.
-- **Verificação:** `npm --prefix extensions/vscode test` = `0` (18) e `npm --prefix extensions/vscode run package` = `0`. Validação manual na host real do VS Code pendente após reinstalar o `.vsix`.
+- **Verificação:** `npm --prefix extensions/vscode test` = `0` (18) e `npm --prefix extensions/vscode run package` = `0`. Usuário confirmou em 27/11/2026 na host real do VS Code que a descoberta exibiu um único aviso e registrou observações/limitações no canal de saída.

@@ -583,7 +583,7 @@ Nova fase iniciada em 26/11/2026 a partir de `PLANO_ETAPA_4_DESCOBERTA_E_ARCHITE
 
 - [x] Motivo: na validação manual da host real do VS Code, a descoberta sem contrato gerou vários popups informativos. Impacto: apenas `extensions/vscode`; nenhuma regra, schema, contrato, SQLite, CLI Rust ou desktop alterado.
 - [x] Descoberta passou a escrever observações/limitações no canal de saída `Vibe Coding Auditor` e mostrar um único popup com ação “Ver observações”. Falhas operacionais também oferecem “Ver detalhes” e registram no canal.
-- [x] `npm --prefix extensions/vscode test` = `0` (18) e `npm --prefix extensions/vscode run package` = `0`. Pendente nova confirmação manual na host real do VS Code após reinstalar o `.vsix`.
+- [x] `npm --prefix extensions/vscode test` = `0` (18) e `npm --prefix extensions/vscode run package` = `0`. Usuário confirmou em 27/11/2026, após reinstalar o `.vsix` e recarregar a janela, que a descoberta mostra um único aviso e as observações no canal de saída `Vibe Coding Auditor`.
 
 ### Ajuste pós-4.8 — Nome da CLI e ajuda sem argumentos — 27/11/2026
 

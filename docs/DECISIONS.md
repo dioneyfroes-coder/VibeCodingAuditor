@@ -823,3 +823,13 @@ Não foram criados `Cargo.toml`, `auditor.example.toml`, `.gitignore`, diretóri
 - **Impacto:** nenhuma regra, contrato ou comportamento do app foi alterado. O serviço usa `tauri-driver` 2.1.0 (cargo) e MSEdgeDriver compatível com WebView2 158.0.4370.45, baixado automaticamente. A captura de logs foi desligada e a suíte troca explicitamente para a janela atual: sem isso o serviço consulta um plugin ausente em cada comando e derruba a sessão. `TAURI_DRIVER_PATH` é escape hatch para máquinas onde o bloqueio de executáveis impede `cargo install` em `~/.cargo/bin`. O npm reportou 25 vulnerabilidades (11 moderadas, 14 altas) em devDependencies transitivas do WDIO; registradas como limite conhecido, sem `npm audit fix --force`.
 - **Limitação:** seleção de pasta usa o campo de texto; o diálogo nativo continua smoke manual. Screenshots de falha ficam em `apps/desktop/e2e/artifacts/`, ignorado pelo Git.
 - **Verificação:** `node --check` nos três arquivos E2E = `0`; `npm --prefix apps/desktop run test:e2e` = `0` (5 testes) com `TAURI_DRIVER_PATH` definido.
+
+## E5.4 — CI Windows com suítes E2E
+
+- **Data:** 27/11/2026
+- **Decisão:** adicionar job `e2e` em `.github/workflows/ci.yml` com `needs: verify`, build de release da CLI e do app Tauri, caches oficiais (`actions/cache@v4`) para host VS Code, `tauri-driver` e MSEdgeDriver, e upload de artefatos em falha (`actions/upload-artifact@v4`).
+- **Motivo:** manter o job determinístico rápido separado das suítes que dependem de host gráfico, download e driver, preservando o mesmo conjunto de regras e binários reais.
+- **Alternativas rejeitadas:** workflow dedicado com triggers duplicados — mais superfície para divergência; retry das suítes inteiras — repetiria asserções funcionais e poderia esconder instabilidade real; adicionar ação de terceiros para retry — laço no bootstrap já atende sem nova dependência.
+- **Impacto:** nenhuma regra, contrato ou runtime alterado. O pin do driver usa `cargo install tauri-driver --version 2.1.0 --locked`, validado localmente. O cache do MSEdgeDriver é chaveado pela versão do WebView2 lida do registro, a mesma fonte usada pelo serviço WebDriver. Retries ficam apenas na instalação do driver (máximo de duas tentativas); timeout do job é 45 minutos.
+- **Limitação:** a execução do job e a estabilidade observada no GitHub Actions dependem do primeiro run remoto; localmente apenas o YAML e o comando de instalação foram validados.
+- **Verificação:** YAML carregado com `js-yaml` = `0` (jobs `verify` e `e2e`, `needs: verify`, 16 passos); `cargo install tauri-driver --version 2.1.0 --locked` em root temporário = `0`.

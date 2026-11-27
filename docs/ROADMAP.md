@@ -268,10 +268,14 @@ Objetivo: cobrir os fluxos que os testes atuais não exercitam em host real, sem
 - [x] Limitação conhecida: o diálogo nativo de pasta é smoke manual; o E2E troca a raiz pelo campo de texto. A instalação WDIO reportou 25 vulnerabilidades em devDependencies transitivas, registradas sem `npm audit fix --force`.
 - [x] Verificação: `npm --prefix apps/desktop run test:e2e` = `0` com `TAURI_DRIVER_PATH` apontando para o driver instalado fora do PATH (5 testes).
 
-### 5.4 — CI Windows E2E (planejada)
-- [ ] Integrar 5.1–5.3 no `.github/workflows/ci.yml` ou workflow dedicado.
-- [ ] Definir política de retries/artefatos/timeout.
-- [ ] Registrar estabilidade observada e limitações.
+### 5.4 — CI Windows E2E (concluída em 27/11/2026)
+- [x] Adicionar job `e2e` em `.github/workflows/ci.yml`, posterior ao job determinístico `verify`, em `windows-latest`.
+- [x] Compilar CLI release e aplicativo Tauri antes das três suítes E2E (CLI, extensão, desktop).
+- [x] Cachear host VS Code fixado, `tauri-driver` 2.1.0 e MSEdgeDriver pela versão do WebView2 detectada.
+- [x] Limitar retries a duas tentativas apenas na instalação do driver; asserções funcionais rodam uma vez. Timeout do job: 45 minutos.
+- [x] Publicar screenshots/logs em falha por 7 dias com `actions/upload-artifact@v4`.
+- [x] Verificação local: YAML interpretado com `js-yaml` (2 jobs, `needs: verify`, 16 passos); `cargo install tauri-driver --version 2.1.0 --locked` = `0` em root temporário. Execução real do job depende do GitHub Actions.
+- [ ] Limitação conhecida: a estabilidade do job no GitHub Actions só pode ser confirmada após o primeiro push com este workflow.
 
 ## Fechamento da primeira fase
 

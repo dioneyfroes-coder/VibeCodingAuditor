@@ -62,3 +62,110 @@ jobs:
       - name: Testar extensão VS Code
         working-directory: extensions/vscode
         run: npm test
+
+  e2e:
+    name: E2E Windows
+    needs: verify
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      VCA_VSCODE_VERSION: '1.146.0'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Fixar Rust 1.98.1
+        run: |
+          rustup toolchain install 1.98.1 --profile minimal
+          rustup override set 1.98.1
+
+      - name: Configurar Node 24.19.0
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: |
+            apps/desktop/package-lock.json
+            extensions/vscode/package-lock.json
+
+      - name: Instalar dependências da desktop
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Instalar dependências da extensão
+        working-directory: extensions/vscode
+        run: npm ci
+
+      - name: Compilar CLI de release
+        run: cargo build --release -p auditor-cli
+
+      - name: Compilar aplicativo desktop
+        run: npm --prefix apps/desktop run tauri build
+
+      - name: Cache do host VS Code
+        uses: actions/cache@v4
+        with:
+          path: extensions/vscode/.vscode-test
+          key: vscode-e2e-${{ env.VCA_VSCODE_VERSION }}-${{ runner.os }}
+
+      - name: Cache do tauri-driver
+        id: cache-tauri-driver
+        uses: actions/cache@v4
+        with:
+          path: C:\Users\runneradmin\.cargo\bin\tauri-driver.exe
+          key: tauri-driver-2.1.0-${{ runner.os }}
+
+      - name: Instalar tauri-driver 2.1.0 (bootstrap, até 2 tentativas)
+        if: steps.cache-tauri-driver.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          for ($attempt = 1; $attempt -le 2; $attempt++) {
+            cargo install tauri-driver --version 2.1.0 --locked
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($attempt -eq 2) { throw "Falha ao instalar tauri-driver" }
+            Start-Sleep -Seconds 5
+          }
+
+      - name: Detectar versão do WebView2
+        id: webview2
+        shell: pwsh
+        run: |
+          $paths = @(
+            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}',
+            'HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}',
+            'HKCU:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          )
+          $version = ''
+          foreach ($registryPath in $paths) {
+            $item = Get-ItemProperty -Path $registryPath -ErrorAction SilentlyContinue
+            if ($item -and $item.pv) { $version = $item.pv; break }
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Cache do MSEdgeDriver
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\msedgedriver
+          key: msedgedriver-${{ steps.webview2.outputs.version }}-${{ runner.os }}
+
+      - name: E2E da CLI
+        run: node --test tests/e2e/cli/cli.e2e.test.mjs
+
+      - name: E2E da extensão VS Code
+        run: npm --prefix extensions/vscode run test:e2e
+
+      - name: E2E do desktop Tauri
+        run: npm --prefix apps/desktop run test:e2e
+
+      - name: Publicar artefatos de falha
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-windows-falhas
+          path: |
+            apps/desktop/e2e/artifacts/**
+            apps/desktop/logs/**
+            extensions/vscode/.vscode-test/**/*.log
+          if-no-files-found: ignore
+          retention-days: 7

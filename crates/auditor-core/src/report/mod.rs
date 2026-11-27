@@ -479,6 +479,10 @@ impl DiscoveryReport {
                 "Relações observadas: {}",
                 self.candidates.observed_dependencies.len()
             ),
+            format!(
+                "Manifests reconhecidos: {}",
+                self.candidates.manifests.len()
+            ),
             format!("Ambiguidades: {}", self.candidates.ambiguities.len()),
             "Achados: nenhum (descoberta não emite achados de conformidade).".to_owned(),
             "Linguagens:".to_owned(),
@@ -513,6 +517,49 @@ impl DiscoveryReport {
             ));
             for evidence in &candidate.evidence {
                 lines.push(format!("      evidência: {evidence}"));
+            }
+        }
+
+        if !self.candidates.manifests.is_empty() {
+            lines.push(String::new());
+            lines.push("Manifests observados:".to_owned());
+            for manifest in &self.candidates.manifests {
+                lines.push(format!(
+                    "  - {} [{}] [{}]",
+                    manifest.path,
+                    manifest.ecosystem.as_str(),
+                    manifest.status.as_str()
+                ));
+                for package in &manifest.local_packages {
+                    let version = package.version.as_deref().unwrap_or("sem versão");
+                    lines.push(format!(
+                        "      pacote local: {} ({version}) em {}",
+                        package.name, package.source_path
+                    ));
+                    for evidence in &package.evidence {
+                        lines.push(format!("          evidência: {evidence}"));
+                    }
+                }
+                for dependency in &manifest.dependencies {
+                    let group = dependency.group.as_deref().unwrap_or("-");
+                    let position = match dependency.line {
+                        Some(line) => format!(" (linha {line})"),
+                        None => String::new(),
+                    };
+                    lines.push(format!(
+                        "      dependência: {} {} [{} / {} / grupo {}]{}",
+                        dependency.name,
+                        dependency.version,
+                        dependency.scope.as_str(),
+                        dependency.destination.as_str(),
+                        group,
+                        position
+                    ));
+                    lines.push(format!("          evidência: {}", dependency.evidence));
+                }
+                for limitation in &manifest.limitations {
+                    lines.push(format!("      limitação: {limitation}"));
+                }
             }
         }
 
@@ -574,6 +621,10 @@ impl DiscoveryReport {
                 "- Relações observadas: {}",
                 self.candidates.observed_dependencies.len()
             ),
+            format!(
+                "- Manifests reconhecidos: {}",
+                self.candidates.manifests.len()
+            ),
             format!("- Ambiguidades: {}", self.candidates.ambiguities.len()),
             "- Achados: nenhum (descoberta não emite achados de conformidade)".to_owned(),
             "- Linguagens:".to_owned(),
@@ -613,6 +664,52 @@ impl DiscoveryReport {
             lines.push("- **Confirmação:** necessária".to_owned());
             for evidence in &candidate.evidence {
                 lines.push(format!("- **Evidência:** {}", markdown_text(evidence)));
+            }
+        }
+
+        if !self.candidates.manifests.is_empty() {
+            lines.push(String::new());
+            lines.push("## Manifests observados".to_owned());
+            for manifest in &self.candidates.manifests {
+                lines.push(String::new());
+                lines.push(format!(
+                    "### `{}` [{}] [{}]",
+                    markdown_text(&manifest.path),
+                    manifest.ecosystem.as_str(),
+                    manifest.status.as_str()
+                ));
+                for package in &manifest.local_packages {
+                    let version = package.version.as_deref().unwrap_or("sem versão");
+                    lines.push(format!(
+                        "- **Pacote local:** {} ({version}) em `{}`",
+                        markdown_text(&package.name),
+                        markdown_text(&package.source_path)
+                    ));
+                    for evidence in &package.evidence {
+                        lines.push(format!("- **Evidência:** {}", markdown_text(evidence)));
+                    }
+                }
+                for dependency in &manifest.dependencies {
+                    let group = dependency.group.as_deref().unwrap_or("-");
+                    lines.push(format!(
+                        "- **Dependência:** `{}` = `{}` [{} / {} / grupo {}]",
+                        markdown_text(&dependency.name),
+                        markdown_text(&dependency.version),
+                        dependency.scope.as_str(),
+                        dependency.destination.as_str(),
+                        markdown_text(group)
+                    ));
+                    if let Some(line) = dependency.line {
+                        lines.push(format!("  - **Linha:** {line}"));
+                    }
+                    lines.push(format!(
+                        "  - **Evidência:** `{}`",
+                        markdown_text(&dependency.evidence)
+                    ));
+                }
+                for limitation in &manifest.limitations {
+                    lines.push(format!("- **Limitação:** {}", markdown_text(limitation)));
+                }
             }
         }
 
@@ -1119,6 +1216,7 @@ mod tests {
         for label in [
             "Módulos candidatos:",
             "Relações observadas:",
+            "Manifests reconhecidos:",
             "Ambiguidades:",
             "Linguagens:",
             "Limitações:",

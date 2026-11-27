@@ -6,9 +6,11 @@
 //! nunca por uma regra de conformidade.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use super::manifests::{ManifestDiscovery, ManifestObservation};
 use super::{Inventory, matches_pattern};
 use crate::analysis::{Analysis, DependencyKind};
 
@@ -126,6 +128,8 @@ pub struct DiscoveryCandidates {
     pub ambiguities: Vec<Ambiguity>,
     /// Extensões vistas e analisadores disponíveis.
     pub languages: Vec<LanguageCoverage>,
+    /// Manifests de outros ecossistemas lidos sem executar ferramentas.
+    pub manifests: Vec<ManifestObservation>,
     /// Limitações da descoberta, inclusive ausência de analisador.
     pub limitations: Vec<String>,
 }
@@ -154,15 +158,13 @@ pub fn build_candidates(inventory: &Inventory, analysis: &Analysis) -> Discovery
         ))
     });
 
+    let manifests: ManifestDiscovery = super::manifests::read_manifests(&inventory.root, &files);
+    for observation in &manifests.observations {
+        limitations.extend(observation.limitations.iter().cloned());
+    }
+    limitations.extend(manifests.limitations.iter().cloned());
     if analysis.workspace.is_none() {
         limitations.push("sem manifesto Cargo reconhecido: não há candidatos direct".to_owned());
-    }
-    for manifest in ["package.json", "pyproject.toml", "go.mod"] {
-        if inventory.root.join(manifest).is_file() {
-            limitations.push(format!(
-                "manifesto {manifest} presente, mas a descoberta ainda não extrai candidatos dele"
-            ));
-        }
     }
     limitations.push(
         "descoberta sem contrato inventaria somente extensões com analisador conhecido; outras linguagens exigem scan.include explícito no contrato"
@@ -176,6 +178,7 @@ pub fn build_candidates(inventory: &Inventory, analysis: &Analysis) -> Discovery
         observed_dependencies,
         ambiguities,
         languages: language_coverage(inventory),
+        manifests: manifests.observations,
         limitations,
     }
 }
@@ -203,15 +206,15 @@ fn direct_candidates(analysis: &Analysis, files: &BTreeSet<&str>) -> Vec<Candida
 }
 
 /// Diretório que contém o manifesto informado.
-fn manifest_directory(manifest_path: &str) -> String {
-    manifest_path
-        .strip_suffix("/Cargo.toml")
+pub(super) fn manifest_directory(manifest_path: &str) -> String {
+    Path::new(manifest_path)
+        .parent()
+        .map(|parent| parent.to_string_lossy().replace('\\', "/"))
         .unwrap_or_default()
-        .to_owned()
 }
 
 /// Prefixo de caminho sustentado pelos arquivos do pacote no inventário.
-fn package_path(directory: &str, files: &BTreeSet<&str>) -> String {
+pub(super) fn package_path(directory: &str, files: &BTreeSet<&str>) -> String {
     let source = if directory.is_empty() {
         "src".to_owned()
     } else {
@@ -535,7 +538,7 @@ fn language_coverage(inventory: &Inventory) -> Vec<LanguageCoverage> {
 }
 
 /// Analisador disponível para uma extensão, quando houver.
-fn analyzer_for(extension: &str) -> Option<&'static str> {
+pub(super) fn analyzer_for(extension: &str) -> Option<&'static str> {
     match extension {
         "rs" => Some("rust"),
         "ts" | "tsx" | "js" | "jsx" => Some("typescript_javascript"),
@@ -668,12 +671,21 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_manifests_are_reported_as_limitations() {
+    fn present_manifests_are_observed_instead_of_reported_as_unsupported() {
         let candidates = candidates_for("discovery_candidates");
 
-        assert!(candidates.limitations.iter().any(|limitation| {
-            limitation.contains("package.json") && limitation.contains("não extrai candidatos")
-        }));
+        assert!(
+            candidates
+                .manifests
+                .iter()
+                .any(|manifest| manifest.path == "package.json")
+        );
+        assert!(
+            candidates
+                .limitations
+                .iter()
+                .all(|limitation| !limitation.contains("ainda não extrai"))
+        );
     }
 
     #[test]

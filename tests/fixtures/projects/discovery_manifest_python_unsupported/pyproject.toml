@@ -1,0 +1,8 @@
+[tool.poetry]
+name = "legado"
+version = "0.1.0"
+description = "formato fora do escopo de extracao"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+requests = "^2.31"

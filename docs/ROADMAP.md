@@ -17,7 +17,7 @@ Estado consolidado das Etapas 0–10 e dos trabalhos posteriores. Decisões e es
 | 10 | Expandir linguagens e recursos | Concluída em 25/11/2026; extensões adicionais nesta rodada: TypeScript/JavaScript e Python no núcleo. Demais opções avaliadas e diferidas |
 | 4 (nova fase) | Descoberta automática e Architecture Builder | Concluída em 27/11/2026 — descoberta, Builder, consistência, validação automatizada e validação manual desktop/VS Code confirmadas; ressalvas e UX registrados |
 | 5 (nova fase) | Suíte de testes E2E dedicada | Concluída em 27/11/2026 — CLI, extensão, desktop e CI Windows verdes no run `46067832029` |
-| 6 (nova fase) | Amadurecimento arquitetural e distribuição | Em andamento — 6.0 baseline registrado em `docs/validation/etapa-6/baseline.md`; 6.1 documentação coerente concluída em 27/11/2026; 6.2–6.8 planejadas |
+| 6 (nova fase) | Amadurecimento arquitetural e distribuição | Em andamento — 6.0 baseline registrado em `docs/validation/etapa-6/baseline.md`; 6.1 documentação coerente e 6.2 descoberta multi-ecossistema concluídas em 27/11/2026; 6.3–6.8 planejadas |
 
 Etapa 2 (confiabilidade do motor): concluída em 26/11/2026 — itens 2.1 a 2.8 verificados localmente no Windows e cobertos pelo workflow de CI, cuja primeira execução remota (`CI Windows` #1, commit `7a07286`) terminou com sucesso.
 
@@ -711,9 +711,22 @@ Nova fase iniciada em 26/11/2026 a partir de `PLANO_ETAPA_4_DESCOBERTA_E_ARCHITE
 - [x] Verificação: `git diff --check` = `0` (apenas aviso LF/CRLF esperado do OneDrive em `AGENTS.md`), `cargo fmt --all --check` = `0`, `cargo check --workspace` = `0`, `cargo test --workspace` = `0` (277 testes), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` = `0`, `npm --prefix apps/desktop test` = `0` (39), `npm --prefix apps/desktop run build` = `0`, `npm --prefix extensions/vscode test` = `0` (18) e `npm --prefix extensions/vscode run package` = `0` (`.vsix` com 10 arquivos, 15,23 kB).
 - [x] Limitações explícitas: nenhuma dependência, workflow, contrato, manifesto ou regra foi alterado; vulnerabilidades e `actions/cache@v4` aguardam 6.6; bundle/instalador aguardam 6.7; E2E remoto continua no commit anterior aos dois commits documentais do HEAD.
 
+#### Etapa 6.2 — Descoberta de manifests multi-ecossistema — Concluída em 27/11/2026
+
+- [x] Módulo `crates/auditor-core/src/discovery/manifests.rs` lê `package.json`, `pyproject.toml` e `go.mod` na raiz e em subprojetos, sem executar scripts, ambientes, instaladores ou comandos do projeto; diretórios padrão ignorados e links simbólicos não são seguidos.
+- [x] `package.json`: extrai `name`, `version` e `dependencies`, `devDependencies`, `peerDependencies` e `optionalDependencies` sem misturar os papéis; reconhece workspaces em array ou `workspaces.packages` com diretórios literais e padrão final `/*`; manifestos malformados viram limitação localizada.
+- [x] Relações `workspace:` são registradas com `destination: local_workspace` e ligadas ao pacote local quando possível; padrões com `**`, `?`, `..` ou `*` fora da posição final viram limitação explícita. Nenhum script é executado.
+- [x] `pyproject.toml`: lê somente `[project]` no padrão PEP 621, com `name`, `version`, `dependencies` e `optional-dependencies` agrupados; Poetry/uv sem `[project]`, seções de gerenciador e versão dinâmica são limitações, não inferências.
+- [x] `go.mod`: lê `module`, `require` em linha ou bloco, `replace`, `exclude` e comentários; diretivas não compreendidas e blocos não fechados geram limitação com linha quando disponível. Nenhum arquivo `.go` passa a ter analisador.
+- [x] Tipos explícitos `ManifestObservation`, `ManifestEcosystem`, `ManifestStatus`, `LocalPackage`, `ManifestDependency`, `DependencyScope` e `DependencyDestination`, com caminho relativo, manifesto de origem e evidência curta; tudo em `candidates.manifests`, sem aprovar dependências ou gerar achados.
+- [x] Relatórios Texto, JSON e Markdown e a saída `analyze` passaram a mostrar os manifests; as limitações locais também aparecem na lista geral de limitações usada por desktop e extensão.
+- [x] Fixtures novas cobrem npm simples, workspace npm, `package.json` inválido, PEP 621 simples e com opcionais, Poetry fora de escopo, `go.mod` válido/parcial e projeto misto com manifests aninhados; `discovery_no_contract` cobre ausência. Fixtures são determinísticas e permanecem imutáveis após `audit`.
+- [x] Decisão `E6.2` registrada em `docs/DECISIONS.md` e documentação alinhada em `README.md`.
+- [x] Verificação: `git diff --check` = `0` (apenas avisos LF/CRLF esperados do OneDrive em arquivos Rust), `cargo fmt --all --check` = `0`, `cargo check --workspace` = `0`, `cargo test --workspace` = `0` (288 testes: 11 + 7 + 6 na CLI, 249 no núcleo e 15 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` = `0`, `npm --prefix apps/desktop test` = `0` (39), `npm --prefix apps/desktop run build` = `0`, `npm --prefix extensions/vscode test` = `0` (18) e `npm --prefix extensions/vscode run package` = `0` (`.vsix` com 10 arquivos, 15,23 kB).
+- [x] Limitações explícitas: nenhuma dependência, lockfile, workflow, `auditor.toml`, manifesto de projeto ou regra de conformidade foi alterado; o Builder ainda não transforma essas observações em sugestões editáveis, a resolução de imports/aliases permanece na 6.3, e arquivos Go continuam sem analisador.
+
 #### Subetapas seguintes — planejadas, não iniciadas
 
-- [ ] 6.2 — Descoberta de manifests multi-ecossistema (`package.json`, `pyproject.toml`, `go.mod`).
 - [ ] 6.3 — Resolução de imports, aliases e dependências externas.
 - [ ] 6.4 — Contrato v3: proposta de schema aprovada antes de qualquer implementação.
 - [ ] 6.5 — Autoauditoria multi-stack do próprio repositório.

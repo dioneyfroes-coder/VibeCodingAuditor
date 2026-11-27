@@ -15,6 +15,9 @@ use crate::contract::Contract;
 /// Candidatos de módulos e classificação neutra das relações observadas.
 pub mod candidates;
 
+/// Leitura declarativa de `package.json`, `pyproject.toml` e `go.mod`.
+pub mod manifests;
+
 /// Diretórios ignorados por padrão, em qualquer profundidade.
 pub const DEFAULT_IGNORED_DIRS: &[&str] = &[
     ".git",

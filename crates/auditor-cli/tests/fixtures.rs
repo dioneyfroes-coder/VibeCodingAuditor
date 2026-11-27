@@ -71,6 +71,13 @@ const DISCOVERY_FIXTURES: &[&str] = &[
     "discovery_workspace",
     "discovery_ambiguous",
     "discovery_empty_project",
+    "discovery_manifest_npm",
+    "discovery_manifest_npm_workspace",
+    "discovery_manifest_npm_invalid",
+    "discovery_manifest_python",
+    "discovery_manifest_python_unsupported",
+    "discovery_manifest_go",
+    "discovery_manifest_mixed",
     "builder_existing_project",
 ];
 
@@ -131,6 +138,42 @@ fn workspace_and_ambiguous_fixtures_expose_evidence_without_verdicts() {
     assert_eq!(ambiguous.0, 0, "{}", ambiguous.2);
     assert!(ambiguous.1.contains("\"ambiguities\""));
     assert!(ambiguous.1.contains("\"needs_confirmation\": true"));
+}
+
+#[test]
+fn manifest_fixtures_expose_evidence_without_verdicts() {
+    let cases = [
+        ("discovery_manifest_npm", "\"ecosystem\": \"npm\""),
+        ("discovery_manifest_python", "\"ecosystem\": \"python\""),
+        ("discovery_manifest_go", "\"ecosystem\": \"go\""),
+        (
+            "discovery_manifest_npm_invalid",
+            "\"status\": \"malformed\"",
+        ),
+        (
+            "discovery_manifest_python_unsupported",
+            "\"status\": \"unsupported\"",
+        ),
+    ];
+    for (name, expected) in cases {
+        let (code, stdout, stderr) = discovery_json(&fixture(name));
+        assert_eq!(code, 0, "{name}: {stderr}");
+        assert!(stdout.contains("\"manifests\""), "{name}");
+        assert!(stdout.contains(expected), "{name} deve conter {expected}");
+        assert!(!stdout.contains("dep.not_allowed"), "{name}");
+        assert!(!stdout.contains("dep.layer_not_allowed"), "{name}");
+    }
+
+    let workspace = discovery_json(&fixture("discovery_manifest_npm_workspace"));
+    assert_eq!(workspace.0, 0, "{}", workspace.2);
+    assert!(
+        workspace.1.contains("\"destination\": \"local_workspace\""),
+        "relação workspace local deve ser distinguida"
+    );
+    assert!(
+        workspace.1.contains("\"scope\": \"development\""),
+        "dependências de desenvolvimento não podem ser misturadas"
+    );
 }
 
 #[test]

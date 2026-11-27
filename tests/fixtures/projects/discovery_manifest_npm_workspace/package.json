@@ -1,0 +1,8 @@
+{
+  "name": "demo-root",
+  "version": "0.1.0",
+  "workspaces": [
+    "packages/*",
+    "packages/**/src/*"
+  ]
+}

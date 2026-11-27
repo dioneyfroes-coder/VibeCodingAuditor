@@ -273,6 +273,35 @@ fn analyze_project(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
                 candidate.path
             );
         }
+        println!("Manifests reconhecidos: {}", candidates.manifests.len());
+        for manifest in &candidates.manifests {
+            println!(
+                "  - {} [{}] [{}]",
+                manifest.path,
+                manifest.ecosystem.as_str(),
+                manifest.status.as_str()
+            );
+            for package in &manifest.local_packages {
+                let version = package.version.as_deref().unwrap_or("sem versão");
+                println!(
+                    "      pacote local: {} ({version}) em {}",
+                    package.name, package.source_path
+                );
+            }
+            for dependency in &manifest.dependencies {
+                println!(
+                    "      dependência: {} {} [{} / {}] — {}",
+                    dependency.name,
+                    dependency.version,
+                    dependency.scope.as_str(),
+                    dependency.destination.as_str(),
+                    dependency.evidence
+                );
+            }
+            for limitation in &manifest.limitations {
+                println!("      limitação: {limitation}");
+            }
+        }
         println!(
             "Relações classificadas: {}",
             candidates.observed_dependencies.len()

@@ -1,0 +1,19 @@
+{
+  "name": "loja-web",
+  "version": "1.4.0",
+  "dependencies": {
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0"
+  },
+  "peerDependencies": {
+    "react-dom": "^18.3.1"
+  },
+  "optionalDependencies": {
+    "fsevents": "^2.3.3"
+  },
+  "scripts": {
+    "build": "echo este-script-nao-deve-ser-executado"
+  }
+}

@@ -813,3 +813,13 @@ Não foram criados `Cargo.toml`, `auditor.example.toml`, `.gitignore`, diretóri
 - **Impacto:** uma devDependency fixada, um runner de teste, uma API mínima de observação na extensão e ignores para `.vscode-test`. Nenhuma regra, contrato, runtime da CLI ou desktop foi alterado. O npm reportou 2 vulnerabilidades moderadas em dependências transitivas do pacote de teste; registradas como limite conhecido, sem `npm audit fix --force` (mudança quebrável e fora do escopo).
 - **Limitação:** o runner não consegue contar popups do VS Code pela API; a ação “Ver observações” e o aviso único continuam validados manualmente, como em E4.9.1.
 - **Verificação:** `npm --prefix extensions/vscode test` = `0` (18 testes); `npm --prefix extensions/vscode run test:e2e` = `0` com VS Code 1.146.0. Falhas anexam o log do canal da extensão; stdout do host é preservado para artefatos de CI.
+
+## E5.3 — Desktop E2E em janela Tauri real
+
+- **Data:** 27/11/2026
+- **Decisão:** adicionar `webdriverio`, `@wdio/cli`, `@wdio/local-runner`, `@wdio/mocha-framework`, `@wdio/spec-reporter` e `@wdio/tauri-service` (todos 9.33.1, exceto o serviço 1.5.1) como devDependencies do desktop, com `e2e/wdio.conf.mjs`, `e2e/helpers.mjs`, `e2e/specs/desktop.spec.mjs` e script `test:e2e`.
+- **Motivo:** exercitar a janela real do Tauri sem duplicar regras do núcleo e sem tornar os testes determinísticos dependentes de driver gráfico.
+- **Alternativas rejeitadas:** ampliar `npm test` com E2E — ciclo rápido ficaria lento e instável; `driverProvider: 'embedded'` — exigiria `tauri-plugin-wdio-webdriver` e mudaria o runtime do app; simular eventos Tauri — não cobre o fluxo real; `driverProvider: 'official'` — alias obsoleto, substituído por `'external'`.
+- **Impacto:** nenhuma regra, contrato ou comportamento do app foi alterado. O serviço usa `tauri-driver` 2.1.0 (cargo) e MSEdgeDriver compatível com WebView2 158.0.4370.45, baixado automaticamente. A captura de logs foi desligada e a suíte troca explicitamente para a janela atual: sem isso o serviço consulta um plugin ausente em cada comando e derruba a sessão. `TAURI_DRIVER_PATH` é escape hatch para máquinas onde o bloqueio de executáveis impede `cargo install` em `~/.cargo/bin`. O npm reportou 25 vulnerabilidades (11 moderadas, 14 altas) em devDependencies transitivas do WDIO; registradas como limite conhecido, sem `npm audit fix --force`.
+- **Limitação:** seleção de pasta usa o campo de texto; o diálogo nativo continua smoke manual. Screenshots de falha ficam em `apps/desktop/e2e/artifacts/`, ignorado pelo Git.
+- **Verificação:** `node --check` nos três arquivos E2E = `0`; `npm --prefix apps/desktop run test:e2e` = `0` (5 testes) com `TAURI_DRIVER_PATH` definido.

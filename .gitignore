@@ -3,6 +3,8 @@ data/
 node_modules/
 apps/desktop/dist/
 apps/desktop/out/
+apps/desktop/e2e/artifacts/
+apps/desktop/logs/
 apps/desktop/src-tauri/gen/schemas/
 extensions/vscode/out/
 extensions/vscode/.vscode-test/

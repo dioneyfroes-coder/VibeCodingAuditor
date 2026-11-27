@@ -259,10 +259,14 @@ Objetivo: cobrir os fluxos que os testes atuais não exercitam em host real, sem
 - [x] Verificação: `npm --prefix extensions/vscode test` = `0` (18 testes) e `npm --prefix extensions/vscode run test:e2e` = `0` (host VS Code 1.146.0 fixo por `VCA_VSCODE_VERSION`).
 - [ ] Limitação conhecida: contagem exata de popups (`um único aviso` com ação “Ver observações”) não é observável pela API do host; permanece no checklist manual já validado pelo usuário.
 
-### 5.3 — Desktop Tauri E2E (planejada)
-- [ ] Adicionar `tauri-driver`/WebDriverIO e scripts de build+test.
-- [ ] Cobrir cenários 5.0/Desktop com app real.
-- [ ] Publicar screenshots/logs WebDriver em falha.
+### 5.3 — Desktop Tauri E2E (concluída em 27/11/2026)
+- [x] Adicionar WebDriverIO 9.33.1, `@wdio/tauri-service` 1.5.1 e script `npm --prefix apps/desktop run test:e2e`, separado do teste determinístico.
+- [x] Cobrir cenários 5.0/Desktop com o executável real `target/release/auditor-desktop.exe`: tema escuro, sem painéis iniciais, detecção/descoberta sem contrato, limpeza ao trocar raiz, auditoria com contrato, abas sem empilhamento, contrato e histórico local.
+- [x] Publicar screenshot em `apps/desktop/e2e/artifacts/` quando um teste falha; diretório ignorado pelo Git.
+- [x] Usar `driverProvider: 'external'` com `tauri-driver` 2.1.0 instalado via cargo, sem `tauri-plugin-wdio-webdriver` no app; `TAURI_DRIVER_PATH` permite ambientes onde o cargo não pode instalar no PATH.
+- [x] Evitar o loop de foco do serviço (plugin de foco ausente no modo externo) e desativar captura de logs que sobrecarregava o driver; selects e inputs são lidos da UI, sem regras reimplementadas.
+- [x] Limitação conhecida: o diálogo nativo de pasta é smoke manual; o E2E troca a raiz pelo campo de texto. A instalação WDIO reportou 25 vulnerabilidades em devDependencies transitivas, registradas sem `npm audit fix --force`.
+- [x] Verificação: `npm --prefix apps/desktop run test:e2e` = `0` com `TAURI_DRIVER_PATH` apontando para o driver instalado fora do PATH (5 testes).
 
 ### 5.4 — CI Windows E2E (planejada)
 - [ ] Integrar 5.1–5.3 no `.github/workflows/ci.yml` ou workflow dedicado.

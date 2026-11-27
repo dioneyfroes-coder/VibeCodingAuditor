@@ -144,10 +144,15 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
 
       - name: Cache do MSEdgeDriver
+        id: cache-msedgedriver
         uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}\msedgedriver
+          path: ${{ runner.temp }}\vca-msedgedriver
           key: msedgedriver-${{ steps.webview2.outputs.version }}-${{ runner.os }}
+
+      - name: Instalar MSEdgeDriver compatível com o WebView2
+        shell: pwsh
+        run: ./scripts/windows/install-msedgedriver.ps1 -EdgeVersion '${{ steps.webview2.outputs.version }}'
 
       - name: E2E da CLI
         run: node --test tests/e2e/cli/cli.e2e.test.mjs

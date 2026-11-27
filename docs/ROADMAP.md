@@ -272,10 +272,11 @@ Objetivo: cobrir os fluxos que os testes atuais não exercitam em host real, sem
 - [x] Adicionar job `e2e` em `.github/workflows/ci.yml`, posterior ao job determinístico `verify`, em `windows-latest`.
 - [x] Compilar CLI release e aplicativo Tauri antes das três suítes E2E (CLI, extensão, desktop).
 - [x] Cachear host VS Code fixado, `tauri-driver` 2.1.0 e MSEdgeDriver pela versão do WebView2 detectada.
+- [x] Instalar o MSEdgeDriver via `scripts/windows/install-msedgedriver.ps1` antes do E2E: extração compatível com Windows PowerShell 5.1 e driver no `GITHUB_PATH`. Isso corrige a falha observada no primeiro run remoto, onde o download interno do `@wdio/tauri-service` usou `Expand-Archive -Force` e uma sobrecarga de `ExtractToDirectory` inexistente no .NET Framework.
 - [x] Limitar retries a duas tentativas apenas na instalação do driver; asserções funcionais rodam uma vez. Timeout do job: 45 minutos.
 - [x] Publicar screenshots/logs em falha por 7 dias com `actions/upload-artifact@v4`.
-- [x] Verificação local: YAML interpretado com `js-yaml` (2 jobs, `needs: verify`, 16 passos); `cargo install tauri-driver --version 2.1.0 --locked` = `0` em root temporário. Execução real do job depende do GitHub Actions.
-- [ ] Limitação conhecida: a estabilidade do job no GitHub Actions só pode ser confirmada após o primeiro push com este workflow.
+- [x] Verificação local: YAML interpretado com `js-yaml` (2 jobs, `needs: verify`, 17 passos); `cargo install tauri-driver --version 2.1.0 --locked` = `0` em root temporário; script de instalação do MSEdgeDriver = `0` para as versões 157 e 158; E2E desktop = `0` (5 testes) com driver pré-instalado no PATH e download automático forçado a falhar.
+- [ ] Limitação conhecida: a estabilidade do job no GitHub Actions depende do segundo run remoto, após a correção do MSEdgeDriver.
 
 ## Fechamento da primeira fase
 

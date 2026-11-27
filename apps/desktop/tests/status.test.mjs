@@ -32,6 +32,10 @@ test('cada ação tem rótulo próprio na linha de status', () => {
   assert.equal(statusLine(graphStatus(4, 5)), 'Grafo: 4 módulos, 5 arestas');
   assert.equal(statusLine(contractStatus('abc')), 'Contrato: 3 caracteres lidos');
   assert.equal(statusLine(recordStatus(7)), 'Registro: execução #7 gravada');
+  assert.equal(
+    statusLine(recordStatus(8, 'descoberta (sem contrato)')),
+    'Registro: execução #8 gravada em modo descoberta (sem contrato)',
+  );
 });
 
 test('seleção de pasta informa o caminho e também o cancelamento', () => {

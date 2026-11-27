@@ -16,21 +16,24 @@ use rusqlite::types::Type;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::Serialize;
 
+use crate::analysis::AnalysisCoverage;
+use crate::audit::{DiscoveryReport, ExecutionMode, ProjectRun};
+use crate::contract::{self, load_contract};
 use crate::discovery::SkipReason;
 use crate::findings::{Finding, Severity};
-use crate::report::{AuditReport, ReportSummary, finding_location};
+use crate::report::{AuditReport, ReportSummary, SkipReasonSummary, finding_location};
 use crate::rules::{RULE_DEPENDENCY_NOT_ALLOWED, RULE_DEPENDENCY_UNRESOLVED};
 
 /// Caminho padrão do banco, relativo ao diretório de trabalho da CLI.
 pub const DEFAULT_DATABASE: &str = "data/auditor.db";
 
 /// Versão do schema de histórico suportada por esta versão do núcleo.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// Colunas persistidas de uma execução, na ordem usada nas consultas.
 const RUN_COLUMNS: &str = "id, recorded_at_unix, project_name, project_root, \
      schema_version, files_included, files_skipped, modules, packages, edges, \
-     findings, errors, warnings, infos, needs_review";
+     findings, errors, warnings, infos, needs_review, execution_mode, contract_identity";
 
 /// Migração inicial: tabelas de execuções, achados, limitações e schema.
 const MIGRATION_V1: &str = "
@@ -111,6 +114,16 @@ CREATE TABLE audit_coverage_skip_reasons (
 );
 ";
 
+/// Migração v3: modo explícito e identidade do contrato aprovado.
+///
+/// Linhas anteriores só podiam vir de `audit_project()`, que exige contrato;
+/// por isso recebem `compliance` por padrão. A identidade permanece nula:
+/// nenhum valor é inventado para execuções gravadas antes desta coluna.
+const MIGRATION_V3: &str = "
+ALTER TABLE audit_runs ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'compliance';
+ALTER TABLE audit_runs ADD COLUMN contract_identity TEXT;
+";
+
 /// Falha operacional ao abrir, migrar, gravar ou consultar o histórico.
 #[derive(Debug)]
 pub enum HistoryError {
@@ -147,6 +160,15 @@ pub enum HistoryError {
         /// Identificador solicitado.
         id: i64,
     },
+    /// As execuções não podem ser comparadas sem produzir uma conclusão enganosa.
+    Incompatible {
+        /// Identificador da linha de base.
+        before_id: i64,
+        /// Identificador da execução comparada.
+        after_id: i64,
+        /// Motivo legível da recusa.
+        reason: String,
+    },
     /// O relógio do sistema está anterior ao epoch Unix.
     Clock(std::time::SystemTimeError),
 }
@@ -172,6 +194,14 @@ impl fmt::Display for HistoryError {
                 "schema de histórico {found} não é suportado; este auditor aceita apenas {supported}"
             ),
             Self::NotFound { id } => write!(formatter, "execução {id} não encontrada"),
+            Self::Incompatible {
+                before_id,
+                after_id,
+                reason,
+            } => write!(
+                formatter,
+                "execuções #{before_id} e #{after_id} não são comparáveis: {reason}"
+            ),
             Self::Clock(source) => write!(formatter, "relógio do sistema inválido: {source}"),
         }
     }
@@ -183,7 +213,9 @@ impl Error for HistoryError {
             Self::Directory { source, .. } | Self::Root { source, .. } => Some(source),
             Self::Database { source, .. } => Some(source),
             Self::Clock(source) => Some(source),
-            Self::UnsupportedSchema { .. } | Self::NotFound { .. } => None,
+            Self::UnsupportedSchema { .. } | Self::NotFound { .. } | Self::Incompatible { .. } => {
+                None
+            }
         }
     }
 }
@@ -225,10 +257,14 @@ pub struct RunSummary {
     pub project_name: String,
     /// Raiz canonicalizada do projeto auditado.
     pub project_root: String,
-    /// Versão do schema do contrato usada na execução.
+    /// Versão do schema do contrato usada na execução; `0` em descoberta.
     pub schema_version: u32,
     /// Contagens da execução.
     pub summary: ReportSummary,
+    /// Modo explícito da execução.
+    pub execution_mode: ExecutionMode,
+    /// Identidade do contrato aprovado; ausente em descoberta e em registros legados.
+    pub contract_identity: Option<String>,
 }
 
 /// Extensão de código sem analisador gravada para uma execução.
@@ -300,6 +336,82 @@ pub struct ExecutionComparison {
     pub after_coverage: Option<StoredCoverage>,
 }
 
+/// Dados de uma execução preparados para gravação, sem conteúdo de arquivos.
+struct StoredExecution {
+    project: String,
+    schema_version: u32,
+    mode: ExecutionMode,
+    contract_identity: Option<String>,
+    summary: ReportSummary,
+    skip_summary: SkipReasonSummary,
+    findings: Vec<Finding>,
+    limitations: Vec<String>,
+    coverage: AnalysisCoverage,
+}
+
+impl StoredExecution {
+    /// Prepara um relatório de conformidade e descobre a identidade do contrato.
+    fn from_report(root: &Path, report: &AuditReport) -> Self {
+        let mode = report.mode;
+        let contract_identity = if mode == ExecutionMode::Compliance {
+            load_contract(&root.join("auditor.toml"))
+                .ok()
+                .map(|contract| contract::contract_identity(&contract))
+        } else {
+            None
+        };
+        Self {
+            project: report.project.clone(),
+            schema_version: report.schema_version,
+            mode,
+            contract_identity,
+            summary: report.summary,
+            skip_summary: report.skip_summary.clone(),
+            findings: report.findings.clone(),
+            limitations: report.limitations.clone(),
+            coverage: report.coverage.clone(),
+        }
+    }
+
+    /// Prepara a descoberta sem transformar observações em achados de regra.
+    fn from_discovery(root: &Path, report: &DiscoveryReport) -> Self {
+        let mut limitations = report.analysis.limitations.clone();
+        limitations.extend(report.candidates.limitations.iter().cloned());
+        limitations.sort();
+        limitations.dedup();
+        Self {
+            project: root
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("sem-contrato")
+                .to_owned(),
+            schema_version: 0,
+            mode: ExecutionMode::Discovery,
+            contract_identity: None,
+            summary: ReportSummary {
+                files_included: report.inventory.files.len(),
+                files_skipped: report.inventory.skipped.len(),
+                modules: report.candidates.candidate_modules.len(),
+                packages: report
+                    .analysis
+                    .workspace
+                    .as_ref()
+                    .map_or(0, |workspace| workspace.packages.len()),
+                edges: report.analysis.edges.len(),
+                findings: 0,
+                errors: 0,
+                warnings: 0,
+                infos: 0,
+                needs_review: 0,
+            },
+            skip_summary: report.skip_summary.clone(),
+            findings: Vec::new(),
+            limitations,
+            coverage: report.analysis.coverage.clone(),
+        }
+    }
+}
+
 /// Conexão com o banco de histórico local.
 pub struct History {
     path: PathBuf,
@@ -340,16 +452,26 @@ impl History {
         &self.path
     }
 
-    /// Executa a auditoria e grava o resultado com a hora atual.
+    /// Grava um relatório de conformidade com a hora atual.
     pub fn record(&mut self, root: &Path, report: &AuditReport) -> Result<i64, HistoryError> {
-        let recorded_at_unix = i64::try_from(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_err(HistoryError::Clock)?
-                .as_secs(),
-        )
-        .unwrap_or(i64::MAX);
-        self.record_at(root, report, recorded_at_unix)
+        self.record_at(root, report, now_unix()?)
+    }
+
+    /// Grava uma execução discriminada com a hora atual, em qualquer dos dois modos.
+    pub fn record_run(&mut self, root: &Path, run: &ProjectRun) -> Result<i64, HistoryError> {
+        match run {
+            ProjectRun::Compliance(compliance) => self.record(root, &compliance.report),
+            ProjectRun::Discovery(discovery) => self.record_discovery(root, discovery),
+        }
+    }
+
+    /// Grava uma descoberta com a hora atual, sem achados de conformidade.
+    pub fn record_discovery(
+        &mut self,
+        root: &Path,
+        report: &DiscoveryReport,
+    ) -> Result<i64, HistoryError> {
+        self.record_discovery_at(root, report, now_unix()?)
     }
 
     /// Lista execuções da mais recente para a mais antiga.
@@ -403,6 +525,38 @@ impl History {
         })
     }
 
+    /// Bloqueia comparações que não representam a mesma métrica de conformidade.
+    fn ensure_comparable(
+        &self,
+        before: &RunSummary,
+        after: &RunSummary,
+        before_id: i64,
+        after_id: i64,
+    ) -> Result<(), HistoryError> {
+        let refuse = |reason: String| HistoryError::Incompatible {
+            before_id,
+            after_id,
+            reason,
+        };
+        if before.execution_mode != after.execution_mode {
+            return Err(refuse("as execuções usam modos diferentes".to_owned()));
+        }
+        if before.execution_mode == ExecutionMode::Discovery {
+            return Err(refuse(
+                "descoberta não produz achados de conformidade para comparar".to_owned(),
+            ));
+        }
+        match (&before.contract_identity, &after.contract_identity) {
+            (None, _) | (_, None) => Err(refuse(
+                "identidade do contrato desconhecida em uma das execuções".to_owned(),
+            )),
+            (Some(left), Some(right)) if left != right => Err(refuse(format!(
+                "as execuções usam contratos incompatíveis ({left} e {right})"
+            ))),
+            _ => Ok(()),
+        }
+    }
+
     /// Compara duas execuções e classifica os achados como novos, resolvidos ou persistentes.
     pub fn compare(
         &self,
@@ -411,6 +565,7 @@ impl History {
     ) -> Result<ExecutionComparison, HistoryError> {
         let before = self.get(before_id)?;
         let after = self.get(after_id)?;
+        self.ensure_comparable(&before.run, &after.run, before_id, after_id)?;
         let before_ids: BTreeSet<&str> = before
             .findings
             .iter()
@@ -448,11 +603,33 @@ impl History {
         })
     }
 
-    /// Grava uma execução com instante explícito, usado também nos testes.
+    /// Grava um relatório com instante explícito, usado também nos testes.
     fn record_at(
         &mut self,
         root: &Path,
         report: &AuditReport,
+        recorded_at_unix: i64,
+    ) -> Result<i64, HistoryError> {
+        let execution = StoredExecution::from_report(root, report);
+        self.store_at(root, &execution, recorded_at_unix)
+    }
+
+    /// Grava uma descoberta com instante explícito, usada nos testes.
+    fn record_discovery_at(
+        &mut self,
+        root: &Path,
+        report: &DiscoveryReport,
+        recorded_at_unix: i64,
+    ) -> Result<i64, HistoryError> {
+        let execution = StoredExecution::from_discovery(root, report);
+        self.store_at(root, &execution, recorded_at_unix)
+    }
+
+    /// Persiste os dados já normalizados pelo núcleo em uma única transação.
+    fn store_at(
+        &mut self,
+        root: &Path,
+        execution: &StoredExecution,
         recorded_at_unix: i64,
     ) -> Result<i64, HistoryError> {
         let canonical_root = fs::canonicalize(root).map_err(|source| HistoryError::Root {
@@ -470,29 +647,32 @@ impl History {
                 "INSERT INTO audit_runs (
                     recorded_at_unix, project_name, project_root, schema_version,
                     files_included, files_skipped, modules, packages, edges,
-                    findings, errors, warnings, infos, needs_review
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                    findings, errors, warnings, infos, needs_review,
+                    execution_mode, contract_identity
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
                 params![
                     recorded_at_unix,
-                    report.project,
+                    execution.project,
                     display_root(&canonical_root),
-                    i64::from(report.schema_version),
-                    i64::try_from(report.summary.files_included).unwrap_or(i64::MAX),
-                    i64::try_from(report.summary.files_skipped).unwrap_or(i64::MAX),
-                    i64::try_from(report.summary.modules).unwrap_or(i64::MAX),
-                    i64::try_from(report.summary.packages).unwrap_or(i64::MAX),
-                    i64::try_from(report.summary.edges).unwrap_or(i64::MAX),
-                    i64::try_from(report.summary.findings).unwrap_or(i64::MAX),
-                    i64::try_from(report.summary.errors).unwrap_or(i64::MAX),
-                    i64::try_from(report.summary.warnings).unwrap_or(i64::MAX),
-                    i64::try_from(report.summary.infos).unwrap_or(i64::MAX),
-                    i64::try_from(report.summary.needs_review).unwrap_or(i64::MAX),
+                    i64::from(execution.schema_version),
+                    i64::try_from(execution.summary.files_included).unwrap_or(i64::MAX),
+                    i64::try_from(execution.summary.files_skipped).unwrap_or(i64::MAX),
+                    i64::try_from(execution.summary.modules).unwrap_or(i64::MAX),
+                    i64::try_from(execution.summary.packages).unwrap_or(i64::MAX),
+                    i64::try_from(execution.summary.edges).unwrap_or(i64::MAX),
+                    i64::try_from(execution.summary.findings).unwrap_or(i64::MAX),
+                    i64::try_from(execution.summary.errors).unwrap_or(i64::MAX),
+                    i64::try_from(execution.summary.warnings).unwrap_or(i64::MAX),
+                    i64::try_from(execution.summary.infos).unwrap_or(i64::MAX),
+                    i64::try_from(execution.summary.needs_review).unwrap_or(i64::MAX),
+                    execution.mode.as_str(),
+                    execution.contract_identity,
                 ],
             )
             .map_err(|source| database_error(&database_path, source))?;
         let run_id = transaction.last_insert_rowid();
 
-        for finding in &report.findings {
+        for finding in &execution.findings {
             transaction
                 .execute(
                     "INSERT INTO audit_findings (
@@ -519,7 +699,7 @@ impl History {
                 .map_err(|source| database_error(&database_path, source))?;
         }
 
-        for limitation in &report.limitations {
+        for limitation in &execution.limitations {
             transaction
                 .execute(
                     "INSERT INTO audit_limitations (run_id, message) VALUES (?1, ?2)",
@@ -537,15 +717,15 @@ impl History {
                  ) VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![
                     run_id,
-                    count(report.coverage.code_files_included),
-                    count(report.coverage.code_files_analyzed),
-                    count(report.coverage.code_files_not_analyzed),
-                    i64::from(report.coverage.partial),
+                    count(execution.coverage.code_files_included),
+                    count(execution.coverage.code_files_analyzed),
+                    count(execution.coverage.code_files_not_analyzed),
+                    i64::from(execution.coverage.partial),
                 ],
             )
             .map_err(|source| database_error(&database_path, source))?;
 
-        for extension in &report.coverage.unsupported_code_extensions {
+        for extension in &execution.coverage.unsupported_code_extensions {
             transaction
                 .execute(
                     "INSERT INTO audit_coverage_unsupported_extensions (run_id, extension, files)
@@ -556,7 +736,7 @@ impl History {
         }
 
         for (position, reason) in SkipReason::ALL.iter().enumerate() {
-            let reason_count = report
+            let reason_count = execution
                 .skip_summary
                 .reasons
                 .iter()
@@ -617,10 +797,14 @@ impl History {
             });
         }
 
-        let pending: Vec<(i64, &str)> = [(1_i64, MIGRATION_V1), (2_i64, MIGRATION_V2)]
-            .into_iter()
-            .filter(|(version, _)| found.is_none_or(|applied| *version > applied))
-            .collect();
+        let pending: Vec<(i64, &str)> = [
+            (1_i64, MIGRATION_V1),
+            (2_i64, MIGRATION_V2),
+            (3_i64, MIGRATION_V3),
+        ]
+        .into_iter()
+        .filter(|(version, _)| found.is_none_or(|applied| *version > applied))
+        .collect();
         if pending.is_empty() {
             return Ok(());
         }
@@ -752,6 +936,16 @@ impl History {
     /// Constrói um resumo a partir de uma linha da tabela `audit_runs`.
     fn read_run(row: &Row<'_>) -> rusqlite::Result<RunSummary> {
         let recorded_at_unix = row.get(1)?;
+        let mode_text: String = row.get(15)?;
+        let mode = ExecutionMode::from_stored(&mode_text).ok_or_else(|| {
+            rusqlite::Error::FromSqlConversionFailure(
+                15,
+                Type::Text,
+                Box::new(std::io::Error::other(format!(
+                    "modo de execução desconhecido: {mode_text}"
+                ))),
+            )
+        })?;
         Ok(RunSummary {
             id: row.get(0)?,
             recorded_at_unix,
@@ -771,6 +965,8 @@ impl History {
                 infos: read_usize(row, 13)?,
                 needs_review: read_usize(row, 14)?,
             },
+            execution_mode: mode,
+            contract_identity: row.get(16)?,
         })
     }
 
@@ -802,6 +998,17 @@ impl History {
             confidence: row.get(11)?,
         })
     }
+}
+
+/// Instante atual em segundos desde o epoch Unix, para gravações explícitas.
+fn now_unix() -> Result<i64, HistoryError> {
+    Ok(i64::try_from(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(HistoryError::Clock)?
+            .as_secs(),
+    )
+    .unwrap_or(i64::MAX))
 }
 
 /// Cria um erro de banco que identifica o arquivo afetado.
@@ -844,7 +1051,9 @@ pub fn render_run_list(runs: &[RunSummary]) -> String {
             run.id, run.recorded_at, run.project_name, run.project_root
         ));
         lines.push(format!(
-            "      schema v{} | {}",
+            "      modo {} | {} | schema v{} | {}",
+            mode_phrase(run.execution_mode),
+            contract_phrase(run.execution_mode, run.contract_identity.as_deref()),
             run.schema_version,
             summary_phrase(&run.summary)
         ));
@@ -858,6 +1067,11 @@ pub fn render_run_detail(detail: &RunDetail) -> String {
     let mut lines = vec![
         format!("Execução #{}", run.id),
         format!("Data: {}", run.recorded_at),
+        format!("Modo: {}", mode_phrase(run.execution_mode)),
+        format!(
+            "Contrato: {}",
+            contract_phrase(run.execution_mode, run.contract_identity.as_deref())
+        ),
         format!("Projeto: {}", run.project_name),
         format!("Raiz: {}", run.project_root),
         format!("Schema do contrato: v{}", run.schema_version),
@@ -974,6 +1188,23 @@ pub fn render_comparison(comparison: &ExecutionComparison) -> String {
 }
 
 /// Resume as contagens de um relatório em uma frase determinística.
+/// Rótulo estável do modo na saída do histórico.
+fn mode_phrase(mode: ExecutionMode) -> &'static str {
+    match mode {
+        ExecutionMode::Discovery => "descoberta (sem contrato)",
+        ExecutionMode::Compliance => "conformidade",
+    }
+}
+
+/// Identidade exibida sem transformar ausência em contrato válido.
+fn contract_phrase(mode: ExecutionMode, identity: Option<&str>) -> String {
+    match (mode, identity) {
+        (ExecutionMode::Discovery, _) => "sem contrato".to_owned(),
+        (ExecutionMode::Compliance, Some(identity)) => format!("identidade {identity}"),
+        (ExecutionMode::Compliance, None) => "identidade desconhecida".to_owned(),
+    }
+}
+
 fn summary_phrase(summary: &ReportSummary) -> String {
     format!(
         "{} ({} erros, {} avisos, {} informações, {} revisões)",
@@ -1289,9 +1520,23 @@ mod tests {
             .join("../../tests/fixtures/projects/partial_coverage")
     }
 
+    /// Raiz da fixture sem contrato, usada para gravar descoberta.
+    fn discovery_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/projects/discovery_no_contract")
+    }
+
     /// Relatório real com cobertura parcial, usado nos testes de migração.
     fn partial_coverage_report() -> AuditReport {
         audit_project(&partial_coverage_root()).expect("partial fixture audit must succeed")
+    }
+
+    /// Identidade conhecida do contrato da fixture de cobertura parcial.
+    fn partial_coverage_identity() -> String {
+        let contract =
+            crate::contract::load_contract(&partial_coverage_root().join("auditor.toml"))
+                .expect("partial fixture contract must load");
+        crate::contract::contract_identity(&contract)
     }
 
     /// Cria um banco já no schema v1 com uma execução simples.
@@ -1347,8 +1592,46 @@ mod tests {
             .expect("run count must be readable")
     }
 
+    /// Cria um banco já no schema v2 com uma execução simples.
+    fn create_version_two_database(path: &Path) -> i64 {
+        let connection = Connection::open(path).expect("legacy database must open");
+        connection
+            .execute_batch(MIGRATION_V1)
+            .expect("legacy v1 schema must be created");
+        connection
+            .execute_batch(MIGRATION_V2)
+            .expect("legacy v2 schema must be created");
+        connection
+            .execute(
+                "CREATE TABLE schema_migrations (
+                    version INTEGER PRIMARY KEY,
+                    applied_at_unix INTEGER NOT NULL
+                 )",
+                [],
+            )
+            .expect("migration control table must be created");
+        connection
+            .execute(
+                "INSERT INTO schema_migrations (version, applied_at_unix)
+                 VALUES (1, 0), (2, 0)",
+                [],
+            )
+            .expect("legacy versions must be registered");
+        connection
+            .execute(
+                "INSERT INTO audit_runs (
+                    recorded_at_unix, project_name, project_root, schema_version,
+                    files_included, files_skipped, modules, packages, edges,
+                    findings, errors, warnings, infos, needs_review
+                 ) VALUES (1700000000, 'legado-v2', 'C:/projeto', 2, 2, 1, 1, 0, 0, 0, 0, 0, 0, 0)",
+                [],
+            )
+            .expect("legacy run must be inserted");
+        connection.last_insert_rowid()
+    }
+
     #[test]
-    fn version_one_database_is_migrated_to_version_two_without_losing_runs() {
+    fn version_one_database_is_migrated_to_current_version_without_losing_runs() {
         let database = TestDatabase::new();
         let run_id = create_version_one_database(&database.path);
 
@@ -1358,10 +1641,12 @@ mod tests {
                 .get(run_id)
                 .expect("legacy run must remain readable after migration");
             assert!(detail.coverage.is_none());
+            assert_eq!(detail.run.execution_mode, ExecutionMode::Compliance);
+            assert_eq!(detail.run.contract_identity, None);
         }
         drop(database.open());
 
-        assert_eq!(applied_schema_version(&database.path), 2);
+        assert_eq!(applied_schema_version(&database.path), SCHEMA_VERSION);
         assert_eq!(legacy_run_count(&database.path), 1);
         assert_eq!(
             database
@@ -1371,6 +1656,147 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn version_two_database_is_migrated_to_version_three_without_losing_runs() {
+        let database = TestDatabase::new();
+        let run_id = create_version_two_database(&database.path);
+
+        {
+            let history = database.open();
+            let detail = history
+                .get(run_id)
+                .expect("legacy run must remain readable after migration");
+            assert_eq!(detail.run.project_name, "legado-v2");
+            assert_eq!(detail.run.execution_mode, ExecutionMode::Compliance);
+            assert_eq!(detail.run.contract_identity, None);
+        }
+        drop(database.open());
+
+        assert_eq!(applied_schema_version(&database.path), 3);
+        assert_eq!(legacy_run_count(&database.path), 1);
+    }
+
+    #[test]
+    fn discovery_run_is_recorded_with_explicit_mode_and_no_contract_identity() {
+        let database = TestDatabase::new();
+        let root = discovery_root();
+        let run = crate::audit::project_run(&root).expect("discovery must succeed");
+        let mut history = database.open();
+
+        let id = history
+            .record_run(&root, &run)
+            .expect("discovery run must be recorded");
+        let detail = history.get(id).expect("recorded run must be readable");
+
+        assert_eq!(detail.run.execution_mode, ExecutionMode::Discovery);
+        assert_eq!(detail.run.contract_identity, None);
+        assert_eq!(detail.run.schema_version, 0);
+        assert!(detail.findings.is_empty());
+        assert!(render_run_detail(&detail).contains("Modo: descoberta"));
+        assert!(
+            render_run_list(&history.list(None, 10).expect("list must succeed"))
+                .contains("descoberta")
+        );
+    }
+
+    #[test]
+    fn compliance_run_records_the_identity_of_the_approved_contract() {
+        let database = TestDatabase::new();
+        let root = project_root();
+        let mut history = database.open();
+        let id = history
+            .record(&root, &fixture_report())
+            .expect("compliance run must be recorded");
+
+        let detail = history.get(id).expect("recorded run must be readable");
+        let contract =
+            crate::contract::load_contract(&root.join("auditor.toml")).expect("contract must load");
+        let expected = crate::contract::contract_identity(&contract);
+        assert_eq!(detail.run.execution_mode, ExecutionMode::Compliance);
+        assert_eq!(
+            detail.run.contract_identity.as_deref(),
+            Some(expected.as_str())
+        );
+        assert!(render_run_detail(&detail).contains("Contrato:"));
+    }
+
+    #[test]
+    fn comparison_rejects_runs_from_different_modes() {
+        let database = TestDatabase::new();
+        let compliance_root = project_root();
+        let discovery_root = discovery_root();
+        let discovery = crate::audit::project_run(&discovery_root).expect("discovery must succeed");
+        let mut history = database.open();
+        let compliance_id = history
+            .record(&compliance_root, &fixture_report())
+            .expect("compliance must be recorded");
+        let discovery_id = history
+            .record_run(&discovery_root, &discovery)
+            .expect("discovery must be recorded");
+
+        let error = history
+            .compare(compliance_id, discovery_id)
+            .expect_err("modes must not be compared");
+        assert!(matches!(error, HistoryError::Incompatible { .. }));
+        assert!(error.to_string().contains("modos"), "{error}");
+    }
+
+    #[test]
+    fn comparison_rejects_two_discovery_runs() {
+        let database = TestDatabase::new();
+        let root = discovery_root();
+        let discovery = crate::audit::project_run(&root).expect("discovery must succeed");
+        let mut history = database.open();
+        let before = history
+            .record_run(&root, &discovery)
+            .expect("first discovery must be recorded");
+        let after = history
+            .record_run(&root, &discovery)
+            .expect("second discovery must be recorded");
+
+        let error = history
+            .compare(before, after)
+            .expect_err("discovery runs must not be compared");
+        assert!(matches!(error, HistoryError::Incompatible { .. }));
+        assert!(error.to_string().contains("descoberta"), "{error}");
+    }
+
+    #[test]
+    fn comparison_rejects_legacy_run_with_unknown_identity() {
+        let database = TestDatabase::new();
+        let legacy_id = create_version_two_database(&database.path);
+        let mut history = database.open();
+        let current_id = history
+            .record(&project_root(), &fixture_report())
+            .expect("current run must be recorded");
+
+        let error = history
+            .compare(legacy_id, current_id)
+            .expect_err("unknown identity must block comparison");
+        assert!(matches!(error, HistoryError::Incompatible { .. }));
+        assert!(error.to_string().contains("identidade"), "{error}");
+    }
+
+    #[test]
+    fn comparison_rejects_different_contract_identities() {
+        let database = TestDatabase::new();
+        let mut history = database.open();
+        let first_id = history
+            .record(&project_root(), &fixture_report())
+            .expect("first contract must be recorded");
+        let other_root = layer_fixture_root();
+        let other_report = audit_project(&other_root).expect("layer fixture audit must succeed");
+        let second_id = history
+            .record(&other_root, &other_report)
+            .expect("second contract must be recorded");
+
+        let error = history
+            .compare(first_id, second_id)
+            .expect_err("different contracts must not be compared");
+        assert!(matches!(error, HistoryError::Incompatible { .. }));
+        assert!(error.to_string().contains("contrato"), "{error}");
     }
 
     #[test]
@@ -1478,6 +1904,17 @@ mod tests {
     fn comparison_marks_legacy_runs_without_coverage_as_missing_data() {
         let database = TestDatabase::new();
         let legacy_id = create_version_one_database(&database.path);
+        drop(database.open());
+        // A linha legada recebe a identidade conhecida para que a comparação
+        // continue válida; o teste verifica apenas a ausência de cobertura.
+        let connection = Connection::open(&database.path).expect("database must open");
+        connection
+            .execute(
+                "UPDATE audit_runs SET contract_identity = ?1 WHERE id = ?2",
+                params![partial_coverage_identity(), legacy_id],
+            )
+            .expect("legacy identity must be set");
+        drop(connection);
         let mut history = database.open();
         let current_id = history
             .record_at(
@@ -1736,7 +2173,7 @@ mod tests {
         let connection = Connection::open(&database.path).expect("database must exist");
         connection
             .execute(
-                "UPDATE schema_migrations SET version = 3 WHERE version = 1",
+                "UPDATE schema_migrations SET version = 4 WHERE version = 1",
                 [],
             )
             .expect("schema version must be changed");
@@ -1748,8 +2185,8 @@ mod tests {
         assert!(matches!(
             error,
             HistoryError::UnsupportedSchema {
-                found: 3,
-                supported: 2
+                found: 4,
+                supported: 3
             }
         ));
     }

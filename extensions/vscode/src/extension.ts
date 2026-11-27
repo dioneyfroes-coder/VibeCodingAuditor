@@ -1,8 +1,9 @@
-//! Extensão VS Code: converte o relatório da CLI em diagnósticos do editor.
+//! Extensão VS Code: converte a resposta da CLI em diagnósticos ou observações.
 //!
 //! Nenhuma regra é avaliada aqui. A extensão invoca o executável
-//! `vibe-coding-auditor`, aceita os códigos 0 e 1 da CLI e transforma o
-//! `AuditReport` recebido em diagnósticos navegáveis.
+//! `vibe-coding-auditor`, aceita os códigos 0 e 1 da CLI e usa o `mode`
+//! explícito do JSON para decidir entre diagnósticos de conformidade e
+//! mensagens informativas de descoberta.
 
 import * as path from 'node:path';
 import { existsSync } from 'node:fs';
@@ -10,12 +11,24 @@ import { spawn } from 'node:child_process';
 
 import * as vscode from 'vscode';
 
-import { AuditReport, DiagnosticSeverityName, Finding, buildDiagnostics } from './model';
+import {
+  CliRun,
+  ComplianceRun,
+  DiagnosticSeverityName,
+  DiscoveryRun,
+  Finding,
+  buildDiagnostics,
+  discoveryMessages,
+  hasViolationDiagnostics,
+  modeLabel,
+  parseCliRun,
+  runSummaryMessage,
+} from './model';
 
-/// Estado da última auditoria, guardado no escopo do workspace.
-interface StoredAudit {
+/// Estado da última execução, guardado no escopo do workspace.
+interface StoredRun {
   root: string;
-  report: AuditReport;
+  run: CliRun;
   recordedAt: string;
 }
 
@@ -34,7 +47,7 @@ interface FindingPick extends vscode.QuickPickItem {
 let extensionContext!: vscode.ExtensionContext;
 let diagnosticCollection!: vscode.DiagnosticCollection;
 let statusBar!: vscode.StatusBarItem;
-let lastAudit: StoredAudit | undefined;
+let lastRun: StoredRun | undefined;
 
 /// Raiz da primeira pasta aberta no workspace.
 function workspaceRoot(): string | undefined {
@@ -55,31 +68,41 @@ function diagnosticSeverity(name: DiagnosticSeverityName): vscode.DiagnosticSeve
   }
 }
 
-/// Atualiza o item da barra de status com o estado da última auditoria.
+/// Atualiza o item da barra de status com o modo e o resumo da última execução.
 function updateStatus(): void {
-  if (!lastAudit) {
+  if (!lastRun) {
     const root = workspaceRoot();
     const configured = root ? existsSync(path.join(root, 'auditor.toml')) : false;
     statusBar.text = configured ? '$(shield) VCA: sem auditoria' : '$(warning) VCA: sem auditor.toml';
     statusBar.tooltip = configured
       ? 'Execute “Vibe Coding Auditor: Auditar projeto”.'
-      : 'A pasta aberta não contém auditor.toml.';
+      : 'A pasta aberta não contém auditor.toml. Use a paleta para executar a descoberta.';
   } else {
-    const count = lastAudit.report.summary.findings;
+    const run = lastRun.run;
+    const label = modeLabel(run);
     statusBar.text =
-      count === 0 ? '$(check) VCA: 0 achados' : `$(warning) VCA: ${count} achado${count === 1 ? '' : 's'}`;
-    statusBar.tooltip = [
-      `Última auditoria: ${lastAudit.recordedAt}`,
-      `${lastAudit.report.project} · schema v${lastAudit.report.schema_version}`,
-      `${count} achado(s); ${lastAudit.report.limitations.length} limitação(ões)`,
-    ].join('\n');
+      run.mode === 'compliance' && run.summary.findings > 0
+        ? `$(warning) VCA: ${label}, ${runSummaryMessage(run)}`
+        : `$(check) VCA: ${label}, ${runSummaryMessage(run)}`;
+    const details = [`Última execução: ${lastRun.recordedAt}`, `Modo: ${label}`];
+    if (run.mode === 'compliance') {
+      details.push(
+        `${run.project} · schema v${run.schema_version}`,
+        `${run.limitations.length} limitação(ões)`,
+      );
+    }
+    statusBar.tooltip = details.join('\n');
   }
   statusBar.show();
 }
 
-/// Aplica um relatório do núcleo aos diagnósticos e ao estado local.
-function applyAudit(root: string, report: AuditReport, recordedAt: string): void {
-  lastAudit = { root, report, recordedAt };
+/// Aplica uma execução de conformidade aos diagnósticos do editor.
+function applyCompliance(
+  root: string,
+  report: ComplianceRun,
+  recordedAt: string,
+): void {
+  lastRun = { root, run: report, recordedAt };
   const byFile = new Map<string, vscode.Diagnostic[]>();
 
   for (const descriptor of buildDiagnostics(report)) {
@@ -108,6 +131,22 @@ function applyAudit(root: string, report: AuditReport, recordedAt: string): void
     diagnosticCollection.set(vscode.Uri.parse(key), list);
   }
   updateStatus();
+}
+
+/// Descoberta limpa diagnósticos antigos e mostra apenas observações do núcleo.
+function applyDiscovery(root: string, run: DiscoveryRun, recordedAt: string): void {
+  lastRun = { root, run, recordedAt };
+  diagnosticCollection.clear();
+  updateStatus();
+}
+
+/// Distribui a execução conforme o modo explícito devolvido pela CLI.
+function applyRun(root: string, run: CliRun, recordedAt: string): void {
+  if (hasViolationDiagnostics(run)) {
+    applyCompliance(root, run, recordedAt);
+  } else {
+    applyDiscovery(root, run, recordedAt);
+  }
 }
 
 /// Reflete a presença de `auditor.toml` no contexto de comandos do VS Code.
@@ -164,15 +203,11 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/// Auditoria manual da pasta apontada ou da raiz do workspace.
+/// Auditoria manual da pasta apontada ou da raiz do workspace, em qualquer modo.
 async function runAudit(target?: vscode.Uri): Promise<void> {
   const root = target?.fsPath ?? workspaceRoot();
   if (!root) {
     vscode.window.showWarningMessage('Abra uma pasta antes de auditar.');
-    return;
-  }
-  if (!existsSync(path.join(root, 'auditor.toml'))) {
-    vscode.window.showWarningMessage(`Pasta sem auditor.toml: ${root}`);
     return;
   }
 
@@ -183,13 +218,23 @@ async function runAudit(target?: vscode.Uri): Promise<void> {
       throw new Error(result.stderr.trim() || `código de saída ${result.code}`);
     }
 
-    const report = JSON.parse(result.stdout) as AuditReport;
+    const run = parseCliRun(JSON.parse(result.stdout));
     const recordedAt = new Date().toISOString();
-    applyAudit(root, report, recordedAt);
-    await extensionContext.workspaceState.update('lastAudit', { root, report, recordedAt });
-    vscode.window.showInformationMessage(
-      `Auditoria concluída: ${report.summary.findings} achado(s) no painel Problems.`,
-    );
+    applyRun(root, run, recordedAt);
+    await extensionContext.workspaceState.update('lastRun', { root, run, recordedAt });
+    if (run.mode === 'discovery') {
+      const messages = discoveryMessages(run);
+      for (const message of messages) {
+        void vscode.window.showInformationMessage(`VCA · ${message}`);
+      }
+      void vscode.window.showInformationMessage(
+        `VCA · conclusão: nenhuma regra de conformidade foi avaliada. ${messages[messages.length - 1]}`,
+      );
+    } else {
+      vscode.window.showInformationMessage(
+        `Auditoria concluída: ${run.summary.findings} achado(s) no painel Problems.`,
+      );
+    }
   } catch (error) {
     vscode.window.showErrorMessage(`Falha na auditoria: ${errorMessage(error)}`);
   }
@@ -197,12 +242,16 @@ async function runAudit(target?: vscode.Uri): Promise<void> {
 
 /// Abre no editor o arquivo e a linha do achado selecionado.
 async function openFinding(): Promise<void> {
-  if (!lastAudit || lastAudit.report.findings.length === 0) {
+  if (
+    !lastRun ||
+    lastRun.run.mode !== 'compliance' ||
+    lastRun.run.findings.length === 0
+  ) {
     vscode.window.showInformationMessage('Não há achados da última auditoria.');
     return;
   }
 
-  const items: FindingPick[] = lastAudit.report.findings.map((finding) => ({
+  const items: FindingPick[] = lastRun.run.findings.map((finding) => ({
     label: `[${finding.severity}] ${finding.title}`,
     description: `${finding.path}:${finding.line_start ?? 1}`,
     detail: finding.id,
@@ -215,7 +264,7 @@ async function openFinding(): Promise<void> {
     return;
   }
 
-  const uri = vscode.Uri.file(path.resolve(lastAudit.root, picked.finding.path));
+  const uri = vscode.Uri.file(path.resolve(lastRun.root, picked.finding.path));
   try {
     const document = await vscode.workspace.openTextDocument(uri);
     const editor = await vscode.window.showTextDocument(document);
@@ -230,9 +279,31 @@ async function openFinding(): Promise<void> {
   }
 }
 
-/// Remove apenas os diagnósticos; o estado da última auditoria é preservado.
+/// Remove apenas os diagnósticos; o estado da última execução é preservado.
 function clearDiagnostics(): void {
   diagnosticCollection.clear();
+}
+
+/// Restaura o estado gravado pela versão atual ou antes da separação de modos.
+function restoreRun(value: unknown): StoredRun | undefined {
+  if (typeof value !== 'object' || value === null) {
+    return undefined;
+  }
+  const state = value as Record<string, unknown>;
+  if (typeof state.root !== 'string' || typeof state.recordedAt !== 'string') {
+    return undefined;
+  }
+  try {
+    return { root: state.root, recordedAt: state.recordedAt, run: parseCliRun(state.run) };
+  } catch {
+    // O formato antigo guardava o relatório diretamente em `report`.
+    try {
+      const run = parseCliRun(state.report);
+      return { root: state.root, recordedAt: state.recordedAt, run };
+    } catch {
+      return undefined;
+    }
+  }
 }
 
 /// Registra comandos, restaura o último estado e detecta o contrato na abertura.
@@ -252,9 +323,10 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  const previous = context.workspaceState.get<StoredAudit>('lastAudit');
-  if (previous?.report && previous.root) {
-    applyAudit(previous.root, previous.report, previous.recordedAt);
+  const previous = restoreRun(context.workspaceState.get('lastRun')) ??
+    restoreRun(context.workspaceState.get('lastAudit'));
+  if (previous) {
+    applyRun(previous.root, previous.run, previous.recordedAt);
   }
   void refreshContext();
 }

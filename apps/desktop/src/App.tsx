@@ -3,7 +3,13 @@ import { invoke } from '@tauri-apps/api/core';
 import { useCallback, useState } from 'react';
 
 import BuilderWizard from './BuilderWizard';
-import { detectedStatus, type ProjectRunStatus } from './builderFlow';
+import {
+  detectedStatus,
+  observationLines,
+  runModeLabel,
+  type DiscoveryReport,
+  type ProjectRunStatus,
+} from './builderFlow';
 
 import {
   availableRules,
@@ -11,6 +17,7 @@ import {
   coverageLabel,
   edgeListLabel,
   filterFindings,
+  historyRunLine,
   reportSummaryPhrase,
 } from './reportView';
 import {
@@ -110,6 +117,8 @@ interface RunSummary {
   project_name: string;
   project_root: string;
   summary: ReportSummary;
+  execution_mode: 'discovery' | 'compliance';
+  contract_identity: string | null;
 }
 
 const SEVERITY_LABELS: Record<Severity, string> = {
@@ -141,6 +150,7 @@ export default function App() {
   const [projectPath, setProjectPath] = useState('');
   const [database, setDatabase] = useState('data/auditor.db');
   const [report, setReport] = useState<AuditReport | null>(null);
+  const [discoveryReport, setDiscoveryReport] = useState<DiscoveryReport | null>(null);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [contractText, setContractText] = useState<string | null>(null);
   const [runs, setRuns] = useState<RunSummary[]>([]);
@@ -211,15 +221,29 @@ export default function App() {
     setDetected(mode);
     const result = await invoke<AuditReport>('audit_project', { path: projectPath });
     setReport(result);
+    setDiscoveryReport(null);
     setAnalysis(null);
     setSeverityFilter('all');
     setRuleFilter('all');
   };
 
+  /// Executa o modo escolhido pelo núcleo; nenhum modo é inferido na interface.
   const runAudit = () =>
     execute('audit', async () => {
+      const mode = await invoke<ProjectRunStatus>('load_project', { path: projectPath });
+      setDetected(mode);
+      if (mode.contract.status === 'missing') {
+        const discovery = await invoke<DiscoveryReport>('discover_project', { path: projectPath });
+        setDiscoveryReport(discovery);
+        setReport(null);
+        setAnalysis(null);
+        pushStatus(builderStatus(runModeLabel(mode), 'success'));
+        reveal('painel-descoberta');
+        return;
+      }
       const result = await invoke<AuditReport>('audit_project', { path: projectPath });
       setReport(result);
+      setDiscoveryReport(null);
       setAnalysis(null);
       setSeverityFilter('all');
       setRuleFilter('all');
@@ -245,8 +269,10 @@ export default function App() {
 
   const recordRun = () =>
     execute('record', async () => {
+      const mode = await invoke<ProjectRunStatus>('load_project', { path: projectPath });
+      setDetected(mode);
       const id = await invoke<number>('history_record', { path: projectPath, database });
-      pushStatus(recordStatus(id));
+      pushStatus(recordStatus(id, runModeLabel(mode)));
       await refreshHistory();
       reveal('painel-historico');
     });
@@ -326,7 +352,7 @@ export default function App() {
             </button>
           )}
           <button type="button" className="primario" disabled={busy || !projectPath} onClick={runAudit}>
-            Auditar
+            Auditar / descobrir
           </button>
           <button type="button" disabled={busy || !projectPath} onClick={showGraph}>
             Ver grafo
@@ -358,6 +384,30 @@ export default function App() {
           visualizado, nunca editado pela interface; não há execução automática em segundo plano.
         </p>
       </section>
+
+      {discoveryReport && (
+        <section className="panel" id="painel-descoberta">
+          <h2>Descoberta: observações do projeto</h2>
+          <p className="detail">
+            Sem <code>auditor.toml</code>, o núcleo apenas observa a estrutura. Nenhuma
+            dependência foi aprovada e nenhuma regra de conformidade foi avaliada.
+          </p>
+          {observationLines(discoveryReport).length === 0 ? (
+            <p>Nenhuma observação disponível.</p>
+          ) : (
+            <ul>
+              {observationLines(discoveryReport).map((line, index) => (
+                <li key={`${index}-${line}`}>{line}</li>
+              ))}
+            </ul>
+          )}
+          {detected && (
+            <button type="button" className="primario" onClick={() => setWizardOpen(true)}>
+              Definir arquitetura com o assistente
+            </button>
+          )}
+        </section>
+      )}
 
       {report && (
         <section className="panel" id="painel-relatorio">
@@ -557,10 +607,7 @@ export default function App() {
           ) : (
             <ol className="historico">
               {runs.map((run) => (
-                <li key={run.id}>
-                  <strong>#{run.id}</strong> — {run.recorded_at} — {run.project_name} —{' '}
-                  {run.summary.findings} achados
-                </li>
+                <li key={run.id}>{historyRunLine(run.id, run)}</li>
               ))}
             </ol>
           )}

@@ -133,9 +133,40 @@ fn discovery_diff_reports_that_no_findings_were_filtered() {
 }
 
 #[test]
-fn history_record_without_contract_is_not_treated_as_discovery() {
+fn history_record_without_contract_records_discovery_mode() {
     let root = fixture("discovery_no_contract");
     let database = temp_path("historico.db");
+    let database_text = database.to_string_lossy().into_owned();
+
+    let (code, stdout, stderr) = run(&[
+        arg("history"),
+        arg("--database"),
+        Path::new(&database_text),
+        arg("record"),
+        root.as_path(),
+    ]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert!(stdout.contains("Modo: descoberta (sem contrato)"));
+    assert!(stdout.contains("Contrato: sem contrato"));
+
+    let (code, stdout, stderr) = run(&[
+        arg("history"),
+        arg("--database"),
+        Path::new(&database_text),
+        arg("list"),
+    ]);
+    let _ = std::fs::remove_file(&database);
+
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert!(stdout.contains("modo descoberta"));
+    assert!(!stdout.contains("dep.not_allowed"));
+}
+
+#[test]
+fn history_compare_rejects_runs_from_different_modes() {
+    let discovery_root = fixture("discovery_no_contract");
+    let compliance_root = fixture("dependencies");
+    let database = temp_path("comparacao.db");
     let database_text = database.to_string_lossy().into_owned();
 
     let (code, _, stderr) = run(&[
@@ -143,10 +174,30 @@ fn history_record_without_contract_is_not_treated_as_discovery() {
         arg("--database"),
         Path::new(&database_text),
         arg("record"),
-        root.as_path(),
+        discovery_root.as_path(),
+    ]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+
+    let (code, _, stderr) = run(&[
+        arg("history"),
+        arg("--database"),
+        Path::new(&database_text),
+        arg("record"),
+        compliance_root.as_path(),
+    ]);
+    assert_eq!(code, 1, "stderr: {stderr}");
+
+    let (code, _, stderr) = run(&[
+        arg("history"),
+        arg("--database"),
+        Path::new(&database_text),
+        arg("compare"),
+        arg("1"),
+        arg("2"),
     ]);
     let _ = std::fs::remove_file(&database);
 
     assert_eq!(code, 2);
-    assert!(stderr.contains("Falha operacional"));
+    assert!(stderr.contains("não são comparáveis"), "stderr: {stderr}");
+    assert!(stderr.contains("modos diferentes"), "stderr: {stderr}");
 }

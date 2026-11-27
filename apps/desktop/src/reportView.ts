@@ -30,6 +30,15 @@ export interface CoverageView {
   partial: boolean;
 }
 
+/// Resumo de uma execução gravada, no formato devolvido pelo núcleo.
+export interface HistoryRunView {
+  recorded_at: string;
+  project_name: string;
+  execution_mode: 'discovery' | 'compliance';
+  contract_identity: string | null;
+  summary: CountSummary;
+}
+
 /// Aresta devolvida pela análise.
 export interface EdgeView {
   from: string;
@@ -81,6 +90,20 @@ export function coverageLabel(coverage: CoverageView): string {
         .join(', ')}`
     : '';
   return `${base}${partial}${unsupported}`;
+}
+
+/// Linha do histórico com modo e identidade, sem inferir contrato ausente.
+export function historyRunLine(id: number, run: HistoryRunView): string {
+  const mode = run.execution_mode === 'discovery'
+    ? 'descoberta (sem contrato)'
+    : 'conformidade';
+  const contract = run.execution_mode === 'discovery'
+    ? 'sem contrato'
+    : run.contract_identity === null
+      ? 'identidade desconhecida'
+      : `identidade ${run.contract_identity}`;
+  const findings = `${run.summary.findings} ${run.summary.findings === 1 ? 'achado' : 'achados'}`;
+  return `#${id} — ${run.recorded_at} — ${run.project_name} — ${mode} — ${contract} — ${findings}`;
 }
 
 /// Descreve as arestas do grafo usando apenas a classificação do núcleo.

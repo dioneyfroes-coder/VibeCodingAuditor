@@ -77,9 +77,14 @@ export function contractStatus(text: string): ActionStatus {
   };
 }
 
-/// Execução gravada no banco local.
-export function recordStatus(id: number): ActionStatus {
-  return { action: 'record', kind: 'success', message: `execução #${id} gravada` };
+/// Execução gravada no banco local, com modo explícito quando informado.
+export function recordStatus(id: number, mode?: string): ActionStatus {
+  const suffix = mode ? ` em modo ${mode}` : '';
+  return {
+    action: 'record',
+    kind: 'success',
+    message: `execução #${id} gravada${suffix}`,
+  };
 }
 
 /// Consulta ao histórico, inclusive quando não há registros.

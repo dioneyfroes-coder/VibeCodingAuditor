@@ -19,6 +19,7 @@ import {
   previousStep,
   removeDraftModule,
   renameDraftLayer,
+  runModeLabel,
   renameDraftModule,
   saveAuthorization,
   saveConfirmationText,
@@ -295,6 +296,14 @@ test('estados de detecção e validação são explícitos', () => {
   assert.match(
     detectedStatus({ mode: 'compliance', contract: { status: 'present', schema_version: 2 } }),
     /v2/,
+  );
+  assert.equal(
+    runModeLabel({ mode: 'discovery', contract: { status: 'missing' } }),
+    'descoberta (sem contrato)',
+  );
+  assert.equal(
+    runModeLabel({ mode: 'compliance', contract: { status: 'present', schema_version: 2 } }),
+    'conformidade (contrato v2)',
   );
   assert.match(validationMessage({ valid: true, errors: [], identity: 'abc' }), /válido/);
   assert.match(

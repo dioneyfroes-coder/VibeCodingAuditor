@@ -8,6 +8,7 @@ import {
   coverageLabel,
   edgeListLabel,
   filterFindings,
+  historyRunLine,
   reportSummaryPhrase,
 } from '../out/reportView.js';
 
@@ -66,6 +67,37 @@ test('cobertura exibida usa os dados da análise, sem inferir conclusão', () =>
       unsupported_code_extensions: [{ extension: 'go', files: 1 }],
     }),
     'Cobertura do código: 4 de 5 arquivo(s) analisados (parcial); sem analisador: .go (1)',
+  );
+});
+
+test('histórico mostra modo e identidade sem transformar ausência em contrato', () => {
+  const compliance = {
+    recorded_at: '2026-11-26T10:00:00Z',
+    project_name: 'projeto',
+    execution_mode: 'compliance',
+    contract_identity: 'abc123',
+    summary: { findings: 2 },
+  };
+  const discovery = {
+    recorded_at: '2026-11-26T11:00:00Z',
+    project_name: 'projeto',
+    execution_mode: 'discovery',
+    contract_identity: null,
+    summary: { findings: 0 },
+  };
+  const legacy = { ...compliance, contract_identity: null };
+
+  assert.equal(
+    historyRunLine(1, compliance),
+    '#1 — 2026-11-26T10:00:00Z — projeto — conformidade — identidade abc123 — 2 achados',
+  );
+  assert.equal(
+    historyRunLine(2, discovery),
+    '#2 — 2026-11-26T11:00:00Z — projeto — descoberta (sem contrato) — sem contrato — 0 achados',
+  );
+  assert.equal(
+    historyRunLine(3, legacy),
+    '#3 — 2026-11-26T10:00:00Z — projeto — conformidade — identidade desconhecida — 2 achados',
   );
 });
 

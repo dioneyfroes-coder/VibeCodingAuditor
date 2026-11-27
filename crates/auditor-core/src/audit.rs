@@ -57,6 +57,25 @@ pub enum ExecutionMode {
     Compliance,
 }
 
+impl ExecutionMode {
+    /// Valor estável gravado no histórico e serializado no JSON.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Discovery => "discovery",
+            Self::Compliance => "compliance",
+        }
+    }
+
+    /// Interpreta o valor gravado no histórico, sem inferir modos desconhecidos.
+    pub fn from_stored(value: &str) -> Option<Self> {
+        match value {
+            "discovery" => Some(Self::Discovery),
+            "compliance" => Some(Self::Compliance),
+            _ => None,
+        }
+    }
+}
+
 /// Estado do contrato na raiz informada.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
@@ -180,6 +199,14 @@ impl ProjectRun {
         match self {
             Self::Discovery(_) => ExecutionMode::Discovery,
             Self::Compliance(_) => ExecutionMode::Compliance,
+        }
+    }
+
+    /// Estado do contrato observado na raiz.
+    pub fn contract(&self) -> &ContractStatus {
+        match self {
+            Self::Discovery(report) => &report.contract,
+            Self::Compliance(run) => &run.contract,
         }
     }
 }

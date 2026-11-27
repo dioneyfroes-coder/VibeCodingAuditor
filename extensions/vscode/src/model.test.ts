@@ -3,12 +3,19 @@ import test from 'node:test';
 
 import {
   AuditReport,
+  ComplianceRun,
   DiagnosticSeverityName,
+  DiscoveryRun,
   Finding,
   Severity,
   buildDiagnostics,
   diagnosticMessage,
   diagnosticRange,
+  discoveryMessages,
+  hasViolationDiagnostics,
+  modeLabel,
+  parseCliRun,
+  runSummaryMessage,
   severityToDiagnosticSeverity,
 } from './model';
 
@@ -97,6 +104,89 @@ test('diagnósticos preservam arquivo, regra e severidade do relatório', () => 
   assert.equal(descriptors[0].code, 'dep.not_allowed');
   assert.equal(descriptors[0].severity, 'warning');
   assert.equal(descriptors[0].range.startLine, 1);
+});
+
+/// Execução de conformidade com o modo explícito produzido pela CLI.
+function complianceRun(): ComplianceRun {
+  return {
+    ...reportWith('error'),
+    mode: 'compliance',
+    contract: { status: 'present', schema_version: 1 },
+  };
+}
+
+/// Execução de descoberta com dados brutos produzidos pelo núcleo.
+function discoveryRun(): DiscoveryRun {
+  return {
+    mode: 'discovery',
+    contract: { status: 'missing' },
+    candidates: {
+      candidate_modules: [],
+      observed_dependencies: [
+        {
+          source: 'src/lib.rs',
+          target: 'domain',
+          resolution: 'resolved',
+          detail: 'módulo local',
+          line: 2,
+          evidence: 'use domain::x;',
+        },
+        {
+          source: 'src/main.rs',
+          target: 'serde',
+          resolution: 'external',
+          detail: 'crate externo',
+          line: null,
+          evidence: null,
+        },
+      ],
+      ambiguities: [],
+      languages: [],
+      limitations: ['sem analisador para .rb'],
+    },
+  };
+}
+
+test('JSON da CLI distingue conformidade de descoberta sem reavaliar regras', () => {
+  const compliance = parseCliRun(complianceRun());
+  assert.equal(compliance.mode, 'compliance');
+  assert.equal(hasViolationDiagnostics(compliance), true);
+  assert.equal(buildDiagnostics(compliance).length, 1);
+
+  const discovery = parseCliRun(discoveryRun());
+  assert.equal(discovery.mode, 'discovery');
+  assert.equal(hasViolationDiagnostics(discovery), false);
+});
+
+test('JSON legado sem modo continua sendo tratado como conformidade', () => {
+  const legacy = parseCliRun(reportWith('warning'));
+  assert.equal(legacy.mode, 'compliance');
+  assert.deepEqual(legacy.contract, { status: 'present', schema_version: 1 });
+});
+
+test('modo desconhecido e descoberta malformada são recusados explicitamente', () => {
+  assert.throws(() => parseCliRun({ mode: 'outro' }), /Modo desconhecido/);
+  assert.throws(
+    () => parseCliRun({ mode: 'discovery', contract: { status: 'missing' } }),
+    /candidatos/,
+  );
+});
+
+test('descoberta mostra observações e orientação, nunca diagnósticos de violação', () => {
+  const messages = discoveryMessages(discoveryRun());
+  assert.ok(messages.some((message) => message.includes('sem auditor.toml')));
+  assert.ok(messages.some((message) => message.includes('src/lib.rs → domain')));
+  assert.ok(messages.some((message) => message.includes('externa')));
+  assert.ok(messages.some((message) => message.includes('sem analisador para .rb')));
+  assert.ok(messages.some((message) => message.includes('Architecture Builder')));
+  assert.ok(!messages.some((message) => message.includes('dep.not_allowed')));
+});
+
+test('resumo e rótulo do modo vêm dos dados da CLI', () => {
+  assert.match(runSummaryMessage(complianceRun()), /1 achado/);
+  assert.match(runSummaryMessage(discoveryRun()), /2 relações observadas/);
+  assert.equal(modeLabel(complianceRun()), 'conformidade (contrato v1)');
+  assert.equal(modeLabel(discoveryRun()), 'descoberta (sem contrato)');
 });
 
 test('nova regra de camada é convertida sem lógica específica na extensão', () => {

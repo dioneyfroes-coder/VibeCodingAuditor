@@ -128,14 +128,14 @@ fn history_list(
         .map_err(|error| error.to_string())
 }
 
-/// Executa a auditoria e registra uma nova execução no banco local.
+/// Registra a execução discriminada pelo núcleo, em qualquer dos dois modos.
 #[tauri::command]
 fn history_record(path: String, database: String) -> Result<i64, String> {
     let root = Path::new(&path);
-    let report = audit::audit_project(root).map_err(|error| error.to_string())?;
+    let run = audit::project_run(root).map_err(|error| error.to_string())?;
     let mut store = History::open(Path::new(&database)).map_err(|error| error.to_string())?;
     store
-        .record(root, &report)
+        .record_run(root, &run)
         .map_err(|error| error.to_string())
 }
 
@@ -347,6 +347,26 @@ mod tests {
             from_command.run.report.summary,
             from_core.run.report.summary
         );
+    }
+
+    #[test]
+    fn history_record_command_records_discovery_with_explicit_mode() {
+        let project = TempProject::new("discovery_no_contract");
+        let database = project.0.join("historico.db");
+        let database_text = database.to_string_lossy().into_owned();
+
+        let id = history_record(project.text(), database_text.clone())
+            .expect("discovery run must be recorded");
+        let store = History::open(Path::new(&database_text)).expect("history must open");
+        let detail = store.get(id).expect("recorded run must be readable");
+
+        assert_eq!(
+            detail.run.execution_mode,
+            auditor_core::audit::ExecutionMode::Discovery
+        );
+        assert_eq!(detail.run.contract_identity, None);
+        assert_eq!(detail.run.schema_version, 0);
+        assert!(detail.findings.is_empty());
     }
 
     #[test]

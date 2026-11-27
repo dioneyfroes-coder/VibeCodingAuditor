@@ -2,13 +2,15 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-import { buildDiagnostics } from '../out/model.js';
+import { buildDiagnostics, parseCliRun } from '../out/model.js';
 
 /// Mesmo JSON real da CLI usado pelo teste de apresentação do desktop.
-const report = JSON.parse(
-  await readFile(
-    new URL('../../../docs/validation/etapa-3/cli-layer-boundaries.json', import.meta.url),
-    'utf8',
+const report = parseCliRun(
+  JSON.parse(
+    await readFile(
+      new URL('../../../docs/validation/etapa-3/cli-layer-boundaries.json', import.meta.url),
+      'utf8',
+    ),
   ),
 );
 

@@ -369,13 +369,25 @@ fn history_command(
 
     match action {
         HistoryCommands::Record { root } => {
-            let report = auditor_core::audit::audit_project(&root)?;
+            let run = auditor_core::audit::project_run(&root)?;
+            let mode = run.mode();
+            let contract = run.contract().clone();
             let mut store = History::open(database)?;
-            let id = store.record(&root, &report)?;
+            let id = store.record_run(&root, &run)?;
             println!("Execução #{id} gravada em {}", store.path().display());
+            println!(
+                "{}",
+                auditor_core::audit::execution_mode_label(mode, &contract)
+            );
             let detail = store.get(id)?;
             println!("{}", history::render_run_detail(&detail));
-            Ok(audit_exit_code(&report))
+            let exit_code = match &run {
+                auditor_core::audit::ProjectRun::Compliance(compliance) => {
+                    audit_exit_code(&compliance.report)
+                }
+                auditor_core::audit::ProjectRun::Discovery(_) => 0,
+            };
+            Ok(exit_code)
         }
         HistoryCommands::List { project, limit } => {
             let store = History::open(database)?;

@@ -1,7 +1,7 @@
 {
   "name": "vibe-coding-auditor",
   "displayName": "Vibe Coding Auditor",
-  "description": "Mostra no VS Code os achados determinísticos produzidos pelo núcleo do Vibe Coding Auditor.",
+  "description": "Mostra no VS Code os achados determinísticos ou as observações de descoberta produzidas pelo núcleo do Vibe Coding Auditor.",
   "version": "0.1.0",
   "publisher": "dioneyfroes-coder",
   "repository": {
@@ -23,7 +23,7 @@
     "commands": [
       {
         "command": "vibeCodingAuditor.audit",
-        "title": "Vibe Coding Auditor: Auditar projeto"
+        "title": "Vibe Coding Auditor: Auditar ou descobrir projeto"
       },
       {
         "command": "vibeCodingAuditor.openFinding",

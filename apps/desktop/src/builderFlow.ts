@@ -574,12 +574,17 @@ export function decideObservedDependency(
     : setResolution(decided, item.ambiguitySubject, item.ambiguityDetail ?? '', moduleName);
 }
 
+/// Rótulo curto do modo devolvido pelo núcleo, sem o prefixo de status.
+export function runModeLabel(run: ProjectRunStatus): string {
+  if (run.contract.status === 'present') {
+    return `conformidade (contrato v${run.contract.schema_version ?? '?'})`;
+  }
+  return 'descoberta (sem contrato)';
+}
+
 /// Modo devolvido pelo núcleo, em texto legível.
 export function detectedStatus(run: ProjectRunStatus): string {
-  if (run.contract.status === 'present') {
-    return `Modo: conformidade (contrato v${run.contract.schema_version ?? '?'})`;
-  }
-  return 'Modo: descoberta (sem contrato)';
+  return `Modo: ${runModeLabel(run)}`;
 }
 
 /// Resultado da validação feita pelo núcleo, sem interpretá-lo.

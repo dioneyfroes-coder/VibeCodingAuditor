@@ -134,9 +134,9 @@ const SEVERITY_LABELS: Record<Severity, string> = {
 };
 
 const EDGE_COLORS: Record<DependencyKind, string> = {
-  allowed: '#2f855a',
-  forbidden: '#c53030',
-  unresolved: '#b7791f',
+  allowed: '#57d38c',
+  forbidden: '#ff7b7b',
+  unresolved: '#f2c35c',
 };
 
 const GRAPH_WIDTH = 440;
@@ -356,141 +356,174 @@ export default function App() {
   );
 
   return (
-    <main>
+    <main className="app-shell">
       <header className="cabecalho">
-        <h1>Vibe Coding Auditor</h1>
-        <p className="subtitle">Auditoria local de arquitetura. Nenhuma operação é automática.</p>
+        <div>
+          <h1>Vibe Coding Auditor</h1>
+          <p className="subtitle">Auditoria local de arquitetura. Nada é automático.</p>
+        </div>
+        <p className="detail contexto">
+          {projectPath ? `Projeto: ${projectPath}` : 'Selecione uma pasta para começar.'}
+        </p>
       </header>
 
-      <section className="panel" aria-label="Status das ações">
-        <h2>Status</h2>
-        {statuses.length === 0 ? (
-          <p className="detail">Nenhuma ação executada neste projeto.</p>
-        ) : (
-          <>
-            <div className={`status-linha status-${statuses[0].kind}`}>
-              <span className="status-kind">{statusKindLabel(statuses[0].kind)}</span>
-              {statusLine(statuses[0])}
-            </div>
-            {statuses.length > 1 && (
-              <details className="detalhe-bloco">
-                <summary>Mensagens anteriores ({statuses.length - 1})</summary>
-                <ul className="status-list">
-                  {statuses.slice(1).map((status, index) => (
-                    <li key={`${status.action}-${index}`} className={`status-${status.kind}`}>
-                      <span className="status-kind">{statusKindLabel(status.kind)}</span>
-                      {statusLine(status)}
-                    </li>
-                  ))}
-                </ul>
-              </details>
+      <div className="workspace">
+        <aside className="coluna-lateral">
+          <section className="panel" aria-label="Status das ações">
+            <h2>Status</h2>
+            {statuses.length === 0 ? (
+              <p className="detail">Nenhuma ação executada neste projeto.</p>
+            ) : (
+              <>
+                <div className={`status-linha status-${statuses[0].kind}`}>
+                  <span className="status-kind">{statusKindLabel(statuses[0].kind)}</span>
+                  {statusLine(statuses[0])}
+                </div>
+                {statuses.length > 1 && (
+                  <details className="detalhe-bloco">
+                    <summary>Mensagens anteriores ({statuses.length - 1})</summary>
+                    <ul className="status-list">
+                      {statuses.slice(1).map((status, index) => (
+                        <li key={`${status.action}-${index}`} className={`status-${status.kind}`}>
+                          <span className="status-kind">{statusKindLabel(status.kind)}</span>
+                          {statusLine(status)}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </>
             )}
-          </>
-        )}
-        {busy && <p className="detail">Operação em andamento…</p>}
-      </section>
+            {busy && <p className="detail">Operação em andamento…</p>}
+          </section>
 
-      <section className="panel">
-        <h2>Projeto</h2>
-        <label>
-          Caminho da raiz
-          <input
-            value={projectPath}
-            onChange={(event) => changeProject(event.target.value)}
-            placeholder="C:\caminho\do\projeto"
-          />
-        </label>
-        <p className="detail hint">
-          Escolha a pasta do projeto. Trocar a pasta limpa os resultados anteriores. Nada é
-          alterado no projeto sem sua confirmação.
-        </p>
-        {projectPath && (
-          <p className="detail">
-            Contrato verificado: <code>{`${projectPath}\\auditor.toml`}</code>
-          </p>
-        )}
-        <div className="actions">
-          <button type="button" className="primario" disabled={busy} onClick={selectProject}>
-            Selecionar pasta
-          </button>
-          <button type="button" disabled={busy || !projectPath} onClick={detectProject}>
-            Detectar projeto
-          </button>
-          {detected && (
-            <button
-              type="button"
-              className="primario"
-              disabled={busy}
-              onClick={() => setWizardOpen(true)}
-            >
-              {detected.contract.status === 'missing'
-                ? 'Definir arquitetura'
-                : 'Revisar arquitetura'}
-            </button>
-          )}
-          <button type="button" className="primario" disabled={busy || !projectPath} onClick={runAudit}>
-            Auditar / descobrir
-          </button>
-          <button type="button" disabled={busy || !projectPath} onClick={showGraph}>
-            Ver grafo
-          </button>
-          <button type="button" disabled={busy || !projectPath} onClick={openContract}>
-            Ver contrato
-          </button>
-          <button type="button" disabled={busy || !projectPath} onClick={recordRun}>
-            Registrar execução
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() =>
-              execute('history', async () => {
-                await refreshHistory();
-                setActivePanel('history');
-                reveal('resultado');
-              })
-            }
-          >
-            Atualizar histórico
-          </button>
-        </div>
-      </section>
-
-      <section className="panel">
-        <h2>Configurações locais</h2>
-        <label>
-          Banco de histórico
-          <input
-            value={database}
-            onChange={(event) => setDatabase(event.target.value)}
-            placeholder="data/auditor.db"
-          />
-        </label>
-        <p className="detail">
-          O caminho do banco é relativo ao diretório de execução do aplicativo. O contrato é
-          visualizado, nunca editado pela interface; não há execução automática em segundo plano.
-        </p>
-      </section>
-
-      {resultTabs.some((tab) => tab.available) && (
-        <nav className="result-tabs" id="resultado" aria-label="Resultados disponíveis">
-          {resultTabs
-            .filter((tab) => tab.available)
-            .map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                className={`aba${activeResult?.id === tab.id ? ' ativa' : ''}`}
-                onClick={() => setActivePanel(tab.id)}
-              >
-                {tab.label}
+          <section className="panel">
+            <h2>Projeto</h2>
+            <label>
+              Caminho da raiz
+              <input
+                value={projectPath}
+                onChange={(event) => changeProject(event.target.value)}
+                placeholder="C:\caminho\do\projeto"
+              />
+            </label>
+            <p className="detail hint">
+              Trocar a pasta limpa os resultados anteriores. Nada é alterado sem sua confirmação.
+            </p>
+            {projectPath && (
+              <p className="detail">
+                Contrato: <code>{`${projectPath}\\auditor.toml`}</code>
+              </p>
+            )}
+            <div className="actions">
+              <button type="button" className="primario" disabled={busy} onClick={selectProject}>
+                Selecionar pasta
               </button>
-            ))}
-        </nav>
-      )}
+              <button type="button" disabled={busy || !projectPath} onClick={detectProject}>
+                Detectar projeto
+              </button>
+              {detected && (
+                <button
+                  type="button"
+                  className="primario"
+                  disabled={busy}
+                  onClick={() => setWizardOpen(true)}
+                >
+                  {detected.contract.status === 'missing'
+                    ? 'Definir arquitetura'
+                    : 'Revisar arquitetura'}
+                </button>
+              )}
+              <button
+                type="button"
+                className="primario"
+                disabled={busy || !projectPath}
+                onClick={runAudit}
+              >
+                Auditar / descobrir
+              </button>
+              <button type="button" disabled={busy || !projectPath} onClick={showGraph}>
+                Ver mapa
+              </button>
+              <button type="button" disabled={busy || !projectPath} onClick={openContract}>
+                Ver contrato
+              </button>
+              <button type="button" disabled={busy || !projectPath} onClick={recordRun}>
+                Registrar execução
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  execute('history', async () => {
+                    await refreshHistory();
+                    setActivePanel('history');
+                    reveal('resultado');
+                  })
+                }
+              >
+                Atualizar histórico
+              </button>
+            </div>
+          </section>
 
-      {activeResult?.id === 'discovery' && discoveryReport && (
-        <section className="panel" id="painel-descoberta">
+          <details className="panel detalhe-bloco painel-config">
+            <summary>Configurações locais</summary>
+            <label>
+              Banco de histórico
+              <input
+                value={database}
+                onChange={(event) => setDatabase(event.target.value)}
+                placeholder="data/auditor.db"
+              />
+            </label>
+            <p className="detail">
+              Caminho relativo ao diretório de execução do aplicativo. O contrato é somente leitura.
+            </p>
+          </details>
+        </aside>
+
+        <section className="coluna-conteudo" id="resultado">
+
+          <section className="panel painel-resultado">
+            <div className="resultado-toolbar">
+              <div>
+                <h2>Resultado</h2>
+                <p className="detail">
+                  {activeResult
+                    ? 'Troque de aba para ver outro resultado sem empilhar painéis.'
+                    : 'Execute uma ação para ver o resultado aqui.'}
+                </p>
+              </div>
+              {resultTabs.some((tab) => tab.available) && (
+                <nav className="result-tabs" aria-label="Resultados disponíveis">
+                  {resultTabs
+                    .filter((tab) => tab.available)
+                    .map((tab) => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        className={`aba${activeResult?.id === tab.id ? ' ativa' : ''}`}
+                        onClick={() => setActivePanel(tab.id)}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                </nav>
+              )}
+            </div>
+
+            <div className="resultado-corpo">
+              {!activeResult && (
+                <div className="resultado-vazio">
+                  <p className="detail">
+                    Os resultados aparecem aqui. A tela fica em uma aba por vez para evitar rolagem longa.
+                  </p>
+                </div>
+              )}
+
+              {activeResult?.id === 'discovery' && discoveryReport && (
+                <div id="painel-descoberta">
           <h2>O que foi encontrado</h2>
           <p className="detail">
             Sem <code>auditor.toml</code>, o programa apenas observa a estrutura. Nenhuma
@@ -519,16 +552,16 @@ export default function App() {
               Mostrar menos
             </button>
           )}
-          {detected && (
-            <button type="button" className="primario" onClick={() => setWizardOpen(true)}>
-              Definir arquitetura com o assistente
-            </button>
-          )}
-        </section>
-      )}
+                  {detected && (
+                    <button type="button" className="primario" onClick={() => setWizardOpen(true)}>
+                      Definir arquitetura com o assistente
+                    </button>
+                  )}
+                </div>
+              )}
 
-      {activeResult?.id === 'report' && report && (
-        <section className="panel" id="painel-relatorio">
+              {activeResult?.id === 'report' && report && (
+                <div id="painel-relatorio">
           <h2>Resultado: {report.project}</h2>
           <p className="detail">
             {report.summary.files_included} arquivos incluídos · {report.summary.modules} módulos ·{' '}
@@ -632,21 +665,21 @@ export default function App() {
             </>
           )}
 
-          {report.limitations.length > 0 && (
-            <details className="detalhe-bloco">
-              <summary>O que este resultado não cobre ({report.limitations.length})</summary>
-              <ul className="detail">
-                {report.limitations.map((limitation) => (
-                  <li key={limitation}>{limitation}</li>
-                ))}
-              </ul>
-            </details>
-          )}
-        </section>
-      )}
+                  {report.limitations.length > 0 && (
+                    <details className="detalhe-bloco">
+                      <summary>O que este resultado não cobre ({report.limitations.length})</summary>
+                      <ul className="detail">
+                        {report.limitations.map((limitation) => (
+                          <li key={limitation}>{limitation}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </div>
+              )}
 
-      {activeResult?.id === 'graph' && analysis && (
-        <section className="panel" id="painel-grafo">
+              {activeResult?.id === 'graph' && analysis && (
+                <div id="painel-grafo">
           <h2>Mapa de módulos</h2>
           <p className="detail">{coverageLabel(analysis.coverage)}</p>
           <ul className="legenda">
@@ -673,7 +706,7 @@ export default function App() {
                     refY="4"
                     orient="auto"
                   >
-                    <path d="M0,0 L8,4 L0,8 Z" fill="#586273" />
+                    <path d="M0,0 L8,4 L0,8 Z" fill="#9fb0c9" />
                   </marker>
                 </defs>
                 {analysis.edges.map((edge) => {
@@ -701,8 +734,8 @@ export default function App() {
                         cx={position.x}
                         cy={position.y}
                         r="20"
-                        fill={declared ? '#edf2f7' : '#fff5f5'}
-                        stroke={declared ? '#2c5282' : '#c53030'}
+                        fill={declared ? '#1d3557' : '#3a2028'}
+                        stroke={declared ? '#7cc4ff' : '#ff7b7b'}
                         strokeDasharray={declared ? undefined : '4 3'}
                       />
                       <text
@@ -710,7 +743,7 @@ export default function App() {
                         y={position.y + 4}
                         textAnchor="middle"
                         fontSize="11"
-                        fill="#1c2430"
+                        fill="#e6edf7"
                       >
                         {node}
                       </text>
@@ -723,28 +756,47 @@ export default function App() {
                 <p className="detail">{dependencyListLabel(analysis.edges)}</p>
               </details>
               <p className="detail">Pontos tracejados ficam fora do contrato.</p>
-              {analysis.limitations.length > 0 && (
-                <details className="detalhe-bloco">
-                  <summary>O que este mapa não cobre ({analysis.limitations.length})</summary>
-                  <ul className="detail">
-                    {analysis.limitations.map((limitation) => (
-                      <li key={limitation}>{limitation}</li>
-                    ))}
-                  </ul>
-                </details>
+                  {analysis.limitations.length > 0 && (
+                    <details className="detalhe-bloco">
+                      <summary>O que este mapa não cobre ({analysis.limitations.length})</summary>
+                      <ul className="detail">
+                        {analysis.limitations.map((limitation) => (
+                          <li key={limitation}>{limitation}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </>
               )}
-            </>
+            </div>
           )}
-        </section>
-      )}
 
-      {activeResult?.id === 'contract' && contractText !== null && (
-        <section className="panel" id="painel-contrato">
-          <h2>Contrato do projeto</h2>
-          <p className="detail">Somente leitura; a interface não altera este arquivo.</p>
-          <pre className="contrato">{contractText}</pre>
+              {activeResult?.id === 'contract' && contractText !== null && (
+                <div id="painel-contrato">
+                  <h2>Contrato do projeto</h2>
+                  <p className="detail">Somente leitura; a interface não altera este arquivo.</p>
+                  <pre className="contrato">{contractText}</pre>
+                </div>
+              )}
+
+              {activeResult?.id === 'history' && historyLoaded && (
+                <div id="painel-historico">
+                  <h2>Histórico local</h2>
+                  {runs.length === 0 ? (
+                    <p className="detail">Nenhuma execução registrada neste banco.</p>
+                  ) : (
+                    <ol className="historico">
+                      {runs.map((run) => (
+                        <li key={run.id}>{historyRunLine(run.id, run)}</li>
+                      ))}
+                    </ol>
+                  )}
+                </div>
+              )}
+            </div>
+          </section>
         </section>
-      )}
+      </div>
 
       {wizardOpen && projectPath && (
         <BuilderWizard
@@ -753,21 +805,6 @@ export default function App() {
           onClose={() => setWizardOpen(false)}
           onSaved={refreshAfterSave}
         />
-      )}
-
-      {activeResult?.id === 'history' && historyLoaded && (
-        <section className="panel" id="painel-historico">
-          <h2>Histórico local</h2>
-          {runs.length === 0 ? (
-            <p className="detail">Nenhuma execução registrada neste banco.</p>
-          ) : (
-            <ol className="historico">
-              {runs.map((run) => (
-                <li key={run.id}>{historyRunLine(run.id, run)}</li>
-              ))}
-            </ol>
-          )}
-        </section>
       )}
     </main>
   );

@@ -585,6 +585,12 @@ Nova fase iniciada em 26/11/2026 a partir de `PLANO_ETAPA_4_DESCOBERTA_E_ARCHITE
 - [x] Descoberta passou a escrever observações/limitações no canal de saída `Vibe Coding Auditor` e mostrar um único popup com ação “Ver observações”. Falhas operacionais também oferecem “Ver detalhes” e registram no canal.
 - [x] `npm --prefix extensions/vscode test` = `0` (18) e `npm --prefix extensions/vscode run package` = `0`. Usuário confirmou em 27/11/2026, após reinstalar o `.vsix` e recarregar a janela, que a descoberta mostra um único aviso e as observações no canal de saída `Vibe Coding Auditor`.
 
+### Ajuste pós-4.9 — UI dark e layout horizontal do desktop — 27/11/2026
+
+- [x] Motivo: usuário relatou fundo branco irritante, rolagem vertical excessiva e acúmulo de informação. Impacto: apenas apresentação no `apps/desktop` (HTML/CSS/React); nenhuma regra, contrato, schema, SQLite, CLI, extensão ou dependência alterada.
+- [x] Dark mode padrão (`color-scheme: dark`, fundo escuro em `html/body/#root`), workspace mais horizontal, barra lateral sticky, ações em grade, configurações locais recolhíveis, toolbar de resultado com abas no mesmo eixo e rolagem interna do painel de resultado.
+- [x] `npm --prefix apps/desktop test` = `0` (39), `npm --prefix apps/desktop run build` = `0`, `npm --prefix apps/desktop run tauri build` = `0`. Executável atualizado em `target/release/auditor-desktop.exe`.
+
 ### Ajuste pós-4.8 — Nome da CLI e ajuda sem argumentos — 27/11/2026
 
 - [x] Após o usuário relatar que o executável “não abria”, foi confirmado que ele abriu `vibe-coding-auditor.exe`, uma CLI de terminal que terminava em silêncio sem argumentos. O binário foi renomeado para `vibe-coding-auditor-cli`, no `Cargo.toml`, no nome do Clap, nos testes `CARGO_BIN_EXE_*`, na documentação e no padrão `vibeCodingAuditor.cliPath` da extensão. Os binários antigos de `target/release` e `target/debug` foram removidos após o novo build.

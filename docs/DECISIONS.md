@@ -770,3 +770,12 @@ Não foram criados `Cargo.toml`, `auditor.example.toml`, `.gitignore`, diretóri
 - **Alternativas rejeitadas:** manter popups por observação — ruído confirmado; remover todo aviso — esconderia o resultado; usar apenas status bar — perderia acesso fácil ao detalhe.
 - **Impacto:** apenas `extensions/vscode/src/extension.ts` e README da extensão; sem mudanças em regras, contrato, JSON, SQLite, CLI ou desktop. O `.vsix` foi reempacotado.
 - **Verificação:** `npm --prefix extensions/vscode test` = `0` (18) e `npm --prefix extensions/vscode run package` = `0`. Usuário confirmou em 27/11/2026 na host real do VS Code que a descoberta exibiu um único aviso e registrou observações/limitações no canal de saída.
+
+## E4.9.5 — UI dark e navegação horizontal do desktop
+
+- **Data:** 27/11/2026
+- **Decisão:** aplicar refinamento visual no desktop: dark mode padrão, layout mais horizontal, lateral sticky, ações em grade, configurações recolhíveis e rolagem interna por aba de resultado.
+- **Motivo:** usuário reportou fundo branco, rolagem vertical excessiva e acúmulo de informação na interface.
+- **Alternativas rejeitadas:** apenas ajustar cores mantendo layout — não resolveria rolagem; criar múltiplas páginas/rotas — complexidade desnecessária para o MVP; adicionar dependência de UI — sem justificativa.
+- **Impacto:** somente `apps/desktop/index.html`, `apps/desktop/src/App.tsx` e `apps/desktop/src/styles.css`. Nenhuma regra, contrato, schema, SQLite, CLI, extensão ou dependência alterada.
+- **Verificação:** `npm --prefix apps/desktop test` = `0` (39), `npm --prefix apps/desktop run build` = `0`, `npm --prefix apps/desktop run tauri build` = `0`. Executável gerado em `target/release/auditor-desktop.exe`.

@@ -6,10 +6,12 @@ import {
   availableRules,
   availableSeverities,
   coverageLabel,
-  edgeListLabel,
+  dependencyListLabel,
   filterFindings,
   historyRunLine,
+  previewItems,
   reportSummaryPhrase,
+  ruleLabel,
 } from '../out/reportView.js';
 
 /// Relatório real produzido pela CLI sobre a fixture de camadas.
@@ -20,11 +22,28 @@ const report = JSON.parse(
   ),
 );
 
-test('resumo da interface repete exatamente as contagens do núcleo', () => {
+test('resumo da interface usa linguagem corrente sem alterar contagens', () => {
   assert.equal(
     reportSummaryPhrase(report.summary),
-    '3 achados (2 erros, 0 avisos, 0 informações, 1 revisões)',
+    '3 problemas encontrados: 2 erros, 1 item a revisar',
   );
+  assert.equal(
+    reportSummaryPhrase({
+      findings: 0,
+      errors: 0,
+      warnings: 0,
+      infos: 0,
+      needs_review: 0,
+    }),
+    'Nenhum problema encontrado.',
+  );
+});
+
+test('prévia limita a apresentação sem recortar os dados recebidos', () => {
+  const items = ['a', 'b', 'c'];
+  assert.deepEqual(previewItems(items, false, 2), { visible: ['a', 'b'], hidden: 1 });
+  assert.deepEqual(previewItems(items, true, 2), { visible: items, hidden: 0 });
+  assert.deepEqual(previewItems(items, false, 5), { visible: items, hidden: 0 });
 });
 
 test('filtros da interface apenas recortam os achados recebidos', () => {
@@ -56,21 +75,20 @@ test('opções dos filtros vêm somente dos achados do relatório', () => {
 });
 
 test('cobertura exibida usa os dados da análise, sem inferir conclusão', () => {
-  assert.equal(coverageLabel(report.coverage), 'Cobertura do código: 5 de 5 arquivo(s) analisados');
+  assert.equal(coverageLabel(report.coverage), '5 de 5 arquivos verificados');
   assert.equal(
     coverageLabel({
       ...report.coverage,
-      code_files_included: 5,
       code_files_analyzed: 4,
       code_files_not_analyzed: 1,
       partial: true,
       unsupported_code_extensions: [{ extension: 'go', files: 1 }],
     }),
-    'Cobertura do código: 4 de 5 arquivo(s) analisados (parcial); sem analisador: .go (1)',
+    '4 de 5 arquivos verificados (parcial); sem analisador: .go (1 arquivo)',
   );
 });
 
-test('histórico mostra modo e identidade sem transformar ausência em contrato', () => {
+test('histórico mostra modo e contrato sem transformar ausência em aprovação', () => {
   const compliance = {
     recorded_at: '2026-11-26T10:00:00Z',
     project_name: 'projeto',
@@ -89,26 +107,32 @@ test('histórico mostra modo e identidade sem transformar ausência em contrato'
 
   assert.equal(
     historyRunLine(1, compliance),
-    '#1 — 2026-11-26T10:00:00Z — projeto — conformidade — identidade abc123 — 2 achados',
+    'Execução #1 — 2026-11-26T10:00:00Z — projeto — conformidade — contrato abc123 — 2 problemas',
   );
   assert.equal(
     historyRunLine(2, discovery),
-    '#2 — 2026-11-26T11:00:00Z — projeto — descoberta (sem contrato) — sem contrato — 0 achados',
+    'Execução #2 — 2026-11-26T11:00:00Z — projeto — descoberta — sem contrato — 0 problemas',
   );
   assert.equal(
     historyRunLine(3, legacy),
-    '#3 — 2026-11-26T10:00:00Z — projeto — conformidade — identidade desconhecida — 2 achados',
+    'Execução #3 — 2026-11-26T10:00:00Z — projeto — conformidade — contrato não identificado — 2 problemas',
   );
 });
 
-test('lista de arestas usa somente as classificações recebidas', () => {
+test('rótulos de regras conhecidas são legíveis e desconhecidas permanecem literais', () => {
+  assert.equal(ruleLabel('dep.not_allowed'), 'Dependência não permitida');
+  assert.equal(ruleLabel('code.duplicated'), 'Código repetido');
+  assert.equal(ruleLabel('regra.nova'), 'regra.nova');
+});
+
+test('lista de ligações usa somente as classificações recebidas', () => {
   assert.equal(
-    edgeListLabel([
+    dependencyListLabel([
       { from: 'application', to: 'domain', kind: 'allowed' },
       { from: 'web', to: 'infrastructure', kind: 'forbidden' },
       { from: 'web', to: 'externo', kind: 'unresolved' },
     ]),
-    'application → domain (permitida); web → infrastructure (proibida); web → externo (não resolvida)',
+    'application → domain (permitida); web → infrastructure (bloqueada); web → externo (não identificada)',
   );
-  assert.equal(edgeListLabel([]), 'nenhuma');
+  assert.equal(dependencyListLabel([]), 'nenhuma ligação');
 });

@@ -9,6 +9,7 @@
     "src/skipSummary.ts",
     "src/reportView.ts",
     "src/status.ts",
+    "src/viewState.ts",
     "src/builderFlow.ts",
     "src/BuilderWizard.tsx"
   ]

@@ -15,10 +15,12 @@ import {
   availableRules,
   availableSeverities,
   coverageLabel,
-  edgeListLabel,
+  dependencyListLabel,
   filterFindings,
   historyRunLine,
+  previewItems,
   reportSummaryPhrase,
+  ruleLabel,
 } from './reportView';
 import {
   auditStatus,
@@ -30,6 +32,7 @@ import {
   historyStatus,
   recordStatus,
   selectionStatus,
+  statusKindLabel,
   statusLine,
   type ActionName,
   type ActionStatus,
@@ -39,8 +42,10 @@ import {
   skipSummaryLine,
   type SkipReasonSummary,
 } from './skipSummary';
+import { isProjectChange, projectViewReset } from './viewState';
 
 type Severity = 'error' | 'warning' | 'info' | 'needs_review';
+type ResultPanel = 'discovery' | 'report' | 'graph' | 'contract' | 'history';
 type DependencyKind = 'allowed' | 'forbidden' | 'unresolved';
 
 interface Finding {
@@ -125,7 +130,7 @@ const SEVERITY_LABELS: Record<Severity, string> = {
   error: 'erro',
   warning: 'aviso',
   info: 'informação',
-  needs_review: 'revisão necessária',
+  needs_review: 'a revisar',
 };
 
 const EDGE_COLORS: Record<DependencyKind, string> = {
@@ -136,6 +141,11 @@ const EDGE_COLORS: Record<DependencyKind, string> = {
 
 const GRAPH_WIDTH = 440;
 const GRAPH_HEIGHT = 320;
+const FINDING_PREVIEW_LIMIT = 5;
+const OBSERVATION_PREVIEW_LIMIT = 6;
+
+/// Estado inicial compartilhado pela primeira abertura e pela troca de projeto.
+const INITIAL_VIEW = projectViewReset();
 
 /// Posição determinística de um nó no grafo, derivada apenas da ordem dos nomes.
 function nodePosition(index: number, total: number): { x: number; y: number } {
@@ -147,25 +157,59 @@ function nodePosition(index: number, total: number): { x: number; y: number } {
 }
 
 export default function App() {
-  const [projectPath, setProjectPath] = useState('');
+  const [projectPath, setProjectPath] = useState(INITIAL_VIEW.projectPath);
   const [database, setDatabase] = useState('data/auditor.db');
-  const [report, setReport] = useState<AuditReport | null>(null);
-  const [discoveryReport, setDiscoveryReport] = useState<DiscoveryReport | null>(null);
-  const [analysis, setAnalysis] = useState<Analysis | null>(null);
-  const [contractText, setContractText] = useState<string | null>(null);
-  const [runs, setRuns] = useState<RunSummary[]>([]);
-  const [severityFilter, setSeverityFilter] = useState('all');
-  const [ruleFilter, setRuleFilter] = useState('all');
-  const [statuses, setStatuses] = useState<ActionStatus[]>([]);
-  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [report, setReport] = useState<AuditReport | null>(INITIAL_VIEW.report);
+  const [discoveryReport, setDiscoveryReport] = useState<DiscoveryReport | null>(
+    INITIAL_VIEW.discoveryReport,
+  );
+  const [analysis, setAnalysis] = useState<Analysis | null>(INITIAL_VIEW.analysis);
+  const [contractText, setContractText] = useState<string | null>(INITIAL_VIEW.contractText);
+  const [runs, setRuns] = useState<RunSummary[]>(INITIAL_VIEW.runs);
+  const [severityFilter, setSeverityFilter] = useState<string>(INITIAL_VIEW.severityFilter);
+  const [ruleFilter, setRuleFilter] = useState<string>(INITIAL_VIEW.ruleFilter);
+  const [statuses, setStatuses] = useState<ActionStatus[]>(INITIAL_VIEW.statuses);
+  const [historyLoaded, setHistoryLoaded] = useState(INITIAL_VIEW.historyLoaded);
   const [busy, setBusy] = useState(false);
-  const [detected, setDetected] = useState<ProjectRunStatus | null>(null);
-  const [wizardOpen, setWizardOpen] = useState(false);
+  const [detected, setDetected] = useState<ProjectRunStatus | null>(INITIAL_VIEW.detected);
+  const [wizardOpen, setWizardOpen] = useState(INITIAL_VIEW.wizardOpen);
+  const [activePanel, setActivePanel] = useState<ResultPanel | null>(INITIAL_VIEW.activePanel);
+  const [showAllFindings, setShowAllFindings] = useState(INITIAL_VIEW.showAllFindings);
+  const [showAllObservations, setShowAllObservations] = useState(
+    INITIAL_VIEW.showAllObservations,
+  );
 
   const pushStatus = useCallback(
     (status: ActionStatus) => setStatuses((current) => [status, ...current].slice(0, 5)),
     [],
   );
+
+  /// Remove resultados e mensagens de outro projeto sem apagar a configuração local.
+  const clearResults = useCallback(() => {
+    setReport(INITIAL_VIEW.report);
+    setDiscoveryReport(INITIAL_VIEW.discoveryReport);
+    setAnalysis(INITIAL_VIEW.analysis);
+    setContractText(INITIAL_VIEW.contractText);
+    setRuns(INITIAL_VIEW.runs);
+    setSeverityFilter(INITIAL_VIEW.severityFilter);
+    setRuleFilter(INITIAL_VIEW.ruleFilter);
+    setStatuses(INITIAL_VIEW.statuses);
+    setHistoryLoaded(INITIAL_VIEW.historyLoaded);
+    setDetected(INITIAL_VIEW.detected);
+    setWizardOpen(INITIAL_VIEW.wizardOpen);
+    setActivePanel(INITIAL_VIEW.activePanel);
+    setShowAllFindings(INITIAL_VIEW.showAllFindings);
+    setShowAllObservations(INITIAL_VIEW.showAllObservations);
+  }, []);
+
+  /// Toda mudança de raiz começa do zero, inclusive quando o caminho é digitado.
+  const changeProject = (nextPath: string) => {
+    if (!isProjectChange(projectPath, nextPath)) {
+      return;
+    }
+    clearResults();
+    setProjectPath(nextPath);
+  };
 
   /// Leva o usuário ao painel gerado pela ação, depois da atualização da tela.
   const reveal = (id: string) =>
@@ -206,9 +250,7 @@ export default function App() {
     execute('select', async () => {
       const selected = await open({ directory: true, multiple: false });
       if (typeof selected === 'string') {
-        setProjectPath(selected);
-        setDetected(null);
-        setWizardOpen(false);
+        changeProject(selected);
         pushStatus(selectionStatus(selected));
       } else {
         pushStatus(cancelledSelectionStatus());
@@ -223,8 +265,10 @@ export default function App() {
     setReport(result);
     setDiscoveryReport(null);
     setAnalysis(null);
-    setSeverityFilter('all');
-    setRuleFilter('all');
+    setSeverityFilter(INITIAL_VIEW.severityFilter);
+    setRuleFilter(INITIAL_VIEW.ruleFilter);
+    setShowAllFindings(INITIAL_VIEW.showAllFindings);
+    setActivePanel('report');
   };
 
   /// Executa o modo escolhido pelo núcleo; nenhum modo é inferido na interface.
@@ -237,34 +281,40 @@ export default function App() {
         setDiscoveryReport(discovery);
         setReport(null);
         setAnalysis(null);
+        setShowAllObservations(INITIAL_VIEW.showAllObservations);
+        setActivePanel('discovery');
         pushStatus(builderStatus(runModeLabel(mode), 'success'));
-        reveal('painel-descoberta');
+        reveal('resultado');
         return;
       }
       const result = await invoke<AuditReport>('audit_project', { path: projectPath });
       setReport(result);
       setDiscoveryReport(null);
       setAnalysis(null);
-      setSeverityFilter('all');
-      setRuleFilter('all');
+      setSeverityFilter(INITIAL_VIEW.severityFilter);
+      setRuleFilter(INITIAL_VIEW.ruleFilter);
+      setShowAllFindings(INITIAL_VIEW.showAllFindings);
+      setActivePanel('report');
       pushStatus(auditStatus(reportSummaryPhrase(result.summary)));
-      reveal('painel-relatorio');
+      reveal('resultado');
     });
 
   const showGraph = () =>
     execute('graph', async () => {
       const result = await invoke<Analysis>('analyze_project', { path: projectPath });
       setAnalysis(result);
+      setActivePanel('graph');
       pushStatus(graphStatus(result.modules.length, result.edges.length));
-      reveal('painel-grafo');
+      reveal('resultado');
     });
 
   const openContract = () =>
     execute('contract', async () => {
       const text = await invoke<string>('read_contract', { path: projectPath });
       setContractText(text);
+      setActivePanel('contract');
       pushStatus(contractStatus(text));
-      reveal('painel-contrato');
+      reveal('resultado');
     });
 
   const recordRun = () =>
@@ -274,7 +324,8 @@ export default function App() {
       const id = await invoke<number>('history_record', { path: projectPath, database });
       pushStatus(recordStatus(id, runModeLabel(mode)));
       await refreshHistory();
-      reveal('painel-historico');
+      setActivePanel('history');
+      reveal('resultado');
     });
 
   // Filtros apenas apresentam o relatório recebido; nenhuma regra é avaliada aqui.
@@ -289,6 +340,21 @@ export default function App() {
     : [];
   const nodeIndexOf = (name: string) => graphNodes.indexOf(name);
 
+  const resultTabs: Array<{ id: ResultPanel; label: string; available: boolean }> = [
+    { id: 'discovery', label: 'Descoberta', available: discoveryReport !== null },
+    { id: 'report', label: 'Relatório', available: report !== null },
+    { id: 'graph', label: 'Mapa', available: analysis !== null },
+    { id: 'contract', label: 'Contrato', available: contractText !== null },
+    { id: 'history', label: 'Histórico', available: historyLoaded },
+  ];
+  const activeResult = resultTabs.find((tab) => tab.id === activePanel && tab.available) ?? null;
+  const findingPreview = previewItems(visibleFindings, showAllFindings, FINDING_PREVIEW_LIMIT);
+  const observationPreview = previewItems(
+    observationLines(discoveryReport, 50),
+    showAllObservations,
+    OBSERVATION_PREVIEW_LIMIT,
+  );
+
   return (
     <main>
       <header className="cabecalho">
@@ -299,16 +365,27 @@ export default function App() {
       <section className="panel" aria-label="Status das ações">
         <h2>Status</h2>
         {statuses.length === 0 ? (
-          <p className="detail">Nenhuma ação executada nesta sessão.</p>
+          <p className="detail">Nenhuma ação executada neste projeto.</p>
         ) : (
-          <ul className="status-list">
-            {statuses.map((status, index) => (
-              <li key={`${status.action}-${index}`} className={`status-${status.kind}`}>
-                <span className="status-kind">{status.kind === 'error' ? 'falha' : status.kind}</span>
-                {statusLine(status)}
-              </li>
-            ))}
-          </ul>
+          <>
+            <div className={`status-linha status-${statuses[0].kind}`}>
+              <span className="status-kind">{statusKindLabel(statuses[0].kind)}</span>
+              {statusLine(statuses[0])}
+            </div>
+            {statuses.length > 1 && (
+              <details className="detalhe-bloco">
+                <summary>Mensagens anteriores ({statuses.length - 1})</summary>
+                <ul className="status-list">
+                  {statuses.slice(1).map((status, index) => (
+                    <li key={`${status.action}-${index}`} className={`status-${status.kind}`}>
+                      <span className="status-kind">{statusKindLabel(status.kind)}</span>
+                      {statusLine(status)}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </>
         )}
         {busy && <p className="detail">Operação em andamento…</p>}
       </section>
@@ -319,13 +396,13 @@ export default function App() {
           Caminho da raiz
           <input
             value={projectPath}
-            onChange={(event) => setProjectPath(event.target.value)}
+            onChange={(event) => changeProject(event.target.value)}
             placeholder="C:\caminho\do\projeto"
           />
         </label>
         <p className="detail hint">
-          Selecione a raiz do projeto. “Detectar projeto” distingue descoberta e conformidade; o
-          assistente mostra sugestões, mas não grava nenhum arquivo nesta etapa.
+          Escolha a pasta do projeto. Trocar a pasta limpa os resultados anteriores. Nada é
+          alterado no projeto sem sua confirmação.
         </p>
         {projectPath && (
           <p className="detail">
@@ -363,7 +440,17 @@ export default function App() {
           <button type="button" disabled={busy || !projectPath} onClick={recordRun}>
             Registrar execução
           </button>
-          <button type="button" disabled={busy} onClick={() => execute('history', refreshHistory)}>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() =>
+              execute('history', async () => {
+                await refreshHistory();
+                setActivePanel('history');
+                reveal('resultado');
+              })
+            }
+          >
             Atualizar histórico
           </button>
         </div>
@@ -385,21 +472,52 @@ export default function App() {
         </p>
       </section>
 
-      {discoveryReport && (
+      {resultTabs.some((tab) => tab.available) && (
+        <nav className="result-tabs" id="resultado" aria-label="Resultados disponíveis">
+          {resultTabs
+            .filter((tab) => tab.available)
+            .map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className={`aba${activeResult?.id === tab.id ? ' ativa' : ''}`}
+                onClick={() => setActivePanel(tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
+        </nav>
+      )}
+
+      {activeResult?.id === 'discovery' && discoveryReport && (
         <section className="panel" id="painel-descoberta">
-          <h2>Descoberta: observações do projeto</h2>
+          <h2>O que foi encontrado</h2>
           <p className="detail">
-            Sem <code>auditor.toml</code>, o núcleo apenas observa a estrutura. Nenhuma
-            dependência foi aprovada e nenhuma regra de conformidade foi avaliada.
+            Sem <code>auditor.toml</code>, o programa apenas observa a estrutura. Nenhuma
+            dependência foi aprovada e nada foi comparado com regras.
           </p>
-          {observationLines(discoveryReport).length === 0 ? (
-            <p>Nenhuma observação disponível.</p>
+          {observationPreview.visible.length === 0 ? (
+            <p>Nada a observar nesta pasta.</p>
           ) : (
-            <ul>
-              {observationLines(discoveryReport).map((line, index) => (
+            <ul className="observacoes">
+              {observationPreview.visible.map((line, index) => (
                 <li key={`${index}-${line}`}>{line}</li>
               ))}
             </ul>
+          )}
+          {observationPreview.hidden > 0 && (
+            <button type="button" className="secundario" onClick={() => setShowAllObservations(true)}>
+              Ver mais {observationPreview.hidden} observações
+            </button>
+          )}
+          {showAllObservations && observationPreview.visible.length > OBSERVATION_PREVIEW_LIMIT && (
+            <button
+              type="button"
+              className="secundario"
+              onClick={() => setShowAllObservations(false)}
+            >
+              Mostrar menos
+            </button>
           )}
           {detected && (
             <button type="button" className="primario" onClick={() => setWizardOpen(true)}>
@@ -409,24 +527,23 @@ export default function App() {
         </section>
       )}
 
-      {report && (
+      {activeResult?.id === 'report' && report && (
         <section className="panel" id="painel-relatorio">
-          <h2>Relatório: {report.project}</h2>
-          <p>
-            Schema v{report.schema_version} · {report.summary.files_included} arquivos incluídos ·{' '}
-            {report.summary.modules} módulos · {report.summary.packages} pacotes ·{' '}
-            {report.summary.edges} arestas
+          <h2>Resultado: {report.project}</h2>
+          <p className="detail">
+            {report.summary.files_included} arquivos incluídos · {report.summary.modules} módulos ·{' '}
+            {report.summary.packages} pacotes · {report.summary.edges} ligações
           </p>
           <p className="detail">{coverageLabel(report.coverage)}</p>
           {report.skip_summary.total > 0 && (
-            <div>
-              <p className="detail">{skipSummaryHeadline(report.skip_summary)}</p>
+            <details className="detalhe-bloco">
+              <summary>{skipSummaryHeadline(report.skip_summary)}</summary>
               <ul className="detail">
                 {report.skip_summary.reasons.map((reason) => (
                   <li key={reason.reason}>{skipSummaryLine(reason)}</li>
                 ))}
               </ul>
-            </div>
+            </details>
           )}
           <p className="summary">{reportSummaryPhrase(report.summary)}</p>
 
@@ -443,65 +560,99 @@ export default function App() {
               </select>
             </label>
             <label>
-              Regra
+              Tipo de problema
               <select value={ruleFilter} onChange={(event) => setRuleFilter(event.target.value)}>
-                <option value="all">todas</option>
+                <option value="all">todos</option>
                 {rules.map((rule) => (
                   <option key={rule} value={rule}>
-                    {rule}
+                    {ruleLabel(rule)}
                   </option>
                 ))}
               </select>
             </label>
           </div>
 
-          {visibleFindings.length === 0 ? (
-            <p>Nenhum achado para os filtros atuais.</p>
+          {findingPreview.visible.length === 0 ? (
+            <p>Nada a mostrar com esses filtros.</p>
           ) : (
-            <ul className="findings">
-              {visibleFindings.map((finding) => (
-                <li key={finding.id}>
-                  <strong>
-                    <span className={`badge severidade-${finding.severity}`}>
-                      {SEVERITY_LABELS[finding.severity]}
-                    </span>{' '}
-                    {finding.title}
-                  </strong>
-                  <div className="detail">id: {finding.id}</div>
-                  <div className="detail">
-                    local: {finding.path}
-                    {finding.line_start === null ? '' : `:${finding.line_start}`}
-                  </div>
-                  <div className="detail">{finding.message}</div>
-                  {finding.evidence && <div className="detail">evidência: {finding.evidence}</div>}
-                  <div className="detail">esperado: {finding.expected}</div>
-                  <div className="detail">sugestão: {finding.suggestion}</div>
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul className="findings">
+                {findingPreview.visible.map((finding) => (
+                  <li key={finding.id}>
+                    <div className="achado-cabecalho">
+                      <span className={`badge severidade-${finding.severity}`}>
+                        {SEVERITY_LABELS[finding.severity]}
+                      </span>
+                      <strong>{finding.title}</strong>
+                    </div>
+                    <p className="detail">{finding.message}</p>
+                    <p className="detail achado-local">
+                      Em {finding.path}
+                      {finding.line_start === null ? '' : `, linha ${finding.line_start}`}
+                    </p>
+                    <details className="detalhe-bloco">
+                      <summary>Como resolver</summary>
+                      <p className="detail">
+                        <strong>Tipo:</strong> {ruleLabel(finding.rule_id)}
+                      </p>
+                      {finding.evidence && (
+                        <p className="detail">
+                          <strong>O que foi visto:</strong> {finding.evidence}
+                        </p>
+                      )}
+                      <p className="detail">
+                        <strong>O que se esperava:</strong> {finding.expected}
+                      </p>
+                      <p className="detail">
+                        <strong>Sugestão:</strong> {finding.suggestion}
+                      </p>
+                      <p className="detail referencia">Referência: {finding.id}</p>
+                    </details>
+                  </li>
+                ))}
+              </ul>
+              {findingPreview.hidden > 0 && (
+                <button
+                  type="button"
+                  className="secundario"
+                  onClick={() => setShowAllFindings(true)}
+                >
+                  Ver mais {findingPreview.hidden} problemas
+                </button>
+              )}
+              {showAllFindings && visibleFindings.length > FINDING_PREVIEW_LIMIT && (
+                <button
+                  type="button"
+                  className="secundario"
+                  onClick={() => setShowAllFindings(false)}
+                >
+                  Mostrar menos
+                </button>
+              )}
+            </>
           )}
 
           {report.limitations.length > 0 && (
-            <div>
-              <h3>Limitações</h3>
-              <ul>
+            <details className="detalhe-bloco">
+              <summary>O que este resultado não cobre ({report.limitations.length})</summary>
+              <ul className="detail">
                 {report.limitations.map((limitation) => (
                   <li key={limitation}>{limitation}</li>
                 ))}
               </ul>
-            </div>
+            </details>
           )}
         </section>
       )}
 
-      {analysis && (
+      {activeResult?.id === 'graph' && analysis && (
         <section className="panel" id="painel-grafo">
-          <h2>Grafo de dependências</h2>
+          <h2>Mapa de módulos</h2>
           <p className="detail">{coverageLabel(analysis.coverage)}</p>
           <ul className="legenda">
             <li><span className="linha-legenda" style={{ background: EDGE_COLORS.allowed }} /> permitida</li>
-            <li><span className="linha-legenda" style={{ background: EDGE_COLORS.forbidden }} /> proibida</li>
-            <li><span className="linha-legenda" style={{ background: EDGE_COLORS.unresolved }} /> não resolvida</li>
+            <li><span className="linha-legenda" style={{ background: EDGE_COLORS.forbidden }} /> bloqueada</li>
+            <li><span className="linha-legenda" style={{ background: EDGE_COLORS.unresolved }} /> não identificada</li>
           </ul>
           {graphNodes.length === 0 ? (
             <p>Nenhum módulo declarado no contrato.</p>
@@ -567,26 +718,31 @@ export default function App() {
                   );
                 })}
               </svg>
-              <p className="detail">
-                Arestas: {edgeListLabel(analysis.edges)}. Nós tracejados não pertencem ao contrato.
-              </p>
+              <details className="detalhe-bloco">
+                <summary>Ver as {analysis.edges.length} ligações</summary>
+                <p className="detail">{dependencyListLabel(analysis.edges)}</p>
+              </details>
+              <p className="detail">Pontos tracejados ficam fora do contrato.</p>
               {analysis.limitations.length > 0 && (
-                <ul>
-                  {analysis.limitations.map((limitation) => (
-                    <li key={limitation}>{limitation}</li>
-                  ))}
-                </ul>
+                <details className="detalhe-bloco">
+                  <summary>O que este mapa não cobre ({analysis.limitations.length})</summary>
+                  <ul className="detail">
+                    {analysis.limitations.map((limitation) => (
+                      <li key={limitation}>{limitation}</li>
+                    ))}
+                  </ul>
+                </details>
               )}
             </>
           )}
         </section>
       )}
 
-      {contractText !== null && (
+      {activeResult?.id === 'contract' && contractText !== null && (
         <section className="panel" id="painel-contrato">
           <h2>Contrato do projeto</h2>
-          <p>Visualização somente leitura; a interface não altera o contrato.</p>
-          <pre>{contractText}</pre>
+          <p className="detail">Somente leitura; a interface não altera este arquivo.</p>
+          <pre className="contrato">{contractText}</pre>
         </section>
       )}
 
@@ -599,7 +755,7 @@ export default function App() {
         />
       )}
 
-      {historyLoaded && (
+      {activeResult?.id === 'history' && historyLoaded && (
         <section className="panel" id="painel-historico">
           <h2>Histórico local</h2>
           {runs.length === 0 ? (

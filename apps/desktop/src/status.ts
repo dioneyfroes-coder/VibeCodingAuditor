@@ -23,14 +23,20 @@ export interface ActionStatus {
   message: string;
 }
 
+const KIND_LABELS: Record<StatusKind, string> = {
+  success: 'concluído',
+  info: 'informação',
+  error: 'falha',
+};
+
 const ACTION_LABELS: Record<ActionName, string> = {
   select: 'Pasta',
   audit: 'Auditoria',
-  graph: 'Grafo',
+  graph: 'Mapa',
   contract: 'Contrato',
   record: 'Registro',
   history: 'Histórico',
-  builder: 'Builder',
+  builder: 'Assistente',
 };
 
 /// Contagem com flexão portuguesa simples, sem alterar os números recebidos.
@@ -41,6 +47,11 @@ function countLabel(count: number, singular: string, plural: string): string {
 /// Linha única exibida na área de status.
 export function statusLine(status: ActionStatus): string {
   return `${ACTION_LABELS[status.action]}: ${status.message}`;
+}
+
+/// Natureza da mensagem em português, sem alterar o tipo usado pelo helper.
+export function statusKindLabel(kind: StatusKind): string {
+  return KIND_LABELS[kind];
 }
 
 /// Pasta escolhida pelo diálogo nativo.
@@ -63,7 +74,7 @@ export function graphStatus(modules: number, edges: number): ActionStatus {
   return {
     action: 'graph',
     kind: 'success',
-    message: `${countLabel(modules, 'módulo', 'módulos')}, ${countLabel(edges, 'aresta', 'arestas')}`,
+    message: `${countLabel(modules, 'módulo', 'módulos')}, ${countLabel(edges, 'ligação', 'ligações')}`,
   };
 }
 

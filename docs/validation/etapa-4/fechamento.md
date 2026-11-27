@@ -109,3 +109,27 @@ A pedido do usuário, o executável da CLI foi renomeado para `vibe-coding-audit
 | `vibe-coding-auditor-cli.exe --help` | 0 | ajuda do Clap com todos os subcomandos |
 
 Os binários antigos `target/release/vibe-coding-auditor.exe` e `target/debug/vibe-coding-auditor.exe` foram removidos. A suíte completa foi reexecutada: `cargo test --workspace` = `0` (277 testes: 239 no núcleo, 11 unitários na CLI, 7 de integração na CLI, 5 de fixtures na CLI e 15 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` = `0`, `npm --prefix extensions/vscode test` = `0` (12) e `npm --prefix extensions/vscode run package` = `0`. Os testes e o build do desktop também permaneceram em `0`. Nenhuma regra, schema, contrato ou dependência foi alterado.
+
+## Validação manual — 27/11/2026
+
+O usuário executou manualmente o desktop com o próprio VibeCodingAuditor e o projeto BackBet e confirmou que os fluxos examinados funcionaram. Em pergunta explícita, respondeu que a validação foi **somente do desktop**; a extensão na host real do VS Code não foi executada nesta rodada e continua pendente. Ele relatou quatro ressalvas de apresentação: excesso de informações, página enorme com barra de rolagem, resíduos de um projeto ao trocar para outro e linguagem muito técnica. A Etapa 4 não é declarada totalmente concluída enquanto a validação da extensão estiver pendente.
+
+## Etapa 4.9 — Interface mais limpa — 27/11/2026
+
+A pedido do usuário, a tela passou a limpar todos os resultados ao trocar de pasta, a exibir apenas uma aba de resultado por vez, a limitar listas longas com “Ver mais” e detalhes recolhidos, e a traduzir rótulos técnicos para linguagem corrente. Adicionados `apps/desktop/src/viewState.ts` e `apps/desktop/tests/viewState.test.mjs`; nenhuma regra, schema, contrato ou dependência mudou.
+
+| Comando | Código | Resultado |
+|---|---:|---|
+| `cargo fmt --all` | 0 | formatação aplicada |
+| `cargo fmt --all --check` | 0 | sem diferenças |
+| `cargo check --workspace` | 0 | workspace compila |
+| `cargo test --workspace` | 0 | 277 testes Rust, nenhuma falha |
+| `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` | 0 | sem avisos |
+| `npm --prefix apps/desktop test` | 0 | 39 testes Node |
+| `npm --prefix apps/desktop run build` | 0 | build Vite concluído |
+| `npm --prefix extensions/vscode test` | 0 | 12 testes Node |
+| `npm --prefix extensions/vscode run package` | 0 | `vibe-coding-auditor-0.1.0.vsix` |
+| `npm --prefix apps/desktop run tauri build` | 0 | `target/release/auditor-desktop.exe` |
+| `git diff --check` | 0 | somente avisos LF/CRLF do OneDrive |
+
+Smoke da janela: `auditor-desktop.exe` iniciou com `RESPONDING=True`, `MainWindowHandle` não nulo e título `Vibe Coding Auditor`. Não houve nova validação visual pelo usuário após esta mudança de interface; os testes cobrem os helpers de apresentação e limpeza de estado, não a aparência final.

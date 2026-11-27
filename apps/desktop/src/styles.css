@@ -402,3 +402,74 @@ fieldset {
 .comparison-columns ul {
   overflow-wrap: anywhere;
 }
+
+.status-linha {
+  border-left: 4px solid var(--borda);
+  border-radius: 4px;
+  background: var(--fundo);
+  overflow-wrap: anywhere;
+  padding: 8px 12px;
+}
+
+.result-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0 0;
+}
+
+.result-tabs .aba {
+  background: var(--fundo);
+  border-color: var(--borda);
+  color: var(--texto-suave);
+  padding: 7px 14px;
+}
+
+.result-tabs .aba.ativa {
+  background: var(--acento);
+  border-color: var(--acento);
+  color: #fff;
+}
+
+button.secundario {
+  background: var(--fundo);
+  border-color: var(--borda);
+  color: var(--acento);
+  margin-top: 10px;
+  padding: 7px 12px;
+}
+
+.detalhe-bloco {
+  border: 1px solid var(--borda);
+  border-radius: 6px;
+  margin: 12px 0;
+  padding: 8px 12px;
+}
+
+.detalhe-bloco > summary {
+  color: var(--acento);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.achado-cabecalho {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.achado-local,
+.referencia {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.observacoes {
+  margin: 8px 0;
+  padding-left: 22px;
+}
+
+pre.contrato {
+  max-height: 320px;
+}

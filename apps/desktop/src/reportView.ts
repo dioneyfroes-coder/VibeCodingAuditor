@@ -46,15 +46,62 @@ export interface EdgeView {
   kind: DependencyKind;
 }
 
-const EDGE_LABELS: Record<DependencyKind, string> = {
+const RELATION_LABELS: Record<DependencyKind, string> = {
   allowed: 'permitida',
-  forbidden: 'proibida',
-  unresolved: 'não resolvida',
+  forbidden: 'bloqueada',
+  unresolved: 'não identificada',
 };
 
-/// Reproduz as contagens do relatório sem reinterpretar severidades.
+/// Nomes amigáveis para regras conhecidas; identificadores desconhecidos seguem literais.
+const RULE_LABELS: Record<string, string> = {
+  'dep.not_allowed': 'Dependência não permitida',
+  'dep.layer_not_allowed': 'Dependência entre camadas não permitida',
+  'dep.unresolved': 'Dependência não identificada',
+  'file.unmapped': 'Arquivo sem módulo',
+  'file.ambiguous_module': 'Arquivo em mais de um módulo',
+  'dep.cycle': 'Ciclo de dependências',
+  'module.no_files': 'Módulo sem arquivos',
+  'module.concentration': 'Módulo concentrado',
+  'code.duplicated': 'Código repetido',
+  'module.unreferenced': 'Módulo não usado',
+};
+
+/// Traduz apenas o rótulo; nenhuma regra é avaliada ou renomeada no relatório.
+export function ruleLabel(ruleId: string): string {
+  return RULE_LABELS[ruleId] ?? ruleId;
+}
+
+/// Reproduz as contagens do relatório em linguagem corrente, sem reclassificar severidades.
 export function reportSummaryPhrase(summary: CountSummary): string {
-  return `${summary.findings} achados (${summary.errors} erros, ${summary.warnings} avisos, ${summary.infos} informações, ${summary.needs_review} revisões)`;
+  if (summary.findings === 0) {
+    return 'Nenhum problema encontrado.';
+  }
+  const groups: string[] = [];
+  if (summary.errors > 0) {
+    groups.push(`${summary.errors} ${summary.errors === 1 ? 'erro' : 'erros'}`);
+  }
+  if (summary.warnings > 0) {
+    groups.push(`${summary.warnings} ${summary.warnings === 1 ? 'aviso' : 'avisos'}`);
+  }
+  if (summary.infos > 0) {
+    groups.push(`${summary.infos} ${summary.infos === 1 ? 'informação' : 'informações'}`);
+  }
+  if (summary.needs_review > 0) {
+    groups.push(
+      `${summary.needs_review} ${summary.needs_review === 1 ? 'item a revisar' : 'itens a revisar'}`,
+    );
+  }
+  const headline = `${summary.findings} ${summary.findings === 1 ? 'problema encontrado' : 'problemas encontrados'}`;
+  return groups.length > 0 ? `${headline}: ${groups.join(', ')}` : headline;
+}
+
+/// Recorta listas longas para a tela, mantendo os dados originais intactos.
+export function previewItems<T>(items: T[], showAll: boolean, limit: number): {
+  visible: T[];
+  hidden: number;
+} {
+  const visible = showAll ? items : items.slice(0, limit);
+  return { visible, hidden: items.length - visible.length };
 }
 
 /// Recorta a lista recebida; `all` mantém todos os itens de cada dimensão.
@@ -80,36 +127,38 @@ export function availableRules(findings: FilterableFinding[]): string[] {
   return Array.from(new Set(findings.map((finding) => finding.rule_id))).sort();
 }
 
-/// Mostra a cobertura exatamente como recebida, sem inferir qualidade.
+/// Mostra a cobertura exatamente como recebida, em texto mais simples.
 export function coverageLabel(coverage: CoverageView): string {
-  const base = `Cobertura do código: ${coverage.code_files_analyzed} de ${coverage.code_files_included} arquivo(s) analisados`;
+  const included = coverage.code_files_included;
+  const files = included === 1 ? 'arquivo' : 'arquivos';
+  const checked = included === 1 ? 'verificado' : 'verificados';
+  const base = `${coverage.code_files_analyzed} de ${included} ${files} ${checked}`;
   const partial = coverage.partial ? ' (parcial)' : '';
   const unsupported = coverage.unsupported_code_extensions.length
     ? `; sem analisador: ${coverage.unsupported_code_extensions
-        .map((item) => `.${item.extension} (${item.files})`)
+        .map((item) => `.${item.extension} (${item.files} ${item.files === 1 ? 'arquivo' : 'arquivos'})`)
         .join(', ')}`
     : '';
   return `${base}${partial}${unsupported}`;
 }
 
-/// Linha do histórico com modo e identidade, sem inferir contrato ausente.
+/// Linha do histórico com modo e contrato, sem inferir contrato ausente.
 export function historyRunLine(id: number, run: HistoryRunView): string {
-  const mode = run.execution_mode === 'discovery'
-    ? 'descoberta (sem contrato)'
-    : 'conformidade';
+  const mode = run.execution_mode === 'discovery' ? 'descoberta' : 'conformidade';
   const contract = run.execution_mode === 'discovery'
     ? 'sem contrato'
     : run.contract_identity === null
-      ? 'identidade desconhecida'
-      : `identidade ${run.contract_identity}`;
-  const findings = `${run.summary.findings} ${run.summary.findings === 1 ? 'achado' : 'achados'}`;
-  return `#${id} — ${run.recorded_at} — ${run.project_name} — ${mode} — ${contract} — ${findings}`;
+      ? 'contrato não identificado'
+      : `contrato ${run.contract_identity}`;
+  const findings = `${run.summary.findings} ${run.summary.findings === 1 ? 'problema' : 'problemas'}`;
+  return `Execução #${id} — ${run.recorded_at} — ${run.project_name} — ${mode} — ${contract} — ${findings}`;
 }
 
-/// Descreve as arestas do grafo usando apenas a classificação do núcleo.
-export function edgeListLabel(edges: EdgeView[]): string {
+/// Descreve as ligações do mapa usando apenas a classificação do núcleo.
+export function dependencyListLabel(edges: EdgeView[]): string {
   return (
-    edges.map((edge) => `${edge.from} → ${edge.to} (${EDGE_LABELS[edge.kind]})`).join('; ') ||
-    'nenhuma'
+    edges
+      .map((edge) => `${edge.from} → ${edge.to} (${RELATION_LABELS[edge.kind]})`)
+      .join('; ') || 'nenhuma ligação'
   );
 }

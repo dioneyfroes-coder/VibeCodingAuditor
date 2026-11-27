@@ -12,6 +12,7 @@ import {
   historyStatus,
   recordStatus,
   selectionStatus,
+  statusKindLabel,
   statusLine,
 } from '../out/status.js';
 import { reportSummaryPhrase } from '../out/reportView.js';
@@ -24,12 +25,18 @@ const report = JSON.parse(
   ),
 );
 
+test('a natureza da mensagem aparece em português', () => {
+  assert.equal(statusKindLabel('success'), 'concluído');
+  assert.equal(statusKindLabel('info'), 'informação');
+  assert.equal(statusKindLabel('error'), 'falha');
+});
+
 test('cada ação tem rótulo próprio na linha de status', () => {
   assert.equal(
     statusLine(auditStatus(reportSummaryPhrase(report.summary))),
-    'Auditoria: 3 achados (2 erros, 0 avisos, 0 informações, 1 revisões)',
+    'Auditoria: 3 problemas encontrados: 2 erros, 1 item a revisar',
   );
-  assert.equal(statusLine(graphStatus(4, 5)), 'Grafo: 4 módulos, 5 arestas');
+  assert.equal(statusLine(graphStatus(4, 5)), 'Mapa: 4 módulos, 5 ligações');
   assert.equal(statusLine(contractStatus('abc')), 'Contrato: 3 caracteres lidos');
   assert.equal(statusLine(recordStatus(7)), 'Registro: execução #7 gravada');
   assert.equal(
@@ -47,15 +54,15 @@ test('seleção de pasta informa o caminho e também o cancelamento', () => {
   assert.equal(statusLine(cancelledSelectionStatus()), 'Pasta: seleção cancelada');
 });
 
-test('grafo e contrato usam singular e plural conforme a contagem', () => {
-  assert.equal(statusLine(graphStatus(1, 0)), 'Grafo: 1 módulo, 0 arestas');
+test('mapa e contrato usam singular e plural conforme a contagem', () => {
+  assert.equal(statusLine(graphStatus(1, 0)), 'Mapa: 1 módulo, 0 ligações');
   assert.equal(statusLine(contractStatus('x')), 'Contrato: 1 caractere lido');
 });
 
 test('o assistente tem rótulo próprio na linha de status', () => {
   assert.equal(
     statusLine(builderStatus('Modo: descoberta (sem contrato)')),
-    'Builder: Modo: descoberta (sem contrato)',
+    'Assistente: Modo: descoberta (sem contrato)',
   );
   assert.equal(builderStatus('falha', 'error').kind, 'error');
 });

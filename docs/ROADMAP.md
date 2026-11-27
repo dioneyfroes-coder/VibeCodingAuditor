@@ -17,6 +17,7 @@ Estado consolidado das Etapas 0–10 e dos trabalhos posteriores. Decisões e es
 | 10 | Expandir linguagens e recursos | Concluída em 25/11/2026; extensões adicionais nesta rodada: TypeScript/JavaScript e Python no núcleo. Demais opções avaliadas e diferidas |
 | 4 (nova fase) | Descoberta automática e Architecture Builder | Concluída em 27/11/2026 — descoberta, Builder, consistência, validação automatizada e validação manual desktop/VS Code confirmadas; ressalvas e UX registrados |
 | 5 (nova fase) | Suíte de testes E2E dedicada | Concluída em 27/11/2026 — CLI, extensão, desktop e CI Windows verdes no run `46067832029` |
+| 6 (nova fase) | Amadurecimento arquitetural e distribuição | Em andamento — 6.0 baseline registrado em `docs/validation/etapa-6/baseline.md`; 6.1 documentação coerente concluída em 27/11/2026; 6.2–6.8 planejadas |
 
 Etapa 2 (confiabilidade do motor): concluída em 26/11/2026 — itens 2.1 a 2.8 verificados localmente no Windows e cobertos pelo workflow de CI, cuja primeira execução remota (`CI Windows` #1, commit `7a07286`) terminou com sucesso.
 
@@ -686,5 +687,38 @@ Nova fase iniciada em 26/11/2026 a partir de `PLANO_ETAPA_4_DESCOBERTA_E_ARCHITE
 - [x] `vibe-coding-auditor-cli.cmd` procura `target/release` e `target/debug`, executa a CLI com os argumentos recebidos e pausa apenas quando é chamado sem argumentos. Chamadas com argumentos preservam o comportamento de terminal.
 - [x] A extensão deixou de esconder o menu de contexto por `projectConfigured`. O comando “Auditar ou descobrir projeto” aparece em qualquer pasta; sem `auditor.toml`, o status mostra descoberta disponível e a execução usa o modo discovery da CLI. `cliCandidates` também procura a CLI no repositório que contém a extensão, cobrindo o caso de abrir outro projeto sem `target/`.
 - [x] Testes novos: `extensions/vscode/tests/cliPath.test.mjs` (4) e `extensions/vscode/tests/manifest.test.mjs` (2). A extensão passou a 18 testes Node puros e o `.vsix` foi reempacotado. Validação manual na host real do VS Code confirmada pelo usuário em 27/11/2026; necessário reinstalar o `.vsix` e ajustar `vibeCodingAuditor.cliPath` quando apontar para o nome antigo da CLI.
+
+### Etapa 6 — Amadurecimento arquitetural e distribuição — Em andamento
+
+#### Etapa 6.0 — Baseline, inventário e reconciliação — Concluída em 27/11/2026
+
+- [x] Branch `main`, HEAD `4146fcc8dd3554ee98923bd9df5fd39d00314d95` e alterações locais preservadas (`D PLANO_ETAPA_3_MODIFICACOES_E_EXECUCOES.md` e `?? PLANO_ETAPA_6_AMADURECIMENTO_ARQUITETURAL_E_DISTRIBUICAO.md`).
+- [x] Inventário completo: um único workflow (`ci.yml`, jobs `verify` e `E2E Windows` em `windows-latest`); manifests, lockfiles, config Tauri e contrato conferidos.
+- [x] Seis divergências da seção 2.3 do plano classificadas: README desatualizado, `bundle.active = false` e CI somente Windows confirmados; `cliPath` e menu sem contrato descartados; contagens de vulnerabilidades atualizadas sem correção.
+- [x] Baseline com comandos, códigos e contagens em `docs/validation/etapa-6/baseline.md`: Rust 277 testes, desktop 39, extensão 18; `cargo fmt/check/test/clippy`, `git diff --check`, testes/builds Node e empacotamento `.vsix` com código `0`.
+- [x] `npm audit`: desktop 25 alertas de desenvolvimento (14 altos, 11 moderados) e extensão 2 moderados de desenvolvimento; produção `0` nos dois; nenhuma correção aplicada.
+- [x] Limitação explícita: E2E não reexecutado localmente no HEAD atual; o run remoto `46067832029` (commit `4ceeab2`) registra `verify` e `E2E Windows` verdes.
+
+#### Etapa 6.1 — Documentação e configuração coerentes — Concluída em 27/11/2026
+
+- [x] `README.md` passou a descrever Etapas 4 e 5 da nova fase, ajustes posteriores e Etapa 6 em andamento, com link para o baseline.
+- [x] Modo automático documentado junto aos comandos da CLI: contrato válido = `compliance`, ausência = `discovery`, TOML inválido = erro `2`, sem fallback; `history record` segue o modo do núcleo.
+- [x] Executável `vibe-coding-auditor-cli` confirmado em `Cargo.toml`, `--version`, `--help`, manifesto da extensão, `src/cliPath.ts`, testes e documentação. Nenhum nome ou caminho foi alterado.
+- [x] Visibilidade do comando confirmada por `when: explorerResourceIsFolder` e pelo teste `o menu de pasta não exige auditor.toml`; contradição no README removida.
+- [x] `bundle.active = false` documentado como ausência de instalador/bundle/release; `tauri build` gera apenas `auditor-desktop.exe`. Distribuição permanece na Etapa 6.7.
+- [x] `AGENTS.md` ajustado somente para explicitar o modo automático no comando `audit`; regras de segurança, somente leitura e aprovação humana preservadas.
+- [x] Decisões `E6.0` e `E6.1` registradas em `docs/DECISIONS.md`.
+- [x] Verificação: `git diff --check` = `0` (apenas aviso LF/CRLF esperado do OneDrive em `AGENTS.md`), `cargo fmt --all --check` = `0`, `cargo check --workspace` = `0`, `cargo test --workspace` = `0` (277 testes), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` = `0`, `npm --prefix apps/desktop test` = `0` (39), `npm --prefix apps/desktop run build` = `0`, `npm --prefix extensions/vscode test` = `0` (18) e `npm --prefix extensions/vscode run package` = `0` (`.vsix` com 10 arquivos, 15,23 kB).
+- [x] Limitações explícitas: nenhuma dependência, workflow, contrato, manifesto ou regra foi alterado; vulnerabilidades e `actions/cache@v4` aguardam 6.6; bundle/instalador aguardam 6.7; E2E remoto continua no commit anterior aos dois commits documentais do HEAD.
+
+#### Subetapas seguintes — planejadas, não iniciadas
+
+- [ ] 6.2 — Descoberta de manifests multi-ecossistema (`package.json`, `pyproject.toml`, `go.mod`).
+- [ ] 6.3 — Resolução de imports, aliases e dependências externas.
+- [ ] 6.4 — Contrato v3: proposta de schema aprovada antes de qualquer implementação.
+- [ ] 6.5 — Autoauditoria multi-stack do próprio repositório.
+- [ ] 6.6 — Segurança, dependências e consistência do CI.
+- [ ] 6.7 — Empacotamento e estratégia de instalação.
+- [ ] 6.8 — Fechamento, documentação e release candidata.
 
 Esta seção será atualizada somente com evidência de testes e comportamentos realmente implementados.

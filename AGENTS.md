@@ -55,7 +55,7 @@ Construir uma aplicação desktop local para comparar a arquitetura pretendida d
 - `cargo run -p auditor-cli -- init <diretorio>` (cria modelo de contrato; nunca sobrescreve `auditor.toml`)
 - `cargo run -p auditor-cli -- scan <raiz>` (inventaria arquivos; somente leitura)
 - `cargo run -p auditor-cli -- analyze <raiz>` (grafo inicial de dependências; somente leitura)
-- `cargo run -p auditor-cli -- audit <raiz>` (regras e relatório, ou descoberta sem contrato; somente leitura)
+- `cargo run -p auditor-cli -- audit <raiz>` (contrato presente e válido = conformidade; ausência = descoberta; TOML inválido = erro explícito; somente leitura)
 - `cargo run -p auditor-cli -- audit <raiz> --diff <patch>` (filtra achados por diff salvo do Git; somente leitura)
 - `cargo run -p auditor-cli -- history record <raiz>` (grava a execução no SQLite local no modo devolvido pelo núcleo)
 - `cargo run -p auditor-cli -- history list|show|compare` (consulta e comparação; somente leitura do banco)

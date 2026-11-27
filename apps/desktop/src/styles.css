@@ -306,3 +306,70 @@ pre {
   padding: 14px;
   line-height: 1.5;
 }
+
+.wizard-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+}
+
+.wizard-steps li {
+  background: var(--fundo);
+  border: 1px solid var(--borda);
+  border-radius: 12px;
+  color: var(--texto-suave);
+  padding: 4px 10px;
+}
+
+.wizard-steps li.atual {
+  background: var(--acento);
+  color: #fff;
+}
+
+.builder-list {
+  list-style: none;
+  margin: 8px 0 16px;
+  padding: 0;
+}
+
+.builder-card {
+  background: var(--fundo);
+  border: 1px solid var(--borda);
+  border-radius: 8px;
+  margin-bottom: 10px;
+  padding: 12px;
+}
+
+.builder-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.choice {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+fieldset {
+  border: 1px solid var(--borda);
+  border-radius: 6px;
+  margin: 10px 0;
+  padding: 10px;
+}
+
+.preview {
+  max-height: 360px;
+}
+
+.status-error {
+  color: var(--falha);
+}
+
+.status-success {
+  color: var(--sucesso);
+}

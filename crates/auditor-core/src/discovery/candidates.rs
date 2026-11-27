@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::{Inventory, matches_pattern};
 use crate::analysis::{Analysis, DependencyKind};
@@ -51,7 +51,7 @@ pub struct CandidateModule {
 }
 
 /// Classificação de uma relação vista no código, sem regras de conformidade.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ObservedResolution {
     /// Destino associado a um arquivo ou candidato interno.
@@ -77,7 +77,7 @@ impl ObservedResolution {
 }
 
 /// Relação observada com destino classificado apenas por evidência.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObservedDependency {
     /// Arquivo de origem, relativo à raiz.
     pub source: String,
@@ -94,7 +94,7 @@ pub struct ObservedDependency {
 }
 
 /// Conflito preservado para decisão humana.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ambiguity {
     /// Arquivo, destino ou nome que originou o conflito.
     pub subject: String,

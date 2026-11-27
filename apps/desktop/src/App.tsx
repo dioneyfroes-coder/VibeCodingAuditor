@@ -1,6 +1,9 @@
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
+
+import BuilderWizard from './BuilderWizard';
+import { detectedStatus, type ProjectRunStatus } from './builderFlow';
 
 import {
   availableRules,
@@ -12,6 +15,7 @@ import {
 } from './reportView';
 import {
   auditStatus,
+  builderStatus,
   cancelledSelectionStatus,
   contractStatus,
   errorStatus,
@@ -145,9 +149,13 @@ export default function App() {
   const [statuses, setStatuses] = useState<ActionStatus[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [detected, setDetected] = useState<ProjectRunStatus | null>(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
-  const pushStatus = (status: ActionStatus) =>
-    setStatuses((current) => [status, ...current].slice(0, 5));
+  const pushStatus = useCallback(
+    (status: ActionStatus) => setStatuses((current) => [status, ...current].slice(0, 5)),
+    [],
+  );
 
   /// Leva o usuário ao painel gerado pela ação, depois da atualização da tela.
   const reveal = (id: string) =>
@@ -177,11 +185,20 @@ export default function App() {
     pushStatus(historyStatus(history.length));
   };
 
+  const detectProject = () =>
+    execute('builder', async () => {
+      const mode = await invoke<ProjectRunStatus>('load_project', { path: projectPath });
+      setDetected(mode);
+      pushStatus(builderStatus(detectedStatus(mode), 'success'));
+    });
+
   const selectProject = () =>
     execute('select', async () => {
       const selected = await open({ directory: true, multiple: false });
       if (typeof selected === 'string') {
         setProjectPath(selected);
+        setDetected(null);
+        setWizardOpen(false);
         pushStatus(selectionStatus(selected));
       } else {
         pushStatus(cancelledSelectionStatus());
@@ -270,18 +287,33 @@ export default function App() {
           />
         </label>
         <p className="detail hint">
-          Selecione a pasta que contém o <code>auditor.toml</code> na raiz. A aplicação nunca cria
-          nem altera esse arquivo.
+          Selecione a raiz do projeto. “Detectar projeto” distingue descoberta e conformidade; o
+          assistente mostra sugestões, mas não grava nenhum arquivo nesta etapa.
         </p>
         {projectPath && (
           <p className="detail">
-            Contrato esperado: <code>{`${projectPath}\\auditor.toml`}</code>
+            Contrato verificado: <code>{`${projectPath}\\auditor.toml`}</code>
           </p>
         )}
         <div className="actions">
           <button type="button" className="primario" disabled={busy} onClick={selectProject}>
             Selecionar pasta
           </button>
+          <button type="button" disabled={busy || !projectPath} onClick={detectProject}>
+            Detectar projeto
+          </button>
+          {detected && (
+            <button
+              type="button"
+              className="primario"
+              disabled={busy}
+              onClick={() => setWizardOpen(true)}
+            >
+              {detected.contract.status === 'missing'
+                ? 'Definir arquitetura'
+                : 'Revisar arquitetura'}
+            </button>
+          )}
           <button type="button" className="primario" disabled={busy || !projectPath} onClick={runAudit}>
             Auditar
           </button>
@@ -495,6 +527,14 @@ export default function App() {
           <p>Visualização somente leitura; a interface não altera o contrato.</p>
           <pre>{contractText}</pre>
         </section>
+      )}
+
+      {wizardOpen && projectPath && (
+        <BuilderWizard
+          root={projectPath}
+          onStatus={pushStatus}
+          onClose={() => setWizardOpen(false)}
+        />
       )}
 
       {historyLoaded && (

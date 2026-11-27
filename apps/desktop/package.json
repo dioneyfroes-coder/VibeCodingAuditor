@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "test": "tsc -p tsconfig.test.json && node --test tests/skipSummary.test.mjs tests/reportView.test.mjs tests/status.test.mjs",
+    "test": "tsc -p tsconfig.test.json && node --test tests/skipSummary.test.mjs tests/reportView.test.mjs tests/status.test.mjs tests/builderFlow.test.mjs tests/builderWizard.test.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

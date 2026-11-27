@@ -8,8 +8,9 @@ use std::fs;
 use std::path::Path;
 
 use auditor_core::analysis::{self, Analysis};
-use auditor_core::audit;
-use auditor_core::contract::load_contract;
+use auditor_core::audit::{self, DiscoveryReport, ProjectRun};
+use auditor_core::builder::{self, ContractDraft, DraftEffects, ValidationResult};
+use auditor_core::contract::{self, load_contract};
 use auditor_core::discovery::discover;
 use auditor_core::history::{History, RunSummary};
 use auditor_core::report::AuditReport;
@@ -34,6 +35,51 @@ fn analyze_project(path: String) -> Result<Analysis, String> {
 fn read_contract(path: String) -> Result<String, String> {
     let contract_path = Path::new(&path).join("auditor.toml");
     fs::read_to_string(contract_path).map_err(|error| error.to_string())
+}
+
+/// Detecta a raiz com ou sem contrato e escolhe o modo no núcleo.
+#[tauri::command]
+fn load_project(path: String) -> Result<ProjectRun, String> {
+    audit::project_run(Path::new(&path)).map_err(|error| error.to_string())
+}
+
+/// Produz a descoberta somente leitura para a tela inicial do assistente.
+#[tauri::command]
+fn discover_project(path: String) -> Result<DiscoveryReport, String> {
+    audit::discover_project(Path::new(&path)).map_err(|error| error.to_string())
+}
+
+/// Inicia o rascunho a partir da descoberta ou de um contrato existente.
+#[tauri::command]
+fn start_draft(path: String) -> Result<ContractDraft, String> {
+    let root = Path::new(&path);
+    let contract_path = root.join("auditor.toml");
+    if contract_path.exists() {
+        let contract = load_contract(&contract_path).map_err(|error| error.to_string())?;
+        Ok(builder::draft_from_contract(&contract))
+    } else {
+        let report = audit::discover_project(root).map_err(|error| error.to_string())?;
+        Ok(builder::draft_from_discovery(&report))
+    }
+}
+
+/// Valida escolhas sem tratar decisões pendentes como falha operacional.
+#[tauri::command]
+fn validate_contract_draft(draft: ContractDraft) -> Result<ValidationResult, String> {
+    builder::validate_draft_result(&draft).map_err(|error| error.to_string())
+}
+
+/// Devolve a prévia TOML do rascunho, sem gravar nenhum arquivo.
+#[tauri::command]
+fn preview_contract(draft: ContractDraft) -> Result<String, String> {
+    let contract = builder::validate_draft(&draft).map_err(|error| error.to_string())?;
+    contract::render_contract(&contract).map_err(|error| error.to_string())
+}
+
+/// Descreve os efeitos do rascunho com os identificadores de regra do núcleo.
+#[tauri::command]
+fn draft_effects(draft: ContractDraft) -> DraftEffects {
+    builder::draft_effects(&draft)
 }
 
 /// Lista execuções gravadas no banco local, da mais recente para a mais antiga.
@@ -68,6 +114,12 @@ pub fn run() {
             audit_project,
             analyze_project,
             read_contract,
+            load_project,
+            discover_project,
+            start_draft,
+            validate_contract_draft,
+            preview_contract,
+            draft_effects,
             history_list,
             history_record
         ])
@@ -135,5 +187,111 @@ mod tests {
 
         assert!(text.contains("schema_version = 1"));
         assert!(text.contains("projeto-parcial"));
+    }
+
+    #[test]
+    fn load_project_command_detects_the_execution_mode() {
+        let missing = project_fixture("discovery_no_contract");
+        let from_command =
+            load_project(missing.to_string_lossy().into_owned()).expect("command must succeed");
+        let from_core = audit::project_run(&missing).expect("core must succeed");
+        assert_eq!(from_command, from_core);
+        assert_eq!(
+            from_command.mode(),
+            auditor_core::audit::ExecutionMode::Discovery
+        );
+
+        let present = project_fixture("clean");
+        let from_command =
+            load_project(present.to_string_lossy().into_owned()).expect("command must succeed");
+        assert_eq!(
+            from_command.mode(),
+            auditor_core::audit::ExecutionMode::Compliance
+        );
+    }
+
+    #[test]
+    fn discover_command_delegates_to_the_core() {
+        let root = project_fixture("discovery_candidates");
+        let from_command =
+            discover_project(root.to_string_lossy().into_owned()).expect("command must succeed");
+        let from_core = audit::discover_project(&root).expect("core must succeed");
+
+        assert_eq!(from_command, from_core);
+        assert_eq!(from_command.candidates.candidate_modules.len(), 3);
+    }
+
+    #[test]
+    fn start_draft_command_uses_suggestions_without_a_contract() {
+        let root = project_fixture("discovery_candidates");
+        let draft = start_draft(root.to_string_lossy().into_owned()).expect("command must succeed");
+
+        assert_eq!(draft.modules.len(), 3);
+        assert!(draft.modules.iter().all(|module| module.needs_confirmation));
+        assert!(!draft.pending_decisions.is_empty());
+    }
+
+    #[test]
+    fn start_draft_command_uses_the_existing_contract() {
+        let root = project_fixture("clean");
+        let draft = start_draft(root.to_string_lossy().into_owned()).expect("command must succeed");
+
+        assert!(!draft.modules.is_empty());
+        assert!(
+            draft
+                .modules
+                .iter()
+                .all(|module| !module.needs_confirmation)
+        );
+        assert!(draft.pending_decisions.is_empty());
+    }
+
+    #[test]
+    fn validation_command_keeps_pending_choices_as_interface_state() {
+        let mut draft = start_draft(project_fixture("clean").to_string_lossy().into_owned())
+            .expect("draft must start");
+        let accepted = validate_contract_draft(draft.clone()).expect("command must succeed");
+        assert!(accepted.valid);
+        assert!(accepted.identity.is_some());
+
+        draft.modules[0].needs_confirmation = true;
+        let rejected = validate_contract_draft(draft).expect("command must succeed");
+        assert!(!rejected.valid);
+        assert!(rejected.identity.is_none());
+        assert!(rejected.errors[0].contains("módulo ainda não confirmado"));
+    }
+
+    #[test]
+    fn preview_command_uses_the_official_serializer() {
+        let draft = start_draft(project_fixture("clean").to_string_lossy().into_owned())
+            .expect("draft must start");
+        let text = preview_contract(draft.clone()).expect("command must succeed");
+        let contract = auditor_core::contract::parse_contract(&text).expect("TOML must be valid");
+
+        assert_eq!(contract.schema_version, 2);
+        assert_eq!(
+            text,
+            auditor_core::contract::render_contract(&contract).expect("core must render")
+        );
+    }
+
+    #[test]
+    fn effects_command_delegates_to_the_core() {
+        let draft = start_draft(project_fixture("clean").to_string_lossy().into_owned())
+            .expect("draft must start");
+        let from_command = draft_effects(draft.clone());
+        let from_core = auditor_core::builder::draft_effects(&draft);
+
+        assert_eq!(from_command, from_core);
+        assert!(
+            from_command
+                .rule_ids
+                .contains(&"dep.not_allowed".to_owned())
+        );
+        assert!(
+            !from_command
+                .rule_ids
+                .contains(&"dep.layer_not_allowed".to_owned())
+        );
     }
 }

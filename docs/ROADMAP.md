@@ -15,7 +15,7 @@ Estado consolidado das Etapas 0–10 e dos trabalhos posteriores. Decisões e es
 | 8 | Criar a aplicação desktop com Tauri | Concluída em 25/11/2026 — Tauri/React compilados e iniciados; 78 testes passaram |
 | 9 | Criar a extensão VS Code | Concluída em 25/11/2026 — `.vsix` gerado; diagnósticos conferem com a CLI; 82 testes passaram |
 | 10 | Expandir linguagens e recursos | Concluída em 25/11/2026; extensões adicionais nesta rodada: TypeScript/JavaScript e Python no núcleo. Demais opções avaliadas e diferidas |
-| 4 (nova fase) | Descoberta automática e Architecture Builder | Em andamento — Etapas 4.0 e 4.1 concluídas em 26/11/2026; descoberta sem contrato implementada no núcleo |
+| 4 (nova fase) | Descoberta automática e Architecture Builder | Em andamento — Etapas 4.0 a 4.5 concluídas em 26/11/2026; assistente visual somente leitura disponível |
 
 Etapa 2 (confiabilidade do motor): concluída em 26/11/2026 — itens 2.1 a 2.8 verificados localmente no Windows e cobertos pelo workflow de CI, cuja primeira execução remota (`CI Windows` #1, commit `7a07286`) terminou com sucesso.
 
@@ -513,9 +513,24 @@ Nova fase iniciada em 26/11/2026 a partir de `PLANO_ETAPA_4_DESCOBERTA_E_ARCHITE
 - [x] Testes escritos antes da implementação falharam na fase vermelha por tipos e funções inexistentes. Durante a revisão, o Clippy apontou import não usado, `if` aninhável e comparação de tamanho; a validação foi reforçada para não depender da lista de pendências.
 - [x] Limitações explícitas: não há interface, backend Tauri ou comando CLI para o Builder nesta etapa (4.5); `auditor init` continua gerando v1; `responsibility` é texto livre, sem interpretação por regras; um módulo aceita apenas um `path`; não há resolução automática de ambiguidades nem leitura de `package.json`, `pyproject.toml` ou `go.mod`.
 
-### Etapa 4.5 a 4.8 — Não iniciadas
+### Etapa 4.5 — Interface visual do Builder — Concluída em 26/11/2026
 
-- [ ] 4.5 — interface visual do Builder.
+- [x] Após o usuário responder “prossiga”, as mudanças ficaram restritas ao núcleo, ao adaptador Tauri e à interface desktop. CLI, extensão VS Code, SQLite e contratos de exemplo não mudaram em comportamento; nenhuma dependência Rust ou npm foi adicionada.
+- [x] O núcleo expõe `validate_draft_result()`, `draft_effects()` e `draft_from_contract()`. `PendingDecisionKind::DecideDependency` passa a informar o `module` já identificado pelo núcleo, para que a interface não reimplemente correspondência de globs. O rascunho e as decisões passam a derivar `Serialize`/`Deserialize` com o formato marcado externamente; `ContractDraft` preserva o perfil `snake_case`.
+- [x] Novos comandos Tauri finos e somente leitura: `load_project`, `discover_project`, `start_draft`, `validate_contract_draft`, `preview_contract` e `draft_effects`. Todos delegam ao núcleo; não há comando de gravação nesta etapa.
+- [x] “Detectar projeto” distingue `modo: descoberta (sem contrato)` de `modo: conformidade (contrato vN)` e habilita “Definir arquitetura” ou “Revisar arquitetura”. A detecção inclui TOML inválido como erro explícito, sem fallback silencioso.
+- [x] O assistente cobre sete etapas fixas: descoberta, escopo, organização, módulos, camadas, dependências e revisão. Voltar e avançar preserva o rascunho; qualquer edição invalida validação, prévia e efeitos anteriores.
+- [x] A descoberta mostra candidatos com categoria, path e evidências limitadas, relações observadas com arquivo/linha/evidência, cobertura por linguagem/analisador, ambiguidades e limitações. Estados vazio e de ausência de analisador são explícitos.
+- [x] Módulos podem ser confirmados, renomeados (com atualização de referências em dependências, camadas e escolhas), adicionados e removidos (com limpeza de referências órfãs). Camadas podem ser criadas, renomeadas e receber módulos; trocar de perfil ajusta as camadas ao schema.
+- [x] Cada relação observada exige decisão humana: origem única vem do núcleo; origem ambígua exige escolha do módulo antes de permitir ou rejeitar. Nenhuma dependência observada é aprovada automaticamente, e o aviso aparece na descoberta e nas dependências.
+- [x] A revisão mostra validação feita pelo parser oficial, prévia TOML determinística do núcleo, identidade do contrato quando válido, contagens de módulos/camadas/dependências permitidas e identificadores das regras que passam a valer. Nenhum arquivo é alterado; a gravação fica para a Etapa 4.6.
+- [x] Estados explícitos: carregamento, falha operacional, ausência de candidatos/relações, decisões pendentes, rascunho inválido e rascunho válido com prévia. Helpers puros (`builderFlow.ts`) concentram navegação, edição e formatação; regras, validação e serialização continuam apenas no núcleo.
+- [x] Testes escritos antes da implementação falharam na fase vermelha por funções/types inexistentes e pelo campo `module` ausente em `DecideDependency`. Durante a revisão, um teste revelou que renomear módulo deixava referências órfãs e que o painel de dependências não conseguia decidir origem ambígua sem duplicar globs; ambos foram corrigidos no núcleo e nos helpers puros.
+- [x] Verificação final: `cargo fmt --all --check` = `0`, `cargo check --workspace` = `0`, `cargo test --workspace` = `0` (247 testes: 221 no núcleo, 10 unitários na CLI, 5 de integração na CLI e 11 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` = `0`, `git diff --check` = `0` (somente avisos LF/CRLF do OneDrive), `npm --prefix apps/desktop test` = `0` (28), `npm --prefix apps/desktop run build` = `0` e `npm --prefix extensions/vscode test` = `0` (7). Testes focados: `cargo test -p auditor-core --lib builder::tests` = `0` (18) e `cargo test -p auditor-desktop --lib` = `0` (11).
+- [x] Limitações explícitas: não há gravação, confirmação final nem segunda auditoria nesta etapa; o agrupamento automático em camadas cria uma camada inicial com todos os módulos, sem inferir responsabilidades; `auditor init` continua gerando v1; a descoberta ainda não lê `package.json`, `pyproject.toml` ou `go.mod` para candidatos; a interface ainda não mostra modo/candidatos na extensão nem no histórico (Etapa 4.7).
+
+### Etapas 4.6 a 4.8 — Não iniciadas
+
 - [ ] 4.6 — gravação segura, validação final e segunda auditoria.
 - [ ] 4.7 — consistência entre CLI, VS Code e histórico.
 - [ ] 4.8 — fixtures, validação manual e fechamento.

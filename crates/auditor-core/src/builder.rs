@@ -7,6 +7,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use serde::{Deserialize, Serialize};
+
 use crate::audit::DiscoveryReport;
 use crate::contract::{
     Architecture, ArchitectureStyle, Contract, ContractError, Layer, Module, Project, Scan,
@@ -22,7 +24,8 @@ use crate::discovery::{ScanOptions, matches_pattern};
 pub const DEFAULT_RESPONSIBILITY: &str = "Responsabilidade a definir";
 
 /// Perfil escolhido pelo usuário. Não é gravado no `auditor.toml`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum BuilderProfile {
     /// Módulos sem camadas; `layers` precisa permanecer vazio.
     ModularMonolith,
@@ -31,7 +34,7 @@ pub enum BuilderProfile {
 }
 
 /// Módulo editável do rascunho.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DraftModule {
     /// Nome usado pelo motor em `allowed_dependencies` e nas arestas.
     pub name: String,
@@ -52,7 +55,7 @@ pub struct DraftModule {
 }
 
 /// Camada editável do rascunho, representável no schema v2.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DraftLayer {
     /// Nome usado em `allowed_dependencies` das camadas.
     pub name: String,
@@ -63,7 +66,8 @@ pub struct DraftLayer {
 }
 
 /// Tipo de decisão que o usuário precisa tomar antes de gerar o contrato.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PendingDecisionKind {
     /// Confirmar um módulo sugerido pela descoberta.
     ConfirmModule {
@@ -85,11 +89,13 @@ pub enum PendingDecisionKind {
         source: String,
         /// Destino bruto encontrado no código.
         target: String,
+        /// Módulo único que cobre a origem, calculado pelo núcleo.
+        module: String,
     },
 }
 
 /// Decisão pendente com explicação para a interface.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingDecision {
     /// Ação necessária.
     pub kind: PendingDecisionKind,
@@ -98,7 +104,7 @@ pub struct PendingDecision {
 }
 
 /// Escolha registrada para uma ambiguidade.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AmbiguityResolution {
     /// Assunto da ambiguidade resolvida.
     pub subject: String,
@@ -109,7 +115,7 @@ pub struct AmbiguityResolution {
 }
 
 /// Rascunho completo, editável e convertível em contrato v2.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContractDraft {
     /// Nome legível do projeto.
     pub project_name: String,
@@ -188,10 +194,11 @@ pub fn draft_from_discovery(report: &DiscoveryReport) -> ContractDraft {
             .filter(|module| matches_pattern(&module.path, &dependency.source))
             .collect();
         match sources.as_slice() {
-            [_module] => draft.pending_decisions.push(PendingDecision {
+            [module] => draft.pending_decisions.push(PendingDecision {
                 kind: PendingDecisionKind::DecideDependency {
                     source: dependency.source.clone(),
                     target: dependency.target.clone(),
+                    module: module.name.clone(),
                 },
                 detail: format!(
                     "{} -> {} — {}",
@@ -257,6 +264,139 @@ pub fn validate_draft(draft: &ContractDraft) -> Result<Contract, ContractError> 
 
     let text = render_contract(&contract)?;
     parse_contract(&text)
+}
+
+/// Resultado de validação sem transformar erros de escolha em falha operacional.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ValidationResult {
+    /// `true` somente quando o contrato equivalente passou no parser oficial.
+    pub valid: bool,
+    /// Mensagens de erro de validação, vazias quando `valid` é `true`.
+    pub errors: Vec<String>,
+    /// Identidade do contrato válido, ausente quando há erros.
+    pub identity: Option<String>,
+}
+
+/// Valida o rascunho mantendo erros de escolha como estado da interface.
+pub fn validate_draft_result(draft: &ContractDraft) -> Result<ValidationResult, ContractError> {
+    match validate_draft(draft) {
+        Ok(contract) => Ok(ValidationResult {
+            valid: true,
+            errors: Vec::new(),
+            identity: Some(crate::contract::contract_identity(&contract)),
+        }),
+        Err(ContractError::Validation(message)) => Ok(ValidationResult {
+            valid: false,
+            errors: vec![message],
+            identity: None,
+        }),
+        Err(error) => Err(error),
+    }
+}
+
+/// Efeitos descritivos do rascunho, produzidos no núcleo para a revisão visual.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DraftEffects {
+    /// Versão do schema que será gravada.
+    pub schema_version: u32,
+    /// Quantidade de módulos que o motor fiscalizará.
+    pub modules: usize,
+    /// Quantidade de camadas ativas.
+    pub layers: usize,
+    /// Quantidade de dependências explicitamente permitidas.
+    pub allowed_dependencies: usize,
+    /// Identificadores das regras que passam a valer para o contrato.
+    pub rule_ids: Vec<String>,
+    /// Explicações curtas sobre o que o motor interpreta.
+    pub notes: Vec<String>,
+}
+
+/// Descreve os efeitos do rascunho sem executar nenhuma regra ou auditoria.
+pub fn draft_effects(draft: &ContractDraft) -> DraftEffects {
+    use crate::rules::{
+        RULE_CODE_DUPLICATED, RULE_DEPENDENCY_CYCLE, RULE_DEPENDENCY_NOT_ALLOWED,
+        RULE_DEPENDENCY_UNRESOLVED, RULE_FILE_AMBIGUOUS_MODULE, RULE_FILE_UNMAPPED,
+        RULE_LAYER_NOT_ALLOWED, RULE_MODULE_CONCENTRATION, RULE_MODULE_UNREFERENCED,
+        RULE_MODULE_WITHOUT_FILES,
+    };
+
+    let mut rule_ids = vec![
+        RULE_DEPENDENCY_NOT_ALLOWED.to_owned(),
+        RULE_DEPENDENCY_UNRESOLVED.to_owned(),
+        RULE_FILE_UNMAPPED.to_owned(),
+        RULE_FILE_AMBIGUOUS_MODULE.to_owned(),
+        RULE_DEPENDENCY_CYCLE.to_owned(),
+        RULE_MODULE_WITHOUT_FILES.to_owned(),
+        RULE_MODULE_CONCENTRATION.to_owned(),
+        RULE_CODE_DUPLICATED.to_owned(),
+        RULE_MODULE_UNREFERENCED.to_owned(),
+    ];
+    if !draft.layers.is_empty() {
+        rule_ids.push(RULE_LAYER_NOT_ALLOWED.to_owned());
+    }
+    rule_ids.sort();
+
+    DraftEffects {
+        schema_version: 2,
+        modules: draft.modules.len(),
+        layers: draft.layers.len(),
+        allowed_dependencies: draft
+            .modules
+            .iter()
+            .map(|module| module.allowed_dependencies.len())
+            .sum(),
+        rule_ids,
+        notes: vec![
+            "responsabilidade é texto descritivo, não é interpretada pelo motor".to_owned(),
+            "dependências observadas não são aprovadas automaticamente".to_owned(),
+        ],
+    }
+}
+
+/// Converte um contrato existente em rascunho de revisão, sem perdas.
+///
+/// Módulos e camadas já confirmados viram estado editável; nenhuma decisão
+/// pendente ou relação observada é inventada para um contrato aprovado.
+pub fn draft_from_contract(contract: &Contract) -> ContractDraft {
+    ContractDraft {
+        project_name: contract.project.name.clone(),
+        include: contract.scan.include.clone(),
+        exclude: contract.scan.exclude.clone(),
+        style: contract.architecture.style,
+        profile: if contract.architecture.layers.is_empty() {
+            BuilderProfile::ModularMonolith
+        } else {
+            BuilderProfile::LayeredMonolith
+        },
+        modules: contract
+            .architecture
+            .modules
+            .iter()
+            .map(|module| DraftModule {
+                name: module.name.clone(),
+                path: module.path.clone(),
+                responsibility: module.responsibility.clone(),
+                allowed_dependencies: module.allowed_dependencies.clone(),
+                rejected_dependencies: Vec::new(),
+                evidence: Vec::new(),
+                needs_confirmation: false,
+            })
+            .collect(),
+        observed_dependencies: Vec::new(),
+        discovered_ambiguities: Vec::new(),
+        layers: contract
+            .architecture
+            .layers
+            .iter()
+            .map(|layer| DraftLayer {
+                name: layer.name.clone(),
+                modules: layer.modules.clone(),
+                allowed_dependencies: layer.allowed_dependencies.clone(),
+            })
+            .collect(),
+        resolved_ambiguities: Vec::new(),
+        pending_decisions: Vec::new(),
+    }
 }
 
 /// Nome sugerido a partir do diretório raiz; sem inferência de manifesto.
@@ -423,7 +563,6 @@ mod tests {
     use super::*;
     use crate::audit::discover_project;
     use crate::contract::{ArchitectureStyle, contract_identity, parse_contract};
-    use crate::discovery::matches_pattern;
 
     /// Raiz de uma fixture de projeto, relativa ao crate.
     fn project_fixture(name: &str) -> PathBuf {
@@ -471,12 +610,12 @@ mod tests {
                         choice: None,
                     });
                 }
-                PendingDecisionKind::DecideDependency { source, target } => {
+                PendingDecisionKind::DecideDependency { module, target, .. } => {
                     let index = draft
                         .modules
                         .iter()
-                        .position(|candidate| matches_pattern(&candidate.path, &source))
-                        .expect("origem da relação deve pertencer a um módulo");
+                        .position(|candidate| candidate.name == module)
+                        .expect("decisão deve referir módulo existente");
                     if target == "domain" {
                         draft.modules[index].allowed_dependencies.push(target);
                     } else {
@@ -706,6 +845,178 @@ mod tests {
         assert!(
             error.to_string().contains("sobrepostos"),
             "erro inesperado: {error}"
+        );
+    }
+
+    #[test]
+    fn pending_decisions_expose_the_module_needed_by_the_desktop() {
+        let draft = draft_from_discovery(&discovered("discovery_candidates"));
+        let value = serde_json::to_value(&draft).expect("draft must serialize");
+        let decisions = value["pending_decisions"]
+            .as_array()
+            .expect("decisions must be an array");
+
+        assert!(
+            decisions
+                .iter()
+                .any(|item| item["kind"]["confirm_module"].is_object())
+        );
+        let decided = decisions
+            .iter()
+            .find(|item| item["kind"]["decide_dependency"].is_object())
+            .expect("observed dependency must become a decision");
+        assert_eq!(
+            decided["kind"]["decide_dependency"]["module"],
+            "application"
+        );
+    }
+
+    #[test]
+    fn draft_survives_a_json_round_trip_for_the_desktop_boundary() {
+        let mut draft = draft_from_discovery(&discovered("discovery_candidates"));
+        draft.profile = BuilderProfile::LayeredMonolith;
+        draft.layers.push(DraftLayer {
+            name: "core".to_owned(),
+            modules: draft
+                .modules
+                .iter()
+                .map(|module| module.name.clone())
+                .collect(),
+            allowed_dependencies: Vec::new(),
+        });
+
+        let text = serde_json::to_string(&draft).expect("draft must serialize");
+        let restored: ContractDraft = serde_json::from_str(&text).expect("draft must deserialize");
+        assert_eq!(restored, draft);
+        assert_eq!(
+            serde_json::to_value(&restored).expect("profile must serialize")["profile"],
+            "layered_monolith"
+        );
+    }
+
+    #[test]
+    fn existing_contract_becomes_a_confirmed_editable_draft() {
+        let contract =
+            crate::contract::load_contract(&project_fixture("clean").join("auditor.toml"))
+                .expect("fixture contract must load");
+        let draft = draft_from_contract(&contract);
+
+        assert_eq!(draft.project_name, contract.project.name);
+        assert_eq!(draft.include, contract.scan.include);
+        assert_eq!(draft.exclude, contract.scan.exclude);
+        assert_eq!(draft.modules.len(), contract.architecture.modules.len());
+        assert!(
+            draft
+                .modules
+                .iter()
+                .all(|module| !module.needs_confirmation)
+        );
+        assert!(draft.pending_decisions.is_empty());
+        assert!(draft.observed_dependencies.is_empty());
+        let reviewed = validate_draft(&draft).expect("draft must be valid");
+        assert_eq!(reviewed.schema_version, 2, "novo contrato é sempre v2");
+        assert_eq!(reviewed.project, contract.project);
+        assert_eq!(reviewed.scan, contract.scan);
+        assert_eq!(reviewed.architecture, contract.architecture);
+    }
+
+    #[test]
+    fn v2_layers_are_preserved_in_a_review_draft() {
+        let contract = crate::contract::parse_contract(
+            r#"
+schema_version = 2
+
+[project]
+name = "camadas"
+
+[scan]
+include = ["src/**/*.rs"]
+exclude = []
+
+[architecture]
+style = "modular_monolith"
+
+[[architecture.modules]]
+name = "domain"
+path = "src/domain/**"
+responsibility = "Domínio"
+allowed_dependencies = []
+
+[[architecture.layers]]
+name = "domain"
+modules = ["domain"]
+allowed_dependencies = []
+"#,
+        )
+        .expect("v2 contract must load");
+        let draft = draft_from_contract(&contract);
+
+        assert_eq!(draft.profile, BuilderProfile::LayeredMonolith);
+        assert_eq!(draft.layers.len(), 1);
+        assert_eq!(draft.layers[0].modules, ["domain"]);
+        assert_eq!(
+            validate_draft(&draft).expect("draft must be valid"),
+            contract
+        );
+    }
+
+    #[test]
+    fn validation_result_reports_choices_without_failing_the_command() {
+        let mut draft = empty_draft("pendente");
+        draft.modules.push(module("domain", "src/domain/**"));
+        draft.modules[0].needs_confirmation = true;
+
+        let result = validate_draft_result(&draft).expect("validation must be a state");
+        assert!(!result.valid);
+        assert!(result.identity.is_none());
+        assert!(result.errors[0].contains("módulo ainda não confirmado"));
+
+        draft.modules[0].needs_confirmation = false;
+        let accepted = validate_draft_result(&draft).expect("validation must be a state");
+        assert!(accepted.valid);
+        assert!(accepted.errors.is_empty());
+        assert_eq!(
+            accepted.identity,
+            Some(crate::contract::contract_identity(
+                &validate_draft(&draft).expect("draft must be valid")
+            ))
+        );
+    }
+
+    #[test]
+    fn effects_describe_rules_without_evaluating_them() {
+        let mut draft = empty_draft("regras");
+        draft.modules.push(module("domain", "src/domain/**"));
+        draft.modules[0]
+            .allowed_dependencies
+            .push("outro".to_owned());
+        draft.profile = BuilderProfile::LayeredMonolith;
+        draft.layers.push(DraftLayer {
+            name: "core".to_owned(),
+            modules: vec!["domain".to_owned()],
+            allowed_dependencies: Vec::new(),
+        });
+
+        let effects = draft_effects(&draft);
+        assert_eq!(effects.schema_version, 2);
+        assert_eq!(effects.modules, 1);
+        assert_eq!(effects.layers, 1);
+        assert_eq!(effects.allowed_dependencies, 1);
+        assert!(
+            effects
+                .rule_ids
+                .contains(&crate::rules::RULE_DEPENDENCY_NOT_ALLOWED.to_owned())
+        );
+        assert!(
+            effects
+                .rule_ids
+                .contains(&crate::rules::RULE_LAYER_NOT_ALLOWED.to_owned())
+        );
+        assert!(
+            effects
+                .notes
+                .iter()
+                .any(|note| note.contains("responsabilidade"))
         );
     }
 }

@@ -7,7 +7,14 @@
 export type StatusKind = 'success' | 'info' | 'error';
 
 /// Ação que produziu o status.
-export type ActionName = 'select' | 'audit' | 'graph' | 'contract' | 'record' | 'history';
+export type ActionName =
+  | 'select'
+  | 'audit'
+  | 'graph'
+  | 'contract'
+  | 'record'
+  | 'history'
+  | 'builder';
 
 /// Resultado legível de uma ação, mantido junto à interface.
 export interface ActionStatus {
@@ -23,6 +30,7 @@ const ACTION_LABELS: Record<ActionName, string> = {
   contract: 'Contrato',
   record: 'Registro',
   history: 'Histórico',
+  builder: 'Builder',
 };
 
 /// Contagem com flexão portuguesa simples, sem alterar os números recebidos.
@@ -83,6 +91,11 @@ export function historyStatus(count: number): ActionStatus {
         message: `${countLabel(count, 'execução', 'execuções')} no banco`,
       }
     : { action: 'history', kind: 'info', message: 'nenhuma execução registrada' };
+}
+
+/// Estado do assistente: detecção, validação ou falha operacional.
+export function builderStatus(message: string, kind: StatusKind = 'info'): ActionStatus {
+  return { action: 'builder', kind, message };
 }
 
 /// Falha operacional, preservando a mensagem recebida do núcleo.

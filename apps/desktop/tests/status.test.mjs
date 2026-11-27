@@ -4,6 +4,7 @@ import test from 'node:test';
 
 import {
   auditStatus,
+  builderStatus,
   cancelledSelectionStatus,
   contractStatus,
   errorStatus,
@@ -45,6 +46,14 @@ test('seleção de pasta informa o caminho e também o cancelamento', () => {
 test('grafo e contrato usam singular e plural conforme a contagem', () => {
   assert.equal(statusLine(graphStatus(1, 0)), 'Grafo: 1 módulo, 0 arestas');
   assert.equal(statusLine(contractStatus('x')), 'Contrato: 1 caractere lido');
+});
+
+test('o assistente tem rótulo próprio na linha de status', () => {
+  assert.equal(
+    statusLine(builderStatus('Modo: descoberta (sem contrato)')),
+    'Builder: Modo: descoberta (sem contrato)',
+  );
+  assert.equal(builderStatus('falha', 'error').kind, 'error');
 });
 
 test('histórico vazio é uma informação explícita, não silêncio', () => {

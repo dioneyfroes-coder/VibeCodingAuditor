@@ -8,7 +8,7 @@ Construir uma aplicação desktop local para comparar a arquitetura pretendida d
 - Aplicação desktop em Tauri 2 com React e TypeScript.
 - CLI Rust para validar o núcleo antes da interface desktop.
 - SQLite para histórico local.
-- Contrato arquitetural dos projetos analisados em `auditor.toml`.
+- Contrato arquitetural dos projetos analisados em `auditor.toml`, opcional: ausência significa descoberta, não erro.
 - Extensão VS Code somente depois que o núcleo e a aplicação desktop estiverem estáveis.
 - Começar como monólito modular. Não criar microserviços.
 
@@ -16,8 +16,10 @@ Construir uma aplicação desktop local para comparar a arquitetura pretendida d
 - O núcleo não depende de Tauri, React ou da CLI.
 - CLI e desktop reutilizam o mesmo núcleo.
 - A interface não implementa regras de auditoria.
-- A auditoria é somente leitura por padrão.
+- A auditoria e a descoberta são somente leitura por padrão.
 - Nunca modificar código-fonte ou contrato silenciosamente.
+- Nunca criar ou alterar `auditor.toml` sem aprovação humana explícita; o Architecture Builder só grava depois de exibir o diff e receber confirmação separada.
+- Descoberta produz observações e sugestões, nunca aprovação de dependências nem violações.
 - Não depender de IA para as regras determinísticas do MVP.
 
 ## Processo de trabalho
@@ -53,9 +55,9 @@ Construir uma aplicação desktop local para comparar a arquitetura pretendida d
 - `cargo run -p auditor-cli -- init <diretorio>` (cria modelo de contrato; nunca sobrescreve `auditor.toml`)
 - `cargo run -p auditor-cli -- scan <raiz>` (inventaria arquivos; somente leitura)
 - `cargo run -p auditor-cli -- analyze <raiz>` (grafo inicial de dependências; somente leitura)
-- `cargo run -p auditor-cli -- audit <raiz>` (regras e relatório; somente leitura)
+- `cargo run -p auditor-cli -- audit <raiz>` (regras e relatório, ou descoberta sem contrato; somente leitura)
 - `cargo run -p auditor-cli -- audit <raiz> --diff <patch>` (filtra achados por diff salvo do Git; somente leitura)
-- `cargo run -p auditor-cli -- history record <raiz>` (grava execução no SQLite local)
+- `cargo run -p auditor-cli -- history record <raiz>` (grava a execução no SQLite local no modo devolvido pelo núcleo)
 - `cargo run -p auditor-cli -- history list|show|compare` (consulta e comparação; somente leitura do banco)
 - Se o OneDrive causar avisos de sessão incremental: `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings`
 

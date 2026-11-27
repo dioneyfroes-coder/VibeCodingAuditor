@@ -1,6 +1,6 @@
 # Proposta técnica — modo de descoberta e Architecture Builder
 
-Status: proposta da Etapa 4.0, pendente de aprovação. Nenhuma API abaixo foi implementada.
+Status: aprovada e implementada nas Etapas 4.1–4.7. Este documento registra a proposta original da Etapa 4.0; o estado corrente está em `docs/ROADMAP.md` e `docs/DECISIONS.md`.
 Data: 26/11/2026
 
 Este documento responde aos itens 5 e 6 da Etapa 4.0 do plano. Ele descreve o menor refactor compatível com o estado atual, sem introduzir um segundo scanner, um segundo motor de regras, IA, rede ou novas dependências.

@@ -1,0 +1,6 @@
+[workspace]
+resolver = "2"
+members = ["crates/application", "crates/domain"]
+
+[workspace.dependencies]
+serde = "1"

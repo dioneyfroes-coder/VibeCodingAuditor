@@ -948,6 +948,7 @@ fn invalid(message: String) -> ContractError {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::path::PathBuf;
 
     use super::*;
@@ -1456,6 +1457,35 @@ allowed_dependencies = []
         }
     }
 
+    /// Conteúdo completo de uma árvore, usado para provar que cancelar não grava.
+    fn tree_snapshot(root: &Path) -> BTreeMap<String, Vec<u8>> {
+        fn visit(base: &Path, dir: &Path, files: &mut BTreeMap<String, Vec<u8>>) {
+            for entry in std::fs::read_dir(dir).expect("diretório legível") {
+                let entry = entry.expect("entrada legível");
+                let path = entry.path();
+                let relative = path
+                    .strip_prefix(base)
+                    .expect("entrada dentro da raiz")
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                if entry.file_type().expect("tipo legível").is_dir() {
+                    visit(base, &path, files);
+                } else {
+                    files.insert(relative, std::fs::read(&path).expect("arquivo legível"));
+                }
+            }
+        }
+
+        let mut files = BTreeMap::new();
+        visit(root, root, &mut files);
+        files
+    }
+
+    /// Texto atual de um contrato, antes de qualquer operação de revisão.
+    fn before_str(path: &Path) -> String {
+        std::fs::read_to_string(path).expect("contrato legível")
+    }
+
     #[test]
     fn save_authorization_serializes_for_the_desktop_boundary() {
         let create = serde_json::to_string(&SaveAuthorization::Create).expect("create serializa");
@@ -1522,6 +1552,25 @@ allowed_dependencies = []
             "erro inesperado: {error}"
         );
         assert!(!project.path().join("auditor.toml").exists());
+    }
+
+    #[test]
+    fn empty_project_fixture_accepts_a_planned_contract() {
+        let project = TempProject::new("discovery_empty_project");
+        let report = discover_project(project.path()).expect("descoberta do projeto vazio");
+        assert!(report.candidates.candidate_modules.is_empty());
+        let draft = empty_draft("projeto-novo");
+        let expected = validate_draft(&draft).expect("draft planejado válido");
+
+        let outcome = save_draft(project.path(), &draft, &SaveAuthorization::Create)
+            .expect("projeto vazio pode receber contrato planejado");
+
+        assert_eq!(outcome.run.mode, crate::audit::ExecutionMode::Compliance);
+        assert_eq!(outcome.saved.schema_version, 2);
+        assert_eq!(
+            parse_contract(&outcome.saved.text).expect("reparso do contrato gravado"),
+            expected
+        );
     }
 
     #[test]
@@ -1625,5 +1674,110 @@ allowed_dependencies = []
             current
         );
         assert!(blocked.is_dir());
+    }
+
+    #[test]
+    fn v1_contract_fixture_is_read_without_rewrite() {
+        let project = TempProject::new("builder_contract_v1");
+        let path = project.path().join("auditor.toml");
+        let before = std::fs::read(&path).expect("contrato v1 da fixture");
+
+        let original = parse_contract(&before_str(&path)).expect("v1 válido");
+        let draft = draft_from_contract(&original);
+        let validation = validate_draft_result(&draft).expect("rascunho revisado é válido");
+        assert!(validation.valid, "rascunho revisado deve ser válido");
+
+        let preview = render_contract(&validate_draft(&draft).expect("draft válido"))
+            .expect("prévia serializa");
+        let _ = contract_diff(&before_str(&path), &preview);
+
+        assert_eq!(std::fs::read(&path).expect("contrato preservado"), before);
+        assert!(path.exists(), "a fixture possui contrato v1");
+    }
+
+    #[test]
+    fn v2_contract_fixture_keeps_layers_in_the_review_draft() {
+        let project = TempProject::new("builder_contract_v2");
+        let current = before_str(&project.path().join("auditor.toml"));
+        let original = parse_contract(&current).expect("v2 válido");
+        let draft = draft_from_contract(&original);
+
+        assert!(!draft.layers.is_empty(), "camadas devem entrar no rascunho");
+        let contract = validate_draft(&draft).expect("draft v2 válido");
+        assert_eq!(contract.schema_version, 2);
+        assert_eq!(contract.architecture.layers.len(), draft.layers.len());
+        assert_eq!(
+            std::fs::read(project.path().join("auditor.toml")).expect("contrato preservado"),
+            current.into_bytes()
+        );
+    }
+
+    #[test]
+    fn write_safety_fixture_refuses_overwrite_and_failed_temporary_creation() {
+        let project = TempProject::new("builder_write_safety");
+        let path = project.path().join("auditor.toml");
+        let current = before_str(&path);
+        let draft = draft_from_contract(&parse_contract(&current).expect("fixture válida"));
+
+        let create = save_draft(project.path(), &draft, &SaveAuthorization::Create)
+            .expect_err("criação não sobrescreve");
+        assert!(matches!(create, SaveError::Conflict { .. }));
+        let stale = save_draft(
+            project.path(),
+            &draft,
+            &SaveAuthorization::Replace {
+                expected_text: "texto antigo".to_owned(),
+            },
+        )
+        .expect_err("aprovação obsoleta não sobrescreve");
+        assert!(matches!(stale, SaveError::Conflict { .. }));
+
+        let blocked = project.path().join("auditor.toml.0-0.tmp");
+        std::fs::create_dir(&blocked).expect("diretório bloqueia o temporário");
+        let failed = save_draft_at(
+            project.path(),
+            &draft,
+            &SaveAuthorization::Replace {
+                expected_text: current.clone(),
+            },
+            &blocked,
+        )
+        .expect_err("criação do temporário deve falhar");
+        assert!(matches!(failed, SaveError::Io { .. }));
+
+        std::fs::remove_dir(&blocked).expect("remove o bloqueio criado pelo teste");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("contrato preservado"),
+            current
+        );
+        assert!(
+            std::fs::read_dir(project.path())
+                .expect("raiz legível")
+                .all(|entry| !entry
+                    .expect("entrada legível")
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".tmp")),
+            "nenhum temporário pode restar"
+        );
+    }
+
+    #[test]
+    fn cancelling_before_save_creates_no_contract() {
+        let project = TempProject::new("builder_existing_project");
+        let before = tree_snapshot(project.path());
+
+        let report = discover_project(project.path()).expect("descoberta deve suceder");
+        let draft = draft_from_discovery(&report);
+        if let Ok(validation) = validate_draft_result(&draft)
+            && validation.valid
+        {
+            let preview = render_contract(&validate_draft(&draft).expect("draft válido"))
+                .expect("prévia serializa");
+            let _ = contract_diff("", &preview);
+        }
+
+        assert!(!project.path().join("auditor.toml").exists());
+        assert_eq!(tree_snapshot(project.path()), before);
     }
 }

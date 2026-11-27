@@ -1,0 +1,7 @@
+{
+  "name": "frontend-sem-contrato",
+  "private": true,
+  "dependencies": {
+    "react": "^18.0.0"
+  }
+}

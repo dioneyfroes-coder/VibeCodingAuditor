@@ -1,0 +1,98 @@
+# Fechamento da Etapa 4 — validação em projetos de teste
+
+Data: 26/11/2026
+
+Este registro cobre a Etapa 4.8 do plano. Nenhuma dependência Rust ou npm foi adicionada. Nenhum comando executou código dos projetos analisados, acessou rede ou gravou `auditor.toml` nas fixtures de descoberta.
+
+## Fixtures criadas
+
+Sob `tests/fixtures/projects/`:
+
+| Fixture | Cenário |
+|---|---|
+| `discovery_rust_no_contract` | Rust sem contrato, com import interno e externo observado |
+| `discovery_ts_no_contract` | TypeScript com `package.json` e imports locais, sem contrato |
+| `discovery_python_no_contract` | Python com `import`/`from ... import`, sem contrato |
+| `discovery_workspace` | workspace Cargo com dois membros e `package.json`, sem contrato |
+| `discovery_ambiguous` | dois manifests com o mesmo nome de pacote, sem contrato |
+| `discovery_empty_project` | diretório sem código; marcador `.gitkeep` fora do `include` |
+| `builder_existing_project` | projeto descoberto com módulos, sem contrato |
+| `builder_contract_v1` | cópia de `clean`, contrato v1 |
+| `builder_contract_v2` | cópia de `layer_boundaries`, contrato v2 com camadas |
+| `builder_write_safety` | cópia de `clean` para tentativas de Create/Replace e falha de temporário |
+
+## Integridade e determinismo
+
+O teste `crates/auditor-cli/tests/fixtures.rs` executa a CLI como processo real duas vezes por fixture, compara byte a byte a saída JSON e o conteúdo completo da árvore antes e depois. Também foi feita uma verificação externa com SHA-256 agregado por árvore, antes e depois de `audit --format json`:
+
+| Fixture | Código da CLI | Hash agregado igual |
+|---|---:|---|
+| `discovery_rust_no_contract` | 0 | sim (`72b7de5302d35a9d…`) |
+| `discovery_ts_no_contract` | 0 | sim (`4a9e309440dbf388…`) |
+| `discovery_python_no_contract` | 0 | sim (`ff6596dbf380274f…`) |
+| `discovery_workspace` | 0 | sim (`29aaf7125221e82a…`) |
+| `discovery_ambiguous` | 0 | sim (`f75de9ba5584bfe4…`) |
+| `discovery_empty_project` | 0 | sim (`88b2de425c435ffe…`) |
+| `builder_existing_project` | 0 | sim (`29aaf7125221e82a…`) |
+
+Todas as saídas trouxeram `"mode": "discovery"`, `"status": "missing"` e `"findings": []`; nenhuma trouxe `dep.not_allowed` ou `dep.layer_not_allowed`.
+
+## Smoke test da CLI
+
+Comandos executados com `cargo run -q -p auditor-cli -- …`:
+
+| Comando | Código | Resultado observado |
+|---|---:|---|
+| `scan tests/fixtures/projects/discovery_rust_no_contract` | 0 | `Modo: descoberta (sem contrato)` |
+| `analyze tests/fixtures/projects/discovery_rust_no_contract` | 0 | `Modo: descoberta (sem contrato)` |
+| `audit tests/fixtures/projects/discovery_rust_no_contract --format json` | 0 | `mode: discovery`, `status: missing`, `findings: []` |
+| `audit tests/fixtures/projects/clean --format json` | 0 | `schema_version: 1`, `mode: compliance`, 0 achados |
+| `audit tests/fixtures/projects/layer_boundaries --format json` | 1 | `schema_version: 2`, `mode: compliance`, 3 achados (2 erros e 1 revisão) |
+| `audit tests/fixtures/projects/discovery_invalid_contract --format json` | 2 | falha explícita, sem fallback para descoberta |
+
+Contratos v1 e v2 foram lidos e não foram reescritos: os testes de integração comparam os bytes de `auditor.toml` antes e depois da auditoria, e os testes do Builder comparam o rascunho gerado sem gravar.
+
+## Histórico
+
+Com banco temporário em `C:\Users\dratz\AppData\Local\Temp\opencode\vca-etapa48.db`, removido ao final:
+
+| Comando | Código | Resultado observado |
+|---|---:|---|
+| `history --database <temp> record tests/fixtures/projects/discovery_rust_no_contract` | 0 | registro `#1`, `Modo: descoberta (sem contrato)` |
+| `history --database <temp> record tests/fixtures/projects/clean` | 0 | registro `#2`, `Modo: conformidade`, identidade `943758ce7d0ac0db` |
+| `history --database <temp> list` | 0 | `#1` mostra `modo descoberta | sem contrato | schema v0`; `#2` mostra modo, identidade e schema v1 |
+| `history --database <temp> compare 1 2` | 2 | `execuções #1 e #2 não são comparáveis: as execuções usam modos diferentes` |
+
+## Segurança do Builder
+
+Testes focados em `crates/auditor-core/src/builder.rs`:
+
+- `empty_project_fixture_accepts_a_planned_contract`: projeto vazio aceita contrato planejado e reabre em conformidade.
+- `cancelling_before_save_creates_no_contract`: descobrir, montar rascunho e fechar não cria nem altera arquivo.
+- `v1_contract_fixture_is_read_without_rewrite` e `v2_contract_fixture_keeps_layers_in_the_review_draft`: leitura/diff sem gravação.
+- `write_safety_fixture_refuses_overwrite_and_failed_temporary_creation`: `Create` recusa existente, `Replace` exige texto exato, falha no temporário preserva o contrato e não deixa resíduo `.tmp`.
+
+## Comandos e resultados
+
+| Comando | Código |
+|---|---:|
+| `cargo fmt --all` | 0 |
+| `cargo fmt --all --check` | 0 |
+| `cargo check --workspace` | 0 |
+| `cargo test --workspace` | 0 |
+| `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` | 0 |
+| `cargo test -p auditor-core --lib builder::tests` | 0 — 29 testes |
+| `cargo test -p auditor-cli --test fixtures` | 0 — 5 testes |
+| `npm --prefix apps/desktop ci` | 0 |
+| `npm --prefix apps/desktop test` | 0 — 33 testes |
+| `npm --prefix apps/desktop run build` | 0 |
+| `npm --prefix extensions/vscode ci` | 0 |
+| `npm --prefix extensions/vscode test` | 0 — 12 testes |
+| `npm --prefix extensions/vscode run package` | 0 — `vibe-coding-auditor-0.1.0.vsix` |
+| `git diff --check` | 0 — somente avisos LF/CRLF do OneDrive |
+
+`cargo test --workspace` executou 275 testes Rust: 239 no núcleo, 10 unitários na CLI, 6 de integração na CLI, 5 de fixtures na CLI e 15 no desktop. Nenhum teste falhou.
+
+## Validação manual pendente
+
+Não foi executada validação manual da interface desktop nem da extensão dentro da host real do VS Code nesta etapa, e não há confirmação explícita do usuário. Os testes npm, o build do desktop e o empacotamento da extensão foram executados, mas não substituem essa validação. Esta ressalva permanece registrada até confirmação.

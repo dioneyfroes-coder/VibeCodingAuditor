@@ -159,10 +159,14 @@ fn init_contract(directory: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Carrega o contrato da raiz e apresenta o inventário resultante.
+/// Apresenta o inventário no modo escolhido pela presença do contrato.
 fn scan_project(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let contract = auditor_core::contract::load_contract(&root.join("auditor.toml"))?;
-    let inventory = auditor_core::discovery::discover(root, &contract)?;
+    let scan = auditor_core::audit::scan_run(root)?;
+    println!(
+        "{}",
+        auditor_core::audit::execution_mode_label(scan.mode, &scan.contract)
+    );
+    let inventory = scan.inventory;
 
     println!("Raiz: {}", inventory.root.display());
     println!("Arquivos incluídos: {}", inventory.files.len());
@@ -176,11 +180,14 @@ fn scan_project(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Carrega o contrato, o inventário e apresenta o grafo de dependências.
+/// Apresenta o grafo no modo escolhido pela presença do contrato.
 fn analyze_project(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let contract = auditor_core::contract::load_contract(&root.join("auditor.toml"))?;
-    let inventory = auditor_core::discovery::discover(root, &contract)?;
-    let analysis = auditor_core::analysis::analyze(root, &contract, &inventory)?;
+    let run = auditor_core::audit::analyze_run(root)?;
+    println!(
+        "{}",
+        auditor_core::audit::execution_mode_label(run.mode, &run.contract)
+    );
+    let analysis = run.analysis;
 
     println!("Módulos: {}", analysis.modules.join(", "));
     if let Some(workspace) = &analysis.workspace {
@@ -246,6 +253,55 @@ fn analyze_project(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
         println!("  - {limitation}");
     }
 
+    if let Some(candidates) = run.candidates {
+        println!("Módulos candidatos: {}", candidates.candidate_modules.len());
+        for candidate in &candidates.candidate_modules {
+            println!(
+                "  - {} [{}] {} (confirmação necessária)",
+                candidate.name,
+                candidate.category.as_str(),
+                candidate.path
+            );
+        }
+        println!(
+            "Relações classificadas: {}",
+            candidates.observed_dependencies.len()
+        );
+        for dependency in &candidates.observed_dependencies {
+            println!(
+                "  - {} -> {} [{}] {}",
+                dependency.source,
+                dependency.target,
+                dependency.resolution.as_str(),
+                dependency.detail
+            );
+        }
+        println!("Ambiguidades: {}", candidates.ambiguities.len());
+        for ambiguity in &candidates.ambiguities {
+            println!("  - {} — {}", ambiguity.subject, ambiguity.detail);
+        }
+        println!(
+            "Linguagens: {}",
+            candidates
+                .languages
+                .iter()
+                .map(|language| {
+                    let analyzer = language
+                        .analyzer
+                        .as_deref()
+                        .map(|name| format!(" ({name})"))
+                        .unwrap_or_default();
+                    format!("{}={}{}", language.extension, language.files, analyzer)
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        println!("Limitações da descoberta: {}", candidates.limitations.len());
+        for limitation in &candidates.limitations {
+            println!("  - {limitation}");
+        }
+    }
+
     Ok(())
 }
 
@@ -256,17 +312,39 @@ fn audit_command(
     output: Option<&Path>,
     diff: Option<&Path>,
 ) -> Result<u8, Box<dyn std::error::Error>> {
-    let report = auditor_core::audit::audit_project(root)?;
-    let report = match diff {
-        Some(path) => {
-            let patch = fs::read_to_string(path)?;
-            let changes = auditor_core::diff::parse_unified_diff(&patch)?;
-            auditor_core::diff::scope_report(&report, &changes)
+    let (content, exit_code) = match auditor_core::audit::project_run(root)? {
+        auditor_core::audit::ProjectRun::Discovery(report) => {
+            if let Some(path) = diff {
+                let patch = fs::read_to_string(path)?;
+                let _ = auditor_core::diff::parse_unified_diff(&patch)?;
+            }
+            let report = if diff.is_some() {
+                report.with_diff_note()
+            } else {
+                report
+            };
+            (report.render(format.into())?, 0)
         }
-        None => report,
+        auditor_core::audit::ProjectRun::Compliance(run) => {
+            let report = match diff {
+                Some(path) => {
+                    let patch = fs::read_to_string(path)?;
+                    let changes = auditor_core::diff::parse_unified_diff(&patch)?;
+                    auditor_core::diff::scope_report(&run.report, &changes)
+                }
+                None => run.report,
+            };
+            let exit_code = audit_exit_code(&report);
+            (report.render(format.into())?, exit_code)
+        }
     };
-    let content = report.render(format.into())?;
 
+    write_report(content, output)?;
+    Ok(exit_code)
+}
+
+/// Grava o relatório no destino escolhido ou o imprime no terminal.
+fn write_report(content: String, output: Option<&Path>) -> Result<(), Box<dyn std::error::Error>> {
     match output {
         Some(path) => {
             fs::write(path, content)?;
@@ -274,8 +352,7 @@ fn audit_command(
         }
         None => println!("{content}"),
     }
-
-    Ok(audit_exit_code(&report))
+    Ok(())
 }
 
 /// Código `0` para execução sem achados e `1` quando há achados.
@@ -344,6 +421,7 @@ mod tests {
     use super::audit_exit_code;
     use super::dependency_kind_label;
     use auditor_core::analysis::{AnalysisCoverage, DependencyKind};
+    use auditor_core::audit::{ContractStatus, ExecutionMode};
     use auditor_core::report::ReportFormat;
     use auditor_core::report::{AuditReport, ReportSummary, SkipReasonSummary};
 
@@ -513,6 +591,8 @@ mod tests {
             findings: Vec::new(),
             limitations: Vec::new(),
             coverage: AnalysisCoverage::default(),
+            mode: ExecutionMode::Compliance,
+            contract: ContractStatus::Present { schema_version: 1 },
         }
     }
 

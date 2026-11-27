@@ -336,6 +336,7 @@ fn merge_ranges(ranges: Vec<LineRange>) -> Vec<LineRange> {
 mod tests {
     use super::*;
     use crate::analysis::AnalysisCoverage;
+    use crate::audit::{ContractStatus, ExecutionMode};
     use crate::discovery::{SkipReason, SkippedEntry};
     use crate::findings::Severity;
     use crate::report::SkipReasonSummary;
@@ -453,6 +454,8 @@ rename to src/new.rs\n";
             ],
             limitations: Vec::new(),
             coverage: AnalysisCoverage::default(),
+            mode: ExecutionMode::Compliance,
+            contract: ContractStatus::Present { schema_version: 1 },
         };
         let changes = parse_unified_diff(PATCH).expect("patch must parse");
 
@@ -499,6 +502,8 @@ rename to src/new.rs\n";
             ],
             limitations: Vec::new(),
             coverage: AnalysisCoverage::default(),
+            mode: ExecutionMode::Compliance,
+            contract: ContractStatus::Present { schema_version: 1 },
         };
         let changes =
             parse_unified_diff("--- a/src/old.rs\n+++ /dev/null\n@@ -1 +0,0 @@\n-conteudo\n")
@@ -542,6 +547,8 @@ rename to src/new.rs\n";
             )],
             limitations: Vec::new(),
             coverage: AnalysisCoverage::default(),
+            mode: ExecutionMode::Compliance,
+            contract: ContractStatus::Present { schema_version: 1 },
         };
         let changes = parse_unified_diff(
             "--- a/crates/domain/src/lib.rs\n\

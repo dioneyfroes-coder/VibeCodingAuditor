@@ -24,6 +24,17 @@ pub enum EvidenceCategory {
     Ambiguous,
 }
 
+impl EvidenceCategory {
+    /// Nome estável usado em texto, Markdown e JSON.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Direct => "direct",
+            Self::InferredPath => "inferred_path",
+            Self::Ambiguous => "ambiguous",
+        }
+    }
+}
+
 /// Módulo sugerido a partir de evidências verificáveis.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CandidateModule {
@@ -51,6 +62,18 @@ pub enum ObservedResolution {
     External,
     /// Mais de um destino interno corresponde ao observado.
     Ambiguous,
+}
+
+impl ObservedResolution {
+    /// Rótulo legível usado em texto e Markdown, neutro quanto a regras.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Resolved => "resolvida",
+            Self::Unresolved => "não resolvida",
+            Self::External => "externa",
+            Self::Ambiguous => "ambígua",
+        }
+    }
 }
 
 /// Relação observada com destino classificado apenas por evidência.

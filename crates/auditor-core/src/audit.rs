@@ -14,7 +14,8 @@ use crate::analysis::{self, Analysis, AnalysisError};
 use crate::contract::{self, Contract, ContractError};
 use crate::discovery::candidates::{self, DiscoveryCandidates};
 use crate::discovery::{self, DiscoveryError, Inventory};
-use crate::report::AuditReport;
+use crate::findings::Finding;
+use crate::report::{AuditReport, SkipReasonSummary};
 use crate::rules;
 
 /// Falha operacional em uma etapa do pipeline de auditoria.
@@ -69,9 +70,33 @@ pub enum ContractStatus {
     },
 }
 
+/// Limitação adicionada quando `--diff` é pedido sem contrato.
+pub const DISCOVERY_DIFF_NOTE: &str =
+    "--diff não filtrou achados: descoberta não produz achados de conformidade";
+
+/// Rótulo estável do modo em texto, Markdown e saída do terminal.
+pub fn execution_mode_label(mode: ExecutionMode, contract: &ContractStatus) -> String {
+    match (mode, contract) {
+        (ExecutionMode::Discovery, ContractStatus::Missing) => {
+            "Modo: descoberta (sem contrato)".to_owned()
+        }
+        (ExecutionMode::Compliance, ContractStatus::Present { schema_version }) => {
+            format!("Modo: conformidade (contrato v{schema_version})")
+        }
+        (ExecutionMode::Discovery, ContractStatus::Present { .. }) => {
+            "Modo: descoberta (contrato presente)".to_owned()
+        }
+        (ExecutionMode::Compliance, ContractStatus::Missing) => {
+            "Modo: conformidade (sem contrato)".to_owned()
+        }
+    }
+}
+
 /// Resultado da descoberta sem contrato.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DiscoveryReport {
+    /// Modo explícito da execução, sempre `discovery`.
+    pub mode: ExecutionMode,
     /// Estado do contrato, sempre `missing` neste modo.
     pub contract: ContractStatus,
     /// Inventário produzido com os defaults seguros de descoberta.
@@ -80,11 +105,53 @@ pub struct DiscoveryReport {
     pub analysis: Analysis,
     /// Material de descoberta: candidatos, relações classificadas e limites.
     pub candidates: DiscoveryCandidates,
+    /// Motivos pelos quais entradas ficaram de fora da varredura.
+    pub skip_summary: SkipReasonSummary,
+    /// Achados de conformidade, sempre vazios em descoberta.
+    pub findings: Vec<Finding>,
+}
+
+impl DiscoveryReport {
+    /// Registra que um filtro de achados não pôde ser aplicado em descoberta.
+    pub fn with_diff_note(mut self) -> Self {
+        self.candidates
+            .limitations
+            .push(DISCOVERY_DIFF_NOTE.to_owned());
+        self.candidates.limitations.sort();
+        self.candidates.limitations.dedup();
+        self
+    }
+}
+
+/// Resultado do inventário com modo explícito.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ScanRun {
+    /// Modo escolhido pela presença do contrato.
+    pub mode: ExecutionMode,
+    /// Estado do contrato na raiz informada.
+    pub contract: ContractStatus,
+    /// Inventário produzido no modo selecionado.
+    pub inventory: Inventory,
+}
+
+/// Resultado da análise com modo explícito.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AnalyzeRun {
+    /// Modo escolhido pela presença do contrato.
+    pub mode: ExecutionMode,
+    /// Estado do contrato na raiz informada.
+    pub contract: ContractStatus,
+    /// Grafo produzido no modo selecionado.
+    pub analysis: Analysis,
+    /// Candidatos e relações classificadas, presentes somente na descoberta.
+    pub candidates: Option<DiscoveryCandidates>,
 }
 
 /// Resultado da conformidade com contrato válido.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ComplianceRun {
+    /// Modo explícito da execução, sempre `compliance`.
+    pub mode: ExecutionMode,
     /// Estado do contrato, sempre `present` neste modo.
     pub contract: ContractStatus,
     /// Relatório de conformidade inalterado.
@@ -92,8 +159,14 @@ pub struct ComplianceRun {
 }
 
 /// Execução discriminada: descoberta ou conformidade.
+///
+/// Os dois ramos carregam inventário/cobertura completos. `ProjectRun` é um
+/// valor de orquestração de curta duração, consumido antes da renderização;
+/// caixas separadas adicionariam indireção sem benefício para CLI/desktop.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "mode", rename_all = "snake_case")]
+// Cada ramo já serializa `mode`; uma tag externa repetiria a chave no JSON.
+#[serde(untagged)]
 pub enum ProjectRun {
     /// Nenhum contrato válido foi encontrado.
     Discovery(DiscoveryReport),
@@ -151,37 +224,98 @@ fn audit_with_contract(root: &Path, contract: &Contract) -> Result<AuditReport, 
     Ok(report)
 }
 
-/// Inventaria e analisa a raiz sem contrato, sem emitir conclusões de regra.
-pub fn discover_project(root: &Path) -> Result<DiscoveryReport, AuditError> {
-    let inventory = discovery::discover_without_contract(root)?;
-    let analysis = analysis::analyze_observations(root, &inventory)?;
-    let candidates = candidates::build_candidates(&inventory, &analysis);
-    Ok(DiscoveryReport {
-        contract: ContractStatus::Missing,
-        inventory,
-        analysis,
-        candidates,
-    })
-}
-
-/// Escolhe o modo pela presença do contrato, sem fallback silencioso.
-pub fn project_run(root: &Path) -> Result<ProjectRun, AuditError> {
+/// Carrega o contrato e seu estado, sem confundir ausência com erro de TOML.
+fn load_contract_status(root: &Path) -> Result<(Option<Contract>, ContractStatus), AuditError> {
     let contract_path = root.join("auditor.toml");
     match contract_path.try_exists() {
         Ok(true) => {
             let contract = contract::load_contract(&contract_path)?;
-            let schema_version = contract.schema_version;
-            Ok(ProjectRun::Compliance(ComplianceRun {
-                contract: ContractStatus::Present { schema_version },
-                report: audit_with_contract(root, &contract)?,
-            }))
+            let status = ContractStatus::Present {
+                schema_version: contract.schema_version,
+            };
+            Ok((Some(contract), status))
         }
-        Ok(false) => Ok(ProjectRun::Discovery(discover_project(root)?)),
+        Ok(false) => Ok((None, ContractStatus::Missing)),
         Err(source) => Err(AuditError::Contract(ContractError::Io {
             path: contract_path,
             source,
         })),
     }
+}
+
+/// Modo decorrente do estado do contrato.
+fn mode_for(contract: &ContractStatus) -> ExecutionMode {
+    match contract {
+        ContractStatus::Missing => ExecutionMode::Discovery,
+        ContractStatus::Present { .. } => ExecutionMode::Compliance,
+    }
+}
+
+/// Inventaria e analisa a raiz sem contrato, sem emitir conclusões de regra.
+pub fn discover_project(root: &Path) -> Result<DiscoveryReport, AuditError> {
+    let inventory = discovery::discover_without_contract(root)?;
+    let analysis = analysis::analyze_observations(root, &inventory)?;
+    let candidates = candidates::build_candidates(&inventory, &analysis);
+    let skip_summary = SkipReasonSummary::from_entries(&inventory.skipped);
+    Ok(DiscoveryReport {
+        mode: ExecutionMode::Discovery,
+        contract: ContractStatus::Missing,
+        inventory,
+        analysis,
+        candidates,
+        skip_summary,
+        findings: Vec::new(),
+    })
+}
+
+/// Escolhe o modo pela presença do contrato, sem fallback silencioso.
+pub fn project_run(root: &Path) -> Result<ProjectRun, AuditError> {
+    let (contract, contract_status) = load_contract_status(root)?;
+    match contract {
+        Some(contract) => Ok(ProjectRun::Compliance(ComplianceRun {
+            mode: ExecutionMode::Compliance,
+            contract: contract_status,
+            report: audit_with_contract(root, &contract)?,
+        })),
+        None => Ok(ProjectRun::Discovery(discover_project(root)?)),
+    }
+}
+
+/// Executa o inventário no modo selecionado pela presença do contrato.
+pub fn scan_run(root: &Path) -> Result<ScanRun, AuditError> {
+    let (contract, contract_status) = load_contract_status(root)?;
+    let inventory = match contract {
+        Some(contract) => discovery::discover(root, &contract)?,
+        None => discovery::discover_without_contract(root)?,
+    };
+    Ok(ScanRun {
+        mode: mode_for(&contract_status),
+        contract: contract_status,
+        inventory,
+    })
+}
+
+/// Executa a análise no modo selecionado pela presença do contrato.
+pub fn analyze_run(root: &Path) -> Result<AnalyzeRun, AuditError> {
+    let (contract, contract_status) = load_contract_status(root)?;
+    let inventory = match &contract {
+        Some(contract) => discovery::discover(root, contract)?,
+        None => discovery::discover_without_contract(root)?,
+    };
+    let analysis = match &contract {
+        Some(contract) => analysis::analyze(root, contract, &inventory)?,
+        None => analysis::analyze_observations(root, &inventory)?,
+    };
+    let candidates = match contract {
+        Some(_) => None,
+        None => Some(candidates::build_candidates(&inventory, &analysis)),
+    };
+    Ok(AnalyzeRun {
+        mode: mode_for(&contract_status),
+        contract: contract_status,
+        analysis,
+        candidates,
+    })
 }
 
 #[cfg(test)]
@@ -1098,6 +1232,12 @@ mod tests {
         let value = serde_json::to_value(&discovery).expect("discovery must serialize");
         assert_eq!(value["mode"], "discovery");
         assert_eq!(value["contract"]["status"], "missing");
+        let raw = serde_json::to_string(&discovery).expect("discovery must serialize to text");
+        assert_eq!(
+            raw.matches("\"mode\"").count(),
+            1,
+            "o JSON não deve repetir a chave de modo"
+        );
 
         let compliance =
             project_run(&project_fixture("clean")).expect("compliance run must succeed");

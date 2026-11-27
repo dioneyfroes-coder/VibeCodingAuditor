@@ -488,9 +488,21 @@ Nova fase iniciada em 26/11/2026 a partir de `PLANO_ETAPA_4_DESCOBERTA_E_ARCHITE
 - [x] Verificação final: `cargo fmt --all` = `0`, `cargo fmt --all --check` = `0`, `cargo check --workspace` = `0`, `cargo test --workspace` = `0` (211 testes: 197 no núcleo, 10 na CLI e 4 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` = `0`, `git diff --check` = `0` (apenas avisos LF/CRLF do OneDrive), `npm --prefix apps/desktop test` = `0` (12), `npm --prefix apps/desktop run build` = `0` e `npm --prefix extensions/vscode test` = `0` (7). Testes focados: `cargo test -p auditor-core --lib discovery::candidates` = `0` (8), `cargo test -p auditor-core --lib project_run` = `0` (5) e `cargo test -p auditor-core --lib discovery_report_exposes_candidates_and_analyzer_limits` = `0` (1).
 - [x] Limitações explícitas: a descoberta ainda não lê `package.json`, `pyproject.toml` nem `go.mod` para extrair candidatos; não resolve pacotes externos nem usa analisadores além de Rust, TypeScript/JavaScript e Python; a CLI, o texto/Markdown, o histórico e a interface ainda não mostram o modo nem os candidatos (4.3); `auditor init` continua gerando v1 (risco já registrado na proposta).
 
-### Etapa 4.3 a 4.8 — Não iniciadas
+### Etapa 4.3 — CLI e contrato do relatório — Concluída em 26/11/2026
 
-- [ ] 4.3 — CLI e contrato do relatório.
+- [x] Após o usuário responder “prossiga”, as mudanças ficaram restritas ao núcleo, à CLI e à documentação. Tauri/React, extensão VS Code, SQLite e contratos não mudaram em comportamento; nenhuma dependência nova foi adicionada.
+- [x] Seleção de modo automática pela presença de `auditor.toml` em `scan_run()`, `analyze_run()` e `project_run()`. TOML existente e inválido continua retornando `AuditError::Contract`, sem fallback para descoberta.
+- [x] `scan` e `analyze` funcionam sem contrato e exibem `Modo: descoberta (sem contrato)`. `analyze` em descoberta mostra arestas `observada`, sem rótulos de conformidade, além de candidatos, relações classificadas por evidência, ambiguidades e limitações.
+- [x] `audit` sem contrato renderiza descoberta nos três formatos, com `mode: "discovery"`, `contract.status: "missing"`, `findings: []`, `skip_summary` e cobertura. Com contrato, `AuditReport` ganha apenas os campos aditivos `mode: "compliance"` e `contract` com `status` e `schema_version`; campos antigos permanecem.
+- [x] Texto e Markdown indicam o modo: `Modo: conformidade (contrato vN)` ou `Modo: descoberta (sem contrato)`. `ProjectRun` passou a serializar sem tag externa porque cada ramo já traz `mode`; um teste garante uma única chave `mode` no JSON.
+- [x] `--diff` em descoberta valida o patch, não filtra achados e registra a limitação `--diff não filtrou achados: descoberta não produz achados de conformidade`. Em conformidade, o comportamento anterior foi preservado.
+- [x] Códigos de saída documentados no README: `0` para sucesso inclusive descoberta com observações, `1` para conformidade com achados e `2` para falha operacional ou contrato inválido. Ausência de TOML não produz `2`; `history record` sem contrato falha com `2` e não grava descoberta.
+- [x] Testes escritos antes da implementação: renderização/serialização no núcleo e cinco testes de integração que executam o binário real. A fase vermelha falhou por métodos e campos inexistentes. Durante a implementação, o Clippy apontou `large_enum_variant` em `ProjectRun` (536 bytes contra 280), resolvido com exceção justificada no código, e um teste revelou `mode` duplicado no JSON, corrigido com `#[serde(untagged)]` e o campo `mode` em `ComplianceRun`.
+- [x] Verificação final: `cargo fmt --all --check` = `0`, `cargo check --workspace` = `0`, `cargo test --workspace` = `0` (220 testes: 201 no núcleo, 10 unitários na CLI, 5 de integração na CLI e 4 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` = `0`, `git diff --check` = `0` (apenas avisos LF/CRLF do OneDrive), `npm --prefix apps/desktop test` = `0` (12), `npm --prefix apps/desktop run build` = `0` e `npm --prefix extensions/vscode test` = `0` (7).
+- [x] Limitações explícitas: desktop, extensão e histórico ainda não mostram modo nem candidatos (Etapas 4.5 e 4.7); `init` continua gerando v1; os candidatos ainda não leem `package.json`, `pyproject.toml` nem `go.mod`; `--diff` em descoberta apenas valida o patch; `ProjectRun` mantém uma exceção documentada do Clippy para variantes grandes.
+
+### Etapa 4.4 a 4.8 — Não iniciadas
+
 - [ ] 4.4 — modelo do Architecture Builder.
 - [ ] 4.5 — interface visual do Builder.
 - [ ] 4.6 — gravação segura, validação final e segunda auditoria.

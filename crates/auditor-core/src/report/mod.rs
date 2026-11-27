@@ -9,6 +9,7 @@ use std::fmt;
 use serde::Serialize;
 
 use crate::analysis::{Analysis, AnalysisCoverage, describe_unsupported_code_extensions};
+use crate::audit::{ContractStatus, DiscoveryReport, ExecutionMode, execution_mode_label};
 use crate::contract::Contract;
 use crate::discovery::{Inventory, SkipReason, SkippedEntry};
 use crate::findings::{Finding, Severity};
@@ -194,6 +195,10 @@ pub struct AuditReport {
     pub limitations: Vec<String>,
     /// Cobertura efetiva da análise sobre o código incluído no inventário.
     pub coverage: AnalysisCoverage,
+    /// Modo explícito da execução, sempre `compliance` neste relatório.
+    pub mode: ExecutionMode,
+    /// Estado do contrato, sempre `present` neste relatório.
+    pub contract: ContractStatus,
 }
 
 impl AuditReport {
@@ -228,6 +233,10 @@ impl AuditReport {
             findings,
             limitations: analysis.limitations.clone(),
             coverage: analysis.coverage.clone(),
+            mode: ExecutionMode::Compliance,
+            contract: ContractStatus::Present {
+                schema_version: contract.schema_version,
+            },
         }
     }
 
@@ -259,6 +268,8 @@ impl AuditReport {
             findings,
             limitations,
             coverage: self.coverage.clone(),
+            mode: self.mode,
+            contract: self.contract.clone(),
         }
     }
 
@@ -283,6 +294,7 @@ impl AuditReport {
                 "Auditoria: {} (schema v{})",
                 self.project, self.schema_version
             ),
+            execution_mode_label(self.mode, &self.contract),
             format!(
                 "Arquivos: {} incluídos, {} não incluídos",
                 self.summary.files_included, self.summary.files_skipped
@@ -356,6 +368,7 @@ impl AuditReport {
         let mut lines = vec![
             format!("# Auditoria: {}", self.project),
             String::new(),
+            format!("- {}", execution_mode_label(self.mode, &self.contract)),
             format!("- Schema: v{}", self.schema_version),
             format!("- Arquivos incluídos: {}", self.summary.files_included),
             format!("- Arquivos não incluídos: {}", self.summary.files_skipped),
@@ -424,6 +437,235 @@ impl AuditReport {
             lines.push(String::new());
             lines.push("## Limitações".to_owned());
             for limitation in &self.limitations {
+                lines.push(format!("- {}", markdown_text(limitation)));
+            }
+        }
+
+        format!("{}\n", lines.join("\n"))
+    }
+}
+
+impl DiscoveryReport {
+    /// Renderiza a descoberta nos mesmos formatos da auditoria de conformidade.
+    pub fn render(&self, format: ReportFormat) -> Result<String, ReportError> {
+        match format {
+            ReportFormat::Text => Ok(self.render_text()),
+            ReportFormat::Json => self.render_json(),
+            ReportFormat::Markdown => Ok(self.render_markdown()),
+        }
+    }
+
+    /// Serializa a descoberta em JSON formatado, com modo e estado do contrato.
+    fn render_json(&self) -> Result<String, ReportError> {
+        serde_json::to_string_pretty(self).map_err(ReportError::Json)
+    }
+
+    /// Texto legível que deixa claro que não houve conformidade avaliada.
+    fn render_text(&self) -> String {
+        let mut lines = vec![
+            execution_mode_label(self.mode, &self.contract),
+            format!("Raiz: {}", self.inventory.root.display()),
+            format!(
+                "Arquivos: {} incluídos, {} não incluídos",
+                self.inventory.files.len(),
+                self.inventory.skipped.len()
+            ),
+            coverage_line(&self.analysis.coverage),
+            format!(
+                "Módulos candidatos: {} (todos exigem confirmação)",
+                self.candidates.candidate_modules.len()
+            ),
+            format!(
+                "Relações observadas: {}",
+                self.candidates.observed_dependencies.len()
+            ),
+            format!("Ambiguidades: {}", self.candidates.ambiguities.len()),
+            "Achados: nenhum (descoberta não emite achados de conformidade).".to_owned(),
+            "Linguagens:".to_owned(),
+        ];
+
+        for language in &self.candidates.languages {
+            let analyzer = language
+                .analyzer
+                .clone()
+                .unwrap_or_else(|| "sem analisador".to_owned());
+            lines.push(format!(
+                "  - {}: {} arquivo(s), analisador: {analyzer}",
+                language.extension, language.files
+            ));
+        }
+
+        if self.skip_summary.total > 0 {
+            lines.push(skip_summary_headline(&self.skip_summary));
+            for reason in &self.skip_summary.reasons {
+                lines.push(format!("  - {}", skip_reason_description(reason)));
+            }
+        }
+
+        lines.push(String::new());
+        lines.push("Módulos candidatos sugeridos:".to_owned());
+        for candidate in &self.candidates.candidate_modules {
+            lines.push(format!(
+                "  - {} [{}] {}",
+                candidate.name,
+                candidate.category.as_str(),
+                candidate.path
+            ));
+            for evidence in &candidate.evidence {
+                lines.push(format!("      evidência: {evidence}"));
+            }
+        }
+
+        if !self.candidates.observed_dependencies.is_empty() {
+            lines.push(String::new());
+            lines.push("Relações observadas:".to_owned());
+            for dependency in &self.candidates.observed_dependencies {
+                let position = match dependency.line {
+                    Some(line) => format!(" (linha {line})"),
+                    None => String::new(),
+                };
+                lines.push(format!(
+                    "  - {} -> {} [{}]{}",
+                    dependency.source,
+                    dependency.target,
+                    dependency.resolution.as_str(),
+                    position
+                ));
+                if let Some(evidence) = &dependency.evidence {
+                    lines.push(format!("      evidência: {evidence}"));
+                }
+            }
+        }
+
+        if !self.candidates.ambiguities.is_empty() {
+            lines.push(String::new());
+            lines.push("Ambiguidades:".to_owned());
+            for ambiguity in &self.candidates.ambiguities {
+                lines.push(format!("  - {} — {}", ambiguity.subject, ambiguity.detail));
+                lines.push(format!("      opções: {}", ambiguity.options.join(", ")));
+            }
+        }
+
+        if !self.candidates.limitations.is_empty() {
+            lines.push(String::new());
+            lines.push("Limitações:".to_owned());
+            for limitation in &self.candidates.limitations {
+                lines.push(format!("  - {limitation}"));
+            }
+        }
+
+        lines.join("\n")
+    }
+
+    /// Markdown com seções separadas para cada tipo de evidência coletada.
+    fn render_markdown(&self) -> String {
+        let mut lines = vec![
+            format!("# Descoberta: {}", self.inventory.root.display()),
+            String::new(),
+            format!("- {}", execution_mode_label(self.mode, &self.contract)),
+            format!("- Arquivos incluídos: {}", self.inventory.files.len()),
+            format!("- Arquivos não incluídos: {}", self.inventory.skipped.len()),
+            format!("- {}", coverage_line(&self.analysis.coverage)),
+            format!(
+                "- Módulos candidatos: {} (todos exigem confirmação)",
+                self.candidates.candidate_modules.len()
+            ),
+            format!(
+                "- Relações observadas: {}",
+                self.candidates.observed_dependencies.len()
+            ),
+            format!("- Ambiguidades: {}", self.candidates.ambiguities.len()),
+            "- Achados: nenhum (descoberta não emite achados de conformidade)".to_owned(),
+            "- Linguagens:".to_owned(),
+        ];
+
+        for language in &self.candidates.languages {
+            let analyzer = language
+                .analyzer
+                .clone()
+                .unwrap_or_else(|| "sem analisador".to_owned());
+            lines.push(format!(
+                "  - {}: {} arquivo(s), analisador: {analyzer}",
+                language.extension, language.files
+            ));
+        }
+
+        if self.skip_summary.total > 0 {
+            lines.push(format!("- {}", skip_summary_headline(&self.skip_summary)));
+            for reason in &self.skip_summary.reasons {
+                lines.push(format!(
+                    "  - {}",
+                    markdown_text(&skip_reason_description(reason))
+                ));
+            }
+        }
+
+        lines.push(String::new());
+        lines.push("## Módulos candidatos".to_owned());
+        for candidate in &self.candidates.candidate_modules {
+            lines.push(String::new());
+            lines.push(format!(
+                "### {} [{}]",
+                markdown_text(&candidate.name),
+                candidate.category.as_str()
+            ));
+            lines.push(format!("- **Path:** `{}`", markdown_text(&candidate.path)));
+            lines.push("- **Confirmação:** necessária".to_owned());
+            for evidence in &candidate.evidence {
+                lines.push(format!("- **Evidência:** {}", markdown_text(evidence)));
+            }
+        }
+
+        lines.push(String::new());
+        lines.push("## Relações observadas".to_owned());
+        for dependency in &self.candidates.observed_dependencies {
+            lines.push(String::new());
+            lines.push(format!(
+                "- **Origem:** `{}`",
+                markdown_text(&dependency.source)
+            ));
+            lines.push(format!(
+                "- **Destino:** `{}`",
+                markdown_text(&dependency.target)
+            ));
+            lines.push(format!(
+                "- **Classificação:** {}",
+                dependency.resolution.as_str()
+            ));
+            if let Some(line) = dependency.line {
+                lines.push(format!("- **Linha:** {line}"));
+            }
+            if let Some(evidence) = &dependency.evidence {
+                lines.push(format!("- **Evidência:** `{}`", markdown_text(evidence)));
+            }
+        }
+
+        if !self.candidates.ambiguities.is_empty() {
+            lines.push(String::new());
+            lines.push("## Ambiguidades".to_owned());
+            for ambiguity in &self.candidates.ambiguities {
+                lines.push(String::new());
+                lines.push(format!("### {}", markdown_text(&ambiguity.subject)));
+                lines.push(format!(
+                    "- **Motivo:** {}",
+                    markdown_text(&ambiguity.detail)
+                ));
+                lines.push(format!(
+                    "- **Opções:** {}",
+                    markdown_text(&ambiguity.options.join(", "))
+                ));
+            }
+        }
+
+        if !self.candidates.limitations.is_empty() {
+            lines.push(String::new());
+            lines.push(format!(
+                "- Limitações: {}",
+                self.candidates.limitations.len()
+            ));
+            lines.push(String::new());
+            lines.push("## Limitações".to_owned());
+            for limitation in &self.candidates.limitations {
                 lines.push(format!("- {}", markdown_text(limitation)));
             }
         }
@@ -534,6 +776,8 @@ fn markdown_text(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
     use crate::analysis::{AnalysisCoverage, UnsupportedCodeExtension};
     use crate::discovery::{SkipReason, SkippedEntry};
@@ -606,6 +850,8 @@ mod tests {
                 ],
                 partial: true,
             },
+            mode: ExecutionMode::Compliance,
+            contract: ContractStatus::Present { schema_version: 1 },
         }
     }
 
@@ -803,5 +1049,112 @@ mod tests {
         finding.line_start = None;
         finding.line_end = None;
         assert_eq!(finding_location(&finding), "src/lib.rs");
+    }
+
+    /// Raiz de uma fixture de projeto, relativa ao crate.
+    fn project_fixture(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/projects")
+            .join(name)
+    }
+
+    #[test]
+    fn compliance_json_keeps_existing_fields_and_adds_mode() {
+        let report = crate::audit::audit_project(&project_fixture("clean"))
+            .expect("compliance audit must succeed");
+        let output = report
+            .render(ReportFormat::Json)
+            .expect("JSON rendering must succeed");
+        let value: serde_json::Value = serde_json::from_str(&output).expect("JSON must be valid");
+
+        assert_eq!(value["mode"], "compliance");
+        assert_eq!(value["contract"]["status"], "present");
+        assert_eq!(value["contract"]["schema_version"], 1);
+        assert!(value["project"].is_string());
+        assert!(value["schema_version"].is_number());
+        assert!(value["summary"].is_object());
+        assert!(value["skip_summary"].is_object());
+        assert!(value["findings"].is_array());
+        assert!(value["limitations"].is_array());
+        assert!(value["coverage"].is_object());
+    }
+
+    #[test]
+    fn compliance_text_and_markdown_state_the_mode() {
+        let report = crate::audit::audit_project(&project_fixture("clean"))
+            .expect("compliance audit must succeed");
+        let text = report
+            .render(ReportFormat::Text)
+            .expect("text rendering cannot fail");
+        let markdown = report
+            .render(ReportFormat::Markdown)
+            .expect("Markdown rendering cannot fail");
+
+        assert!(text.contains("Modo: conformidade (contrato v1)"));
+        assert!(markdown.contains("Modo: conformidade (contrato v1)"));
+        assert!(!text.contains("descoberta"));
+        assert!(!markdown.contains("descoberta"));
+    }
+
+    #[test]
+    fn discovery_report_states_mode_and_evidence_in_all_formats() {
+        let report = crate::audit::discover_project(&project_fixture("discovery_candidates"))
+            .expect("discovery must succeed");
+        let text = report
+            .render(ReportFormat::Text)
+            .expect("text rendering cannot fail");
+        let markdown = report
+            .render(ReportFormat::Markdown)
+            .expect("Markdown rendering cannot fail");
+        let output = report
+            .render(ReportFormat::Json)
+            .expect("JSON rendering must succeed");
+        let value: serde_json::Value = serde_json::from_str(&output).expect("JSON must be valid");
+
+        assert!(text.contains("Modo: descoberta (sem contrato)"));
+        assert!(markdown.contains("Modo: descoberta (sem contrato)"));
+        assert_eq!(value["mode"], "discovery");
+        assert_eq!(value["contract"]["status"], "missing");
+        assert_eq!(value["findings"], serde_json::json!([]));
+        for label in [
+            "Módulos candidatos:",
+            "Relações observadas:",
+            "Ambiguidades:",
+            "Linguagens:",
+            "Limitações:",
+        ] {
+            assert!(text.contains(label), "texto deve conter {label}");
+            assert!(markdown.contains(label), "Markdown deve conter {label}");
+        }
+        assert!(text.contains("direct"));
+        assert!(text.contains("typescript_javascript"));
+    }
+
+    #[test]
+    fn discovery_diff_note_is_explicit_in_all_formats() {
+        let report = crate::audit::discover_project(&project_fixture("discovery_no_contract"))
+            .expect("discovery must succeed")
+            .with_diff_note();
+        let text = report
+            .render(ReportFormat::Text)
+            .expect("text rendering cannot fail");
+        let markdown = report
+            .render(ReportFormat::Markdown)
+            .expect("Markdown rendering cannot fail");
+        let output = report
+            .render(ReportFormat::Json)
+            .expect("JSON rendering must succeed");
+        let value: serde_json::Value = serde_json::from_str(&output).expect("JSON must be valid");
+        let note = crate::audit::DISCOVERY_DIFF_NOTE;
+
+        assert!(text.contains(note));
+        assert!(markdown.contains(note));
+        assert!(
+            value["candidates"]["limitations"]
+                .as_array()
+                .expect("limitations must be an array")
+                .iter()
+                .any(|item| item.as_str() == Some(note))
+        );
     }
 }

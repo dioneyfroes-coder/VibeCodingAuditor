@@ -17,7 +17,7 @@ fn fixture(name: &str) -> PathBuf {
 
 /// Executa o binário e devolve código, saída padrão e saída de erro.
 fn run(args: &[&Path]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_vibe-coding-auditor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_vibe-coding-auditor-cli"))
         .args(args)
         .output()
         .expect("CLI binary must run");

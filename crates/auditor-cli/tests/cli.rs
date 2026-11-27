@@ -24,7 +24,7 @@ fn temp_path(label: &str) -> PathBuf {
 
 /// Executa o binário e devolve código, saída padrão e saída de erro.
 fn run(args: &[&Path]) -> (i32, String, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_vibe-coding-auditor"))
+    let output = Command::new(env!("CARGO_BIN_EXE_vibe-coding-auditor-cli"))
         .args(args)
         .output()
         .expect("CLI binary must run");
@@ -38,6 +38,22 @@ fn run(args: &[&Path]) -> (i32, String, String) {
 /// Argumento de caminho como `&Path`, usado por `run`.
 fn arg(value: &str) -> &Path {
     Path::new(value)
+}
+
+#[test]
+fn running_without_arguments_shows_presentation_and_help() {
+    let (code, stdout, stderr) = run(&[]);
+
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert!(stdout.contains("Vibe Coding Auditor"), "saída: {stdout}");
+    assert!(stdout.contains("CLI"), "saída: {stdout}");
+    assert!(stdout.contains("Usage:"), "saída: {stdout}");
+    assert!(
+        stdout.contains("vibe-coding-auditor-cli"),
+        "saída: {stdout}"
+    );
+    assert!(stdout.contains("--help"), "saída: {stdout}");
+    assert_eq!(stderr, "");
 }
 
 #[test]

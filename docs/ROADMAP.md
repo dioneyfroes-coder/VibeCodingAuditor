@@ -570,4 +570,11 @@ Nova fase iniciada em 26/11/2026 a partir de `PLANO_ETAPA_4_DESCOBERTA_E_ARCHITE
 - [ ] Validação da extensão na host real do VS Code — não executada nem confirmada nesta etapa; testes, build e empacotamento não a substituem.
 - [ ] Declarar a Etapa 4 totalmente concluída somente após a confirmação explícita dessas duas validações manuais.
 
+### Ajuste pós-4.8 — Nome da CLI e ajuda sem argumentos — 27/11/2026
+
+- [x] Após o usuário relatar que o executável “não abria”, foi confirmado que ele abriu `vibe-coding-auditor.exe`, uma CLI de terminal que terminava em silêncio sem argumentos. O binário foi renomeado para `vibe-coding-auditor-cli`, no `Cargo.toml`, no nome do Clap, nos testes `CARGO_BIN_EXE_*`, na documentação e no padrão `vibeCodingAuditor.cliPath` da extensão. Os binários antigos de `target/release` e `target/debug` foram removidos após o novo build.
+- [x] Sem argumentos, a CLI imprime apresentação, ajuda do Clap e linha em branco, com código `0`. `--help`, `--version`, `init`, `scan`, `analyze`, `audit` e `history` permanecem inalterados. A apresentação informa que a interface gráfica é `auditor-desktop.exe`.
+- [x] Dois testes novos cobrem o nome do comando e a saída sem argumentos. A extensão e o README foram atualizados; quem configurou `cliPath` com o nome antigo precisa ajustar a configuração. Nenhuma regra, schema, contrato ou dependência mudou.
+- [x] Verificação: `cargo fmt --all` = `0`, `cargo fmt --all --check` = `0`, `cargo check --workspace` = `0`, `cargo test --workspace` = `0` (277 testes: 239 no núcleo, 11 unitários na CLI, 7 de integração na CLI, 5 de fixtures na CLI e 15 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` = `0`, `npm --prefix apps/desktop test` = `0` (33), `npm --prefix apps/desktop run build` = `0`, `npm --prefix extensions/vscode test` = `0` (12), `npm --prefix extensions/vscode run package` = `0` e `cargo build --release -p auditor-cli` = `0`. Smoke: sem argumentos = `0` com apresentação e `Usage: vibe-coding-auditor-cli [COMMAND]`; `--version` = `0` com `vibe-coding-auditor-cli 0.1.0`; `--help` = `0`.
+
 Esta seção será atualizada somente com evidência de testes e comportamentos realmente implementados.

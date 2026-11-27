@@ -1,7 +1,7 @@
 //! Extensão VS Code: converte a resposta da CLI em diagnósticos ou observações.
 //!
 //! Nenhuma regra é avaliada aqui. A extensão invoca o executável
-//! `vibe-coding-auditor`, aceita os códigos 0 e 1 da CLI e usa o `mode`
+//! `vibe-coding-auditor-cli`, aceita os códigos 0 e 1 da CLI e usa o `mode`
 //! explícito do JSON para decidir entre diagnósticos de conformidade e
 //! mensagens informativas de descoberta.
 
@@ -161,12 +161,13 @@ async function refreshContext(): Promise<void> {
 async function resolveCli(root: string): Promise<string> {
   const configured =
     vscode.workspace.getConfiguration('vibeCodingAuditor').get<string>('cliPath') ??
-    'vibe-coding-auditor';
-  if (configured !== 'vibe-coding-auditor' || path.isAbsolute(configured)) {
+    'vibe-coding-auditor-cli';
+  if (configured !== 'vibe-coding-auditor-cli' || path.isAbsolute(configured)) {
     return configured;
   }
 
-  const executable = process.platform === 'win32' ? 'vibe-coding-auditor.exe' : 'vibe-coding-auditor';
+  const executable =
+    process.platform === 'win32' ? 'vibe-coding-auditor-cli.exe' : 'vibe-coding-auditor-cli';
   for (const candidate of [
     path.join(root, 'target', 'release', executable),
     path.join(root, 'target', 'debug', executable),

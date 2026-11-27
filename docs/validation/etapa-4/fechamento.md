@@ -96,3 +96,16 @@ Testes focados em `crates/auditor-core/src/builder.rs`:
 ## Validação manual pendente
 
 Não foi executada validação manual da interface desktop nem da extensão dentro da host real do VS Code nesta etapa, e não há confirmação explícita do usuário. Os testes npm, o build do desktop e o empacotamento da extensão foram executados, mas não substituem essa validação. Esta ressalva permanece registrada até confirmação.
+
+## Ajuste pós-fechamento — 27/11/2026
+
+A pedido do usuário, o executável da CLI foi renomeado para `vibe-coding-auditor-cli` e a execução sem argumentos passou a imprimir apresentação e ajuda com código `0`.
+
+| Comando | Código | Resultado |
+|---|---:|---|
+| `cargo build --release -p auditor-cli` | 0 | `target/release/vibe-coding-auditor-cli.exe` (6.302.720 bytes) |
+| `vibe-coding-auditor-cli.exe` sem argumentos | 0 | apresentação + `Usage: vibe-coding-auditor-cli [COMMAND]` |
+| `vibe-coding-auditor-cli.exe --version` | 0 | `vibe-coding-auditor-cli 0.1.0` |
+| `vibe-coding-auditor-cli.exe --help` | 0 | ajuda do Clap com todos os subcomandos |
+
+Os binários antigos `target/release/vibe-coding-auditor.exe` e `target/debug/vibe-coding-auditor.exe` foram removidos. A suíte completa foi reexecutada: `cargo test --workspace` = `0` (277 testes: 239 no núcleo, 11 unitários na CLI, 7 de integração na CLI, 5 de fixtures na CLI e 15 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` = `0`, `npm --prefix extensions/vscode test` = `0` (12) e `npm --prefix extensions/vscode run package` = `0`. Os testes e o build do desktop também permaneceram em `0`. Nenhuma regra, schema, contrato ou dependência foi alterado.

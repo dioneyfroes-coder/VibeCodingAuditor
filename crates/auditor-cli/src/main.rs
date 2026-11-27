@@ -3,11 +3,11 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 
 /// Auditor local de arquitetura de projetos.
 #[derive(Parser, Debug)]
-#[command(name = "vibe-coding-auditor", version, about, long_about = None)]
+#[command(name = "vibe-coding-auditor-cli", version, about, long_about = None)]
 struct Args {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -141,8 +141,18 @@ fn dispatch_command(args: Args) -> Result<u8, Box<dyn std::error::Error>> {
             diff,
         }) => audit_command(&root, format, output.as_deref(), diff.as_deref()),
         Some(Commands::History { database, action }) => history_command(&database, action),
-        None => Ok(0),
+        None => {
+            println!("{}", presentation_text());
+            Args::command().print_help()?;
+            println!();
+            Ok(0)
+        }
     }
+}
+
+/// Apresentação exibida quando a CLI é iniciada sem subcomando.
+fn presentation_text() -> &'static str {
+    "Vibe Coding Auditor — CLI de auditoria local.\nEste executável é a linha de comando; para a interface gráfica use auditor-desktop.exe.\n"
 }
 
 /// Escreve o modelo sem sobrescrever um contrato existente.
@@ -422,6 +432,7 @@ fn dependency_kind_label(kind: auditor_core::analysis::DependencyKind) -> &'stat
 
 #[cfg(test)]
 mod tests {
+    use clap::CommandFactory;
     use clap::Parser;
     use clap::error::ErrorKind;
 
@@ -438,48 +449,53 @@ mod tests {
     use auditor_core::report::{AuditReport, ReportSummary, SkipReasonSummary};
 
     #[test]
+    fn command_name_identifies_the_cli() {
+        assert_eq!(Args::command().get_name(), "vibe-coding-auditor-cli");
+    }
+
+    #[test]
     fn help_flag_is_recognized() {
-        let error = Args::try_parse_from(["vibe-coding-auditor", "--help"])
+        let error = Args::try_parse_from(["vibe-coding-auditor-cli", "--help"])
             .expect_err("--help must be handled by clap");
         assert_eq!(error.kind(), ErrorKind::DisplayHelp);
     }
 
     #[test]
     fn version_flag_is_recognized() {
-        let error = Args::try_parse_from(["vibe-coding-auditor", "--version"])
+        let error = Args::try_parse_from(["vibe-coding-auditor-cli", "--version"])
             .expect_err("--version must be handled by clap");
         assert_eq!(error.kind(), ErrorKind::DisplayVersion);
     }
 
     #[test]
     fn init_subcommand_is_recognized() {
-        let args = Args::try_parse_from(["vibe-coding-auditor", "init", "projeto"])
+        let args = Args::try_parse_from(["vibe-coding-auditor-cli", "init", "projeto"])
             .expect("init must parse");
         assert!(matches!(args.command, Some(Commands::Init { .. })));
     }
 
     #[test]
     fn scan_subcommand_requires_explicit_root() {
-        let args = Args::try_parse_from(["vibe-coding-auditor", "scan", "projeto"])
+        let args = Args::try_parse_from(["vibe-coding-auditor-cli", "scan", "projeto"])
             .expect("scan must parse");
         assert!(
             matches!(args.command, Some(Commands::Scan { root }) if root.as_path() == Path::new("projeto"))
         );
 
-        let error = Args::try_parse_from(["vibe-coding-auditor", "scan"])
+        let error = Args::try_parse_from(["vibe-coding-auditor-cli", "scan"])
             .expect_err("scan must require a root");
         assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument);
     }
 
     #[test]
     fn analyze_subcommand_requires_explicit_root() {
-        let args = Args::try_parse_from(["vibe-coding-auditor", "analyze", "projeto"])
+        let args = Args::try_parse_from(["vibe-coding-auditor-cli", "analyze", "projeto"])
             .expect("analyze must parse");
         assert!(
             matches!(args.command, Some(Commands::Analyze { root }) if root.as_path() == Path::new("projeto"))
         );
 
-        let error = Args::try_parse_from(["vibe-coding-auditor", "analyze"])
+        let error = Args::try_parse_from(["vibe-coding-auditor-cli", "analyze"])
             .expect_err("analyze must require a root");
         assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument);
     }
@@ -487,7 +503,7 @@ mod tests {
     #[test]
     fn audit_subcommand_parses_format_and_output() {
         let args = Args::try_parse_from([
-            "vibe-coding-auditor",
+            "vibe-coding-auditor-cli",
             "audit",
             "projeto",
             "--format",
@@ -513,20 +529,25 @@ mod tests {
             _ => panic!("audit command must be selected"),
         }
 
-        let error = Args::try_parse_from(["vibe-coding-auditor", "audit"])
+        let error = Args::try_parse_from(["vibe-coding-auditor-cli", "audit"])
             .expect_err("audit must require a root");
         assert_eq!(error.kind(), ErrorKind::MissingRequiredArgument);
 
-        let error =
-            Args::try_parse_from(["vibe-coding-auditor", "audit", "projeto", "--format", "xml"])
-                .expect_err("unknown format must be rejected");
+        let error = Args::try_parse_from([
+            "vibe-coding-auditor-cli",
+            "audit",
+            "projeto",
+            "--format",
+            "xml",
+        ])
+        .expect_err("unknown format must be rejected");
         assert_eq!(error.kind(), ErrorKind::InvalidValue);
     }
 
     #[test]
     fn history_subcommands_parse_database_and_arguments() {
         let args = Args::try_parse_from([
-            "vibe-coding-auditor",
+            "vibe-coding-auditor-cli",
             "history",
             "--database",
             "historico.db",
@@ -545,7 +566,7 @@ mod tests {
         }
 
         let args = Args::try_parse_from([
-            "vibe-coding-auditor",
+            "vibe-coding-auditor-cli",
             "history",
             "compare",
             "1",
@@ -564,7 +585,7 @@ mod tests {
             _ => panic!("history command must be selected"),
         }
 
-        let error = Args::try_parse_from(["vibe-coding-auditor", "history"])
+        let error = Args::try_parse_from(["vibe-coding-auditor-cli", "history"])
             .expect_err("history must require an operation");
         assert_eq!(
             error.kind(),

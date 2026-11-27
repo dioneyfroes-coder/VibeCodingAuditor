@@ -246,7 +246,7 @@ npm test
 npm run package
 ```
 
-O comando `npm test` compila o TypeScript e executa 12 testes puros de conversão e discriminação de modo, incluindo 2 de paridade sobre o mesmo JSON real da CLI; `npm run package` gera `vibe-coding-auditor-0.1.0.vsix`. O executável usado vem de `vibeCodingAuditor.cliPath` (padrão: procurar no `PATH` e depois em `target/release`/`target/debug` da pasta aberta). A extensão aceita os códigos de saída `0` e `1` da CLI; somente códigos maiores que `1` são falha.
+O comando `npm test` compila o TypeScript e executa 12 testes puros de conversão e discriminação de modo, incluindo 2 de paridade sobre o mesmo JSON real da CLI; `npm run package` gera `vibe-coding-auditor-0.1.0.vsix`. O executável usado vem de `vibeCodingAuditor.cliPath` (padrão `vibe-coding-auditor-cli`: procurar no `PATH` e depois em `target/release`/`target/debug` da pasta aberta). A extensão aceita os códigos de saída `0` e `1` da CLI; somente códigos maiores que `1` são falha.
 
 Mapeamento: `error` → `Error`, `warning` e `needs_review` → `Warning`, `info` → `Information`. O `rule_id` vira código do diagnóstico e a mensagem inclui `id`, evidência, expectativa e sugestão. Nenhuma regra é avaliada na extensão e nenhum daemon é criado.
 
@@ -266,6 +266,6 @@ O diretório `validation/targets/fake-order-service` é um projeto falso criado 
 
 ## Execução
 
-O executável `vibe-coding-auditor` responde a `--help`, `--version`, `init <diretorio>`, `scan <raiz>`, `analyze <raiz>`, `audit <raiz>` e `history <operacao>`. `init` cria `auditor.toml` sem sobrescrever arquivo existente; `scan` e `analyze` são somente leitura e servem para inspeção. `audit` produz achados e relatórios no formato escolhido. `history record` reutiliza a auditoria e grava o banco; `list`, `show` e `compare` apenas leem o banco.
+O executável `vibe-coding-auditor-cli` responde a `--help`, `--version`, `init <diretorio>`, `scan <raiz>`, `analyze <raiz>`, `audit <raiz>` e `history <operacao>`. Sem argumentos, imprime uma apresentação e a ajuda e termina com código `0`; é uma CLI de terminal, não uma janela — para a interface gráfica use `auditor-desktop.exe`. `init` cria `auditor.toml` sem sobrescrever arquivo existente; `scan` e `analyze` são somente leitura e servem para inspeção. `audit` produz achados e relatórios no formato escolhido. `history record` reutiliza a auditoria e grava o banco; `list`, `show` e `compare` apenas leem o banco.
 
 Códigos de saída: `0` quando a operação termina sem achados de conformidade — inclusive descoberta com observações e candidatos —, `1` quando há pelo menos um achado de conformidade e `2` para falha operacional, contrato inválido ou argumento inválido. Ausência de `auditor.toml` nunca produz `2` em `scan`, `analyze`, `audit` ou `history record`; TOML existente e inválido produz `2` sem cair em descoberta. `audit` e `history record` usam `0`/`1` conforme os achados da execução; `init`, `scan`, `analyze`, `history list`, `history show` e `history compare` retornam `0` em sucesso e `2` em falha. `history record` sem contrato registra descoberta e retorna `0`. `history compare` recusa comparações entre modos diferentes, duas descobertas ou conformidades com identidade desconhecida/diferente e retorna `2`.

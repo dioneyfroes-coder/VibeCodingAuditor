@@ -48,8 +48,8 @@
       "properties": {
         "vibeCodingAuditor.cliPath": {
           "type": "string",
-          "default": "vibe-coding-auditor",
-          "description": "Caminho para o executável vibe-coding-auditor. O valor padrão procura no PATH e, em seguida, em target/release e target/debug da pasta aberta."
+          "default": "vibe-coding-auditor-cli",
+          "description": "Caminho para o executável vibe-coding-auditor-cli. O valor padrão procura no PATH e, em seguida, em target/release e target/debug da pasta aberta."
         }
       }
     }

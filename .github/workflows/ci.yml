@@ -168,11 +168,16 @@ jobs:
           Get-ChildItem 'C:\Program Files (x86)\Microsoft\EdgeWebView\Application' -Directory -ErrorAction SilentlyContinue |
             ForEach-Object { "{0} WebView2={1}" -f $_.Name, (Get-Item (Join-Path $_.FullName 'msedgewebview2.exe') -ErrorAction SilentlyContinue).VersionInfo.ProductVersion }
 
-      - name: E2E do desktop Tauri
+      # O runner é elevado; o processo de integridade média precisa gravar artefatos no workspace.
+      - name: Ajustar integridade do workspace
+        shell: pwsh
+        run: icacls.exe "$env:GITHUB_WORKSPACE" /setintegritylevel '(CI)(OI)M' /T /Q
+
+      - name: E2E do desktop Tauri (integridade média)
+        shell: pwsh
         env:
           VCA_EDGEDRIVER_DIR: ${{ runner.temp }}\vca-msedgedriver
-          VCA_E2E_DRIVER_LOGS: '1'
-        run: npm --prefix apps/desktop run test:e2e
+        run: ./scripts/windows/run-deelevated.ps1 -Command 'npm --prefix apps/desktop run test:e2e' -WorkingDirectory $env:GITHUB_WORKSPACE
 
       - name: Publicar artefatos de falha
         if: failure()

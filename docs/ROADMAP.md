@@ -274,10 +274,11 @@ Objetivo: cobrir os fluxos que os testes atuais não exercitam em host real, sem
 - [x] Cachear host VS Code fixado, `tauri-driver` 2.1.0 e MSEdgeDriver pela versão do WebView2 detectada.
 - [x] Instalar o MSEdgeDriver via `scripts/windows/install-msedgedriver.ps1` antes do E2E: extração compatível com Windows PowerShell 5.1 e driver no `GITHUB_PATH`. Isso corrige a falha observada no primeiro run remoto, onde o download interno do `@wdio/tauri-service` usou `Expand-Archive -Force` e uma sobrecarga de `ExtractToDirectory` inexistente no .NET Framework.
 - [x] Após o segundo run remoto ainda falhar, o `VCA_EDGEDRIVER_DIR` passa a ser repassado explicitamente ao ambiente do `tauri-driver` pela configuração do WebdriverIO; uma etapa verifica `where msedgedriver.exe` e a versão do driver antes do E2E.
+- [x] Após o quarto run remoto, o E2E desktop passa a rodar em integridade média via `scripts/windows/run-deelevated.ps1` (`runas /trustlevel:0x20000`): runners elevados fazem o WebView2 ≥ 150 ignorar `--remote-debugging-port` recebido por `WEBVIEW2_*`/HKCU, que é o canal usado pelo `msedgedriver`.
 - [x] Limitar retries a duas tentativas apenas na instalação do driver; asserções funcionais rodam uma vez. Timeout do job: 45 minutos.
 - [x] Publicar screenshots/logs em falha por 7 dias com `actions/upload-artifact@v4`.
-- [x] Verificação local: YAML interpretado com `js-yaml` (2 jobs, `needs: verify`, 18 passos); `cargo install tauri-driver --version 2.1.0 --locked` = `0` em root temporário; script de instalação do MSEdgeDriver = `0` para as versões 157 e 158 (inclusive reaproveitamento); E2E desktop = `0` (5 testes) com `VCA_EDGEDRIVER_DIR` explícito e download automático forçado a falhar.
-- [ ] Limitação conhecida: a estabilidade do job no GitHub Actions depende do terceiro run remoto, após o repasse explícito do diretório do driver.
+- [x] Verificação local: YAML interpretado com `js-yaml` (2 jobs, `needs: verify`, 19 passos); `cargo install tauri-driver --version 2.1.0 --locked` = `0` em root temporário; script de instalação do MSEdgeDriver = `0` para as versões 157 e 158 (inclusive reaproveitamento); E2E desktop = `0` (5 testes) com `VCA_EDGEDRIVER_DIR` explícito, execução de integridade média e download automático forçado a falhar; helper propagou códigos `0` e `7`.
+- [ ] Limitação conhecida: a estabilidade do job no GitHub Actions depende do quinto run remoto, após a de-elevação do E2E desktop.
 
 ## Fechamento da primeira fase
 

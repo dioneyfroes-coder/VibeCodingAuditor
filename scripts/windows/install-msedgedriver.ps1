@@ -25,9 +25,9 @@ $driverPath = Join-Path $InstallDir 'msedgedriver.exe'
 
 if (Test-Path -LiteralPath $driverPath) {
   $existing = (& $driverPath --version 2>&1 | Out-String)
-  if ($existing -match "MSEdgeDriver\s+$major\.") {
+  if ($existing -match "(?:MSEdgeDriver|Microsoft Edge WebDriver)\s+$major\.") {
     Write-Host "MSEdgeDriver $major reaproveitado de $InstallDir"
-    if ($env:GITHUB_PATH) { Add-Content -Path $env:GITHUB_PATH -Value $InstallDir }
+    if ($env:GITHUB_PATH) { Add-Content -Path $env:GITHUB_PATH -Value $InstallDir -Encoding utf8 }
     else { $env:PATH = "$InstallDir;$env:PATH" }
     exit 0
   }
@@ -65,6 +65,6 @@ Copy-Item -LiteralPath (Join-Path $extractDir 'msedgedriver.exe') -Destination $
 Remove-Item -LiteralPath $extractDir -Recurse -Force
 Remove-Item -LiteralPath $zipPath -Force
 
-if ($env:GITHUB_PATH) { Add-Content -Path $env:GITHUB_PATH -Value $InstallDir }
+if ($env:GITHUB_PATH) { Add-Content -Path $env:GITHUB_PATH -Value $InstallDir -Encoding utf8 }
 else { $env:PATH = "$InstallDir;$env:PATH" }
 Write-Host "MSEdgeDriver $driverVersion instalado em $driverPath"

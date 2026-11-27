@@ -12,6 +12,12 @@ const artifacts = path.join(here, 'artifacts');
 // Ambientes onde cargo install é bloqueado podem definir TAURI_DRIVER_PATH;
 // o CI continua usando o tauri-driver instalado no PATH.
 const tauriDriverPath = process.env.TAURI_DRIVER_PATH;
+// O tauri-driver localiza o msedgedriver pelo PATH do processo filho. Em CI o
+// diretório é explícito para não depender da ordem em que o runner aplica GITHUB_PATH.
+const edgeDriverDir = process.env.VCA_EDGEDRIVER_DIR;
+const driverEnv = edgeDriverDir
+  ? { PATH: `${edgeDriverDir};${process.env.PATH ?? ''}` }
+  : undefined;
 
 if (!existsSync(appBinaryPath)) {
   throw new Error(`Executável ausente: ${appBinaryPath}. Execute npm --prefix apps/desktop run tauri build antes do E2E.`);
@@ -36,6 +42,7 @@ export const config = {
         driverProvider: 'external',
         // Permite usar um driver instalado fora do PATH; padrão no CI continua sendo o PATH.
         ...(tauriDriverPath ? { tauriDriverPath } : {}),
+        ...(driverEnv ? { env: driverEnv } : {}),
         autoInstallTauriDriver: !tauriDriverPath,
         autoDownloadEdgeDriver: true,
         tauriDriverPort: 4444,

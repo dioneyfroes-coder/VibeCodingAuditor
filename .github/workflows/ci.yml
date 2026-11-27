@@ -160,7 +160,15 @@ jobs:
       - name: E2E da extensão VS Code
         run: npm --prefix extensions/vscode run test:e2e
 
+      - name: Verificar MSEdgeDriver no PATH
+        shell: pwsh
+        run: |
+          where.exe msedgedriver.exe
+          msedgedriver.exe --version
+
       - name: E2E do desktop Tauri
+        env:
+          VCA_EDGEDRIVER_DIR: ${{ runner.temp }}\vca-msedgedriver
         run: npm --prefix apps/desktop run test:e2e
 
       - name: Publicar artefatos de falha

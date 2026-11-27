@@ -208,13 +208,62 @@ Etapa 2 (confiabilidade do motor): concluída em 26/11/2026 — itens 2.1 a 2.8 
 - [x] `cargo run -p auditor-cli -- audit --help` mostrou `--diff <ARQUIVO>`; `npm test` da extensão e `npm run build` da desktop passaram
 - [x] Smoke com `git diff` real: `dependencies` caiu de 7 para 3 achados no arquivo alterado; CLI→JSON→extensão gerou 3 diagnósticos (1 `error` e 2 `warning`)
 
-## Critérios da Etapa 5 da nova fase — Suíte de testes E2E dedicada
+## Etapa 5 da nova fase — Suíte de testes E2E dedicada
 
-- [ ] Definir escopo E2E separado dos testes determinísticos: CLI como processo, desktop Tauri em janela real e extensão VS Code em host real.
-- [ ] Escolher e justificar ferramentas (ex.: WebDriver/tauri-driver para desktop; `@vscode/test-electron` para extensão), com impacto em dependências, tempo de CI e flakiness.
-- [ ] Cobrir fluxos críticos: abrir CLI sem argumentos pelo atalho Windows; descoberta sem `auditor.toml`; auditoria com contrato; troca de projeto no desktop; abrir achado/observação na extensão.
-- [ ] Integrar execução na CI Windows com artefatos de diagnóstico (logs, capturas quando disponíveis), sem tornar a suíte frágil por timing.
-- [ ] Registrar limitações: E2E não substitui testes unitários/integração do núcleo; falhas de ambiente gráfico devem ser classificadas separadamente.
+Objetivo: cobrir os fluxos que os testes atuais não exercitam em host real, sem substituir a suíte determinística existente. A Etapa 5 só começa implementação após a 5.0 aprovada; dependências novas só entram no item que as usar.
+
+### 5.0 — Escopo, ferramentas e critérios (detalhado em 27/11/2026)
+
+- [x] Escopo separado dos testes determinísticos:
+  - **CLI E2E**: executa `vibe-coding-auditor-cli`/`.cmd` como processo real, com diretório temporário, fixtures e asserções sobre stdout/stderr/código de saída/arquivos gerados. Não chama funções Rust internas.
+  - **Desktop E2E**: executa o app Tauri empacotado/dev em janela real, por automação WebDriver. Valida fluxo de usuário; não substitui os testes Node puros de `viewState/reportView/status/builderFlow`.
+  - **Extensão E2E**: executa a extensão em host real do VS Code via `@vscode/test-electron`. Valida ativação, comandos, menu/contexto, Problems, status bar e canal de saída.
+  - **Fora do escopo 5.x inicial**: macOS/Linux E2E, teste visual pixel-perfect, fuzzing, carga/performance, testes que dependam de rede externa, e reescrita dos testes determinísticos existentes.
+- [x] Ferramentas escolhidas e justificativa:
+
+  | Camada | Ferramenta | Justificativa | Impacto |
+  | --- | --- | --- | --- |
+  | CLI | Node `node:test` + `node:child_process` + `node:fs/os/path` | Já existe no repo, sem dependência nova, roda bem no Windows/CI. | Baixo; reaproveita padrão dos testes da extensão/desktop. |
+  | Extensão VS Code | `@vscode/test-electron` + `@vscode/test-cli` (ou runner mínimo com `@vscode/test-electron`) + `mocha`/runner compatível | API oficial para host real do VS Code; cobre ativação, comandos, diagnostics e workspace. `@vscode/test-electron` já é o caminho suportado pelo ecossistema VS Code. | Adiciona devDependencies na extensão; download de VS Code em CI/cache; execução mais lenta que testes puros. |
+  | Desktop Tauri | `tauri-driver` + `WebdriverIO` + `@wdio/local-runner` + `@wdio/mocha-framework` + `@wdio/spec-reporter` + `edgedriver/msedgedriver` conforme suporte Windows/WebView2 | Caminho oficial Tauri v2 para Windows/Linux; WebView2 no Windows usa Edge WebDriver. Permite clicar/abrir pasta/validar DOM real. | Maior custo: dependências npm, binário `tauri-driver`/driver compatível, flakiness de timing, necessidade de build do app antes do teste. |
+  | Diagnóstico CI | artefatos do GitHub Actions (`actions/upload-artifact`) | Logs, stdout/stderr, screenshots WebDriver e logs do VS Code ajudam depuração sem rerun local cego. | Pequeno no YAML; cuidado com tamanho/retention. |
+
+- [x] Fluxos críticos cobertos por etapa:
+  - **5.1 CLI E2E**: `--help`, `--version`, sem args (mensagem de apresentação), `init` em pasta vazia, `audit` em fixture com contrato, `audit` em pasta sem `auditor.toml` (descoberta), `audit --diff`, `history record/list/show/compare`, execução pelo `vibe-coding-auditor-cli.cmd` sem argumentos não deve travar/fechar silenciosamente no contexto de processo (validar saída/código; duplo clique real continua smoke manual).
+  - **5.2 Extensão E2E (host real)**: ativação; comando no projeto sem `auditor.toml` gera observações no canal e um único aviso com ação “Ver observações”; projeto com contrato gera diagnósticos no Problems com severidade/código/arquivo; `Ocultar diagnósticos` limpa; `Abrir achado...` navega; ausência da CLI mostra erro orientando `vibeCodingAuditor.cliPath`.
+  - **5.3 Desktop E2E (janela real)**: abrir app, selecionar pasta, detectar projeto, auditar/descobrir, trocar projeto limpa resultados, alternar abas sem empilhar painéis, abrir contrato, registrar/atualizar histórico, smoke do layout dark sem fundo branco por CSS computado.
+  - **5.4 CI Windows E2E**: job separado ou etapa separada após build; cache de downloads; artefatos em falha; retries limitados apenas para boot de host gráfico/driver, nunca para asserção funcional.
+- [x] Riscos e mitigação:
+  - **Flakiness**: usar esperas por condição observável, nunca `sleep` fixo grande; timeouts explícitos; retries só no bootstrap do host.
+  - **Custo CI**: separar E2E do job determinístico rápido; rodar E2E em `windows-latest`; permitir execução manual `workflow_dispatch` durante estabilização se necessário.
+  - **Desktop Tauri**: WebDriver no Windows depende de Edge WebDriver compatível com WebView2; fixar versão/estratégia no 5.3. Se bloqueado, registrar limitação e não fingir cobertura.
+  - **Extensão VS Code**: download do VS Code pode falhar; usar cache e versão fixa. Testes devem criar workspace temporário, não poluir o repo.
+  - **CLI `.cmd`**: duplo clique é comportamento do shell/Windows Explorer; E2E automatizado valida invocação por processo/`cmd /c`; confirmação de duplo clique permanece checklist manual.
+- [x] Critérios de aceite da 5.0:
+  - Decisão E5.0 registrada em `docs/DECISIONS.md`.
+  - Roadmap detalha 5.1–5.4, ferramentas, riscos, fora de escopo e artefatos.
+  - Nenhuma dependência nova adicionada nesta etapa de planejamento.
+  - Suíte determinística atual continua verde (não alterada).
+
+### 5.1 — CLI E2E (planejada)
+- [ ] Adicionar harness Node em `tests/e2e/cli` ou `crates/auditor-cli/tests/e2e_*` conforme decisão final de 5.1; preferir Node `node:test` para alinhar com o repo.
+- [ ] Cobrir cenários 5.0/CLI com fixtures temporárias e binário real.
+- [ ] Publicar logs de stdout/stderr em falha.
+
+### 5.2 — Extensão VS Code E2E (planejada)
+- [ ] Adicionar `@vscode/test-electron` e runner E2E na extensão, isolado de `npm test` puro atual.
+- [ ] Cobrir cenários 5.0/Extensão em host real.
+- [ ] Publicar logs do Extension Host em falha.
+
+### 5.3 — Desktop Tauri E2E (planejada)
+- [ ] Adicionar `tauri-driver`/WebDriverIO e scripts de build+test.
+- [ ] Cobrir cenários 5.0/Desktop com app real.
+- [ ] Publicar screenshots/logs WebDriver em falha.
+
+### 5.4 — CI Windows E2E (planejada)
+- [ ] Integrar 5.1–5.3 no `.github/workflows/ci.yml` ou workflow dedicado.
+- [ ] Definir política de retries/artefatos/timeout.
+- [ ] Registrar estabilidade observada e limitações.
 
 ## Fechamento da primeira fase
 

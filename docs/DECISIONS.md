@@ -779,3 +779,18 @@ Não foram criados `Cargo.toml`, `auditor.example.toml`, `.gitignore`, diretóri
 - **Alternativas rejeitadas:** apenas ajustar cores mantendo layout — não resolveria rolagem; criar múltiplas páginas/rotas — complexidade desnecessária para o MVP; adicionar dependência de UI — sem justificativa.
 - **Impacto:** somente `apps/desktop/index.html`, `apps/desktop/src/App.tsx` e `apps/desktop/src/styles.css`. Nenhuma regra, contrato, schema, SQLite, CLI, extensão ou dependência alterada.
 - **Verificação:** `npm --prefix apps/desktop test` = `0` (39), `npm --prefix apps/desktop run build` = `0`, `npm --prefix apps/desktop run tauri build` = `0`. Executável gerado em `target/release/auditor-desktop.exe`.
+
+## E5.0 — Escopo e ferramentas da suíte E2E dedicada
+
+- **Data:** 27/11/2026
+- **Decisão:** detalhar e aprovar o planejamento da Etapa 5 da nova fase antes de implementar. A suíte E2E será separada por camadas (CLI, extensão VS Code host real, desktop Tauri janela real, CI Windows) e não substituirá os testes determinísticos existentes.
+- **Ferramentas propostas:**
+  - **CLI:** Node `node:test` + `child_process/fs/os/path`, sem dependência nova.
+  - **Extensão VS Code:** `@vscode/test-electron` (oficial) com runner E2E isolado do teste puro atual; avaliar `@vscode/test-cli` no 5.2 para simplificar bootstrap.
+  - **Desktop Tauri:** `tauri-driver` + WebdriverIO (`@wdio/local-runner`, `@wdio/mocha-framework`, `@wdio/spec-reporter`) e driver Edge/WebView2 compatível no Windows, conforme documentação Tauri v2 WebDriver.
+  - **CI:** GitHub Actions Windows, artefatos de logs/screenshots, cache de downloads, retries limitados a bootstrap de host/driver.
+- **Motivo:** a validação manual já encontrou lacunas que testes puros/integração não pegaram (comportamento de extensão em host real, UX de popups, instalação `.vsix`, caminho da CLI). O E2E cobre risco de ambiente/produto, mantendo o núcleo determinístico como fonte principal de confiança.
+- **Alternativas rejeitadas:** Playwright puro para desktop Tauri — não é o caminho nativo de WebDriver Tauri; E2E só de CLI — não cobriria host VS Code/janela real; rodar E2E junto com `npm test` atual — tornaria suíte rápida em lenta/frágil; E2E em Linux para extensão/desktop Windows-first — útil depois, mas não cobre o ambiente alvo principal.
+- **Impacto:** apenas documentação nesta etapa. Nenhuma dependência, CI, schema, contrato, regra ou código de runtime alterado.
+- **Riscos registrados:** flakiness de UI/boot; download de VS Code; compatibilidade WebView2/EdgeDriver/tauri-driver; tempo de CI; duplo clique do `.cmd` não é totalmente automatizável como gesto Explorer.
+- **Verificação:** `docs/ROADMAP.md` e `docs/DECISIONS.md` atualizados; `git diff --check` após edição. Nenhum teste executado porque a mudança é documental.

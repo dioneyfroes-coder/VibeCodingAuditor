@@ -18,6 +18,8 @@ const edgeDriverDir = process.env.VCA_EDGEDRIVER_DIR;
 const driverEnv = edgeDriverDir
   ? { PATH: `${edgeDriverDir};${process.env.PATH ?? ''}` }
   : undefined;
+// Diagnóstico opcional: o backend do tauri-driver explica falhas de sessão no CI.
+const captureDriverLogs = process.env.VCA_E2E_DRIVER_LOGS === '1';
 
 if (!existsSync(appBinaryPath)) {
   throw new Error(`Executável ausente: ${appBinaryPath}. Execute npm --prefix apps/desktop run tauri build antes do E2E.`);
@@ -50,7 +52,7 @@ export const config = {
         startTimeout: 60_000,
         commandTimeout: 30_000,
         // A captura de logs injeta scripts antes de cada comando e sobrecarrega o driver externo.
-        captureBackendLogs: false,
+        captureBackendLogs: captureDriverLogs,
         captureFrontendLogs: false,
       },
     ],

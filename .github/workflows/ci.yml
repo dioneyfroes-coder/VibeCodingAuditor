@@ -165,10 +165,13 @@ jobs:
         run: |
           where.exe msedgedriver.exe
           msedgedriver.exe --version
+          Get-ChildItem 'C:\Program Files (x86)\Microsoft\EdgeWebView\Application' -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object { "{0} WebView2={1}" -f $_.Name, (Get-Item (Join-Path $_.FullName 'msedgewebview2.exe') -ErrorAction SilentlyContinue).VersionInfo.ProductVersion }
 
       - name: E2E do desktop Tauri
         env:
           VCA_EDGEDRIVER_DIR: ${{ runner.temp }}\vca-msedgedriver
+          VCA_E2E_DRIVER_LOGS: '1'
         run: npm --prefix apps/desktop run test:e2e
 
       - name: Publicar artefatos de falha

@@ -740,7 +740,7 @@ Não foram criados `Cargo.toml`, `auditor.example.toml`, `.gitignore`, diretóri
 - **Motivo:** o usuário relatou que a CLI fecha imediatamente ao ser aberta por duplo clique e que a extensão não funciona em projeto antigo sem `auditor.toml`. O fechamento é o comportamento normal de um executável de terminal ao terminar; a dependência de `auditor.toml` contradizia o modo de descoberta da Etapa 4.
 - **Alternativas rejeitadas:** bloquear a CLI indefinidamente sem argumentos — prejudicaria scripts e testes; transformar a CLI em aplicativo de janela — mudaria o produto; manter apenas instrução de configuração de `cliPath` — deixaria o caso padrão quebrado; deixar o menu oculto sem contrato — impediria o uso do modo discovery.
 - **Impacto:** nenhuma regra, severidade, schema SQLite, contrato, formato JSON, comando Rust, adaptador Tauri ou dependência foi alterado. O `.cmd` é um atalho de conveniência no Windows; o executável da CLI continua igual. A extensão ganhou resolução de caminho mais robusta e testes puros adicionais.
-- **Limitações registradas:** o atalho `.cmd` depende de `target/release` ou `target/debug`; não empacota a CLI. A descoberta do executável no repositório da extensão só ajuda quando a extensão está instalada a partir desse repositório/workspace; instalações externas ainda podem exigir `vibeCodingAuditor.cliPath`. A validação manual na host real do VS Code continua pendente.
+- **Limitações registradas:** o atalho `.cmd` depende de `target/release` ou `target/debug`; não empacota a CLI. A descoberta do executável no repositório da extensão só ajuda quando a extensão está instalada a partir desse repositório/workspace; instalações externas ainda podem exigir `vibeCodingAuditor.cliPath`. A validação manual na host real do VS Code foi confirmada pelo usuário em 27/11/2026 (ver E4.9.3).
 - **Verificação:** `npm --prefix extensions/vscode test` = `0` (18 testes: 12 anteriores + 4 `cliPath` + 2 `manifest`) e `npm --prefix extensions/vscode run package` = `0`. Smoke: `cmd /c ".\vibe-coding-auditor-cli.cmd --version"` = `0` com `vibe-coding-auditor-cli 0.1.0`; `cmd /c "echo. | .\vibe-coding-auditor-cli.cmd"` = `0` com apresentação e ajuda.
 
 ## E4.9.2 — Planejamento da suíte E2E dedicada
@@ -751,3 +751,13 @@ Não foram criados `Cargo.toml`, `auditor.example.toml`, `.gitignore`, diretóri
 - **Alternativas rejeitadas:** iniciar implementação E2E imediatamente — exigiria escolher ferramentas, dependências e estratégia de CI antes de aprovação do escopo; declarar E2E desnecessária — contraria as lacunas observadas; misturar com o fechamento da Etapa 4 — a validação manual pendente já tem critérios próprios.
 - **Impacto:** somente documentação de planejamento. Nenhum código, dependência, CI ou contrato foi alterado por este registro.
 - **Verificação:** atualização do roadmap e desta decisão; nenhuma execução de teste adicional necessária para o registro documental.
+
+## E4.9.3 — Validação manual da extensão na host real do VS Code
+
+- **Data:** 27/11/2026
+- **Decisão:** registrar a confirmação manual do usuário para a extensão na host real do VS Code e declarar a Etapa 4 concluída com ressalvas documentadas.
+- **Motivo:** o item pendente do plano/roadmap era exclusivamente a validação manual da extensão. O usuário confirmou os quatro pontos do checklist após reinstalar o `.vsix` correto e atualizar `vibeCodingAuditor.cliPath` para `vibe-coding-auditor-cli`.
+- **Evidência reportada pelo usuário:** comando disponível sem `auditor.toml`; execução em modo descoberta sem violações de conformidade no Problems; barra de status/resumo de descoberta; auditoria com contrato válido exibiu diagnósticos no Problems. Observações de descoberta apareceram como múltiplos popups informativos.
+- **Alternativas rejeitadas:** declarar conclusão sem confirmação — proibido pelo plano; tratar popups informativos como bloqueio funcional — o usuário confirmou os critérios do checklist; o ruído de UX foi registrado como ressalva.
+- **Impacto:** documentação e status do roadmap atualizados. Nenhum código, regra, contrato, schema ou dependência alterado.
+- **Ressalvas:** observações de descoberta geram vários popups informativos na extensão (ruído de UX). Ajustes de apresentação do desktop permanecem fora desta etapa, conforme pedido do usuário.

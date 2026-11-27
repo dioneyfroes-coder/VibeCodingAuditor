@@ -112,7 +112,7 @@ Os binários antigos `target/release/vibe-coding-auditor.exe` e `target/debug/vi
 
 ## Validação manual — 27/11/2026
 
-O usuário executou manualmente o desktop com o próprio VibeCodingAuditor e o projeto BackBet e confirmou que os fluxos examinados funcionaram. Em pergunta explícita, respondeu que a validação foi **somente do desktop**; a extensão na host real do VS Code não foi executada nesta rodada e continua pendente. Ele relatou quatro ressalvas de apresentação: excesso de informações, página enorme com barra de rolagem, resíduos de um projeto ao trocar para outro e linguagem muito técnica. A Etapa 4 não é declarada totalmente concluída enquanto a validação da extensão estiver pendente.
+O usuário executou manualmente o desktop com o próprio VibeCodingAuditor e o projeto BackBet e confirmou que os fluxos examinados funcionaram. Em 27/11/2026, o usuário também confirmou a validação da extensão na host real do VS Code após reinstalar `extensions/vscode/vibe-coding-auditor-0.1.0.vsix` e ajustar `vibeCodingAuditor.cliPath` para `vibe-coding-auditor-cli` (o valor antigo apontava para `vibe-coding-auditor.exe`). Itens confirmados: comando disponível sem `auditor.toml`; execução em descoberta sem violações de conformidade no Problems; barra de status/resumo de descoberta; auditoria com contrato válido exibiu diagnósticos no Problems. Observações de descoberta apareceram como múltiplos popups informativos (ressalva de UX). Com essas confirmações, a Etapa 4 foi declarada concluída com ressalvas documentadas.
 
 ## Etapa 4.9 — Interface mais limpa — 27/11/2026
 

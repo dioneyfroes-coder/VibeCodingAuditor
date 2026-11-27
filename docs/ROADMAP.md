@@ -245,10 +245,11 @@ Objetivo: cobrir os fluxos que os testes atuais não exercitam em host real, sem
   - Nenhuma dependência nova adicionada nesta etapa de planejamento.
   - Suíte determinística atual continua verde (não alterada).
 
-### 5.1 — CLI E2E (planejada)
-- [ ] Adicionar harness Node em `tests/e2e/cli` ou `crates/auditor-cli/tests/e2e_*` conforme decisão final de 5.1; preferir Node `node:test` para alinhar com o repo.
-- [ ] Cobrir cenários 5.0/CLI com fixtures temporárias e binário real.
-- [ ] Publicar logs de stdout/stderr em falha.
+### 5.1 — CLI E2E (concluída em 27/11/2026)
+- [x] Adicionar harness Node em `tests/e2e/cli/cli.e2e.test.mjs`, usando `node:test` + `child_process`, sem dependência nova.
+- [x] Cobrir cenários 5.0/CLI com fixtures/binário reais: ajuda, versão, execução sem argumentos, atalho `.cmd` com argumentos, `init` sem sobrescrever, descoberta JSON, conformidade com achados, `--diff` e histórico.
+- [x] Asserções incluem stdout/stderr/código de saída; logs são exibidos pelo runner do Node em falha.
+- [x] Verificação: `node --test tests/e2e/cli/cli.e2e.test.mjs` = `0` (8 testes). O harness usa `target/release` quando presente, senão `target/debug`; exige build prévio da CLI.
 
 ### 5.2 — Extensão VS Code E2E (planejada)
 - [ ] Adicionar `@vscode/test-electron` e runner E2E na extensão, isolado de `npm test` puro atual.

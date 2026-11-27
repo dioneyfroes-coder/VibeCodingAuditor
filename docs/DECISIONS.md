@@ -794,3 +794,12 @@ Não foram criados `Cargo.toml`, `auditor.example.toml`, `.gitignore`, diretóri
 - **Impacto:** apenas documentação nesta etapa. Nenhuma dependência, CI, schema, contrato, regra ou código de runtime alterado.
 - **Riscos registrados:** flakiness de UI/boot; download de VS Code; compatibilidade WebView2/EdgeDriver/tauri-driver; tempo de CI; duplo clique do `.cmd` não é totalmente automatizável como gesto Explorer.
 - **Verificação:** `docs/ROADMAP.md` e `docs/DECISIONS.md` atualizados; `git diff --check` após edição. Nenhum teste executado porque a mudança é documental.
+
+## E5.1 — CLI E2E com processo real
+
+- **Data:** 27/11/2026
+- **Decisão:** implementar a primeira camada E2E em `tests/e2e/cli/cli.e2e.test.mjs` com `node:test` e `child_process`, usando o executável real da CLI (`target/release` ou `target/debug`).
+- **Motivo:** cobrir comportamento visível de processo, códigos de saída e atalho Windows sem adicionar dependências ou duplicar regras internas.
+- **Alternativas rejeitadas:** ampliar testes Rust de integração existentes — a camada E2E pedida deve ser separada e executável fora do `cargo test`; Playwright — desnecessário para CLI; adicionar biblioteca de teste — sem justificativa.
+- **Impacto:** novo arquivo de teste, sem mudança em runtime, contrato, schema, CI ou dependências.
+- **Verificação:** `node --test tests/e2e/cli/cli.e2e.test.mjs` = `0` (8 testes). Caso o binário não exista, o teste falha com instrução de executar `cargo build --release -p auditor-cli`.

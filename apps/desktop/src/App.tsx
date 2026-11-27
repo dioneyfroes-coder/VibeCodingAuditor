@@ -205,6 +205,17 @@ export default function App() {
       }
     });
 
+  /// Após a gravação aprovada, a interface passa a mostrar conformidade.
+  const refreshAfterSave = async () => {
+    const mode = await invoke<ProjectRunStatus>('load_project', { path: projectPath });
+    setDetected(mode);
+    const result = await invoke<AuditReport>('audit_project', { path: projectPath });
+    setReport(result);
+    setAnalysis(null);
+    setSeverityFilter('all');
+    setRuleFilter('all');
+  };
+
   const runAudit = () =>
     execute('audit', async () => {
       const result = await invoke<AuditReport>('audit_project', { path: projectPath });
@@ -534,6 +545,7 @@ export default function App() {
           root={projectPath}
           onStatus={pushStatus}
           onClose={() => setWizardOpen(false)}
+          onSaved={refreshAfterSave}
         />
       )}
 

@@ -1,18 +1,24 @@
 //! Estado editável do Architecture Builder e conversão para contrato válido.
 //!
-//! O rascunho contém sugestões e decisões humanas. Nada aqui grava arquivos:
-//! a prévia TOML é produzida pelo módulo de contrato e precisa passar pelo
-//! mesmo parser usado na auditoria.
+//! O rascunho contém sugestões e decisões humanas. A prévia TOML é produzida
+//! pelo módulo de contrato e precisa passar pelo mesmo parser usado na
+//! auditoria. A gravação acontece somente com autorização explícita e reabre
+//! o arquivo salvo antes de executar a conformidade.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::error::Error;
+use std::fmt;
+use std::fs::{self, OpenOptions};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
-use crate::audit::DiscoveryReport;
+use crate::audit::{self, ComplianceRun, DiscoveryReport, ProjectRun};
 use crate::contract::{
     Architecture, ArchitectureStyle, Contract, ContractError, Layer, Module, Project, Scan,
-    parse_contract, render_contract,
+    contract_identity, load_contract, parse_contract, render_contract,
 };
 use crate::discovery::candidates::{Ambiguity, CandidateModule, ObservedDependency};
 use crate::discovery::{ScanOptions, matches_pattern};
@@ -397,6 +403,390 @@ pub fn draft_from_contract(contract: &Contract) -> ContractDraft {
         resolved_ambiguities: Vec::new(),
         pending_decisions: Vec::new(),
     }
+}
+
+/// Autorização explícita para a gravação final.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SaveAuthorization {
+    /// Cria `auditor.toml`; falha se o arquivo já existir.
+    Create,
+    /// Substitui o arquivo somente se o texto conferido ainda for o atual.
+    Replace {
+        /// Texto integral lido do contrato apresentado ao usuário.
+        expected_text: String,
+    },
+}
+
+/// Tipo de uma linha no diff determinístico do contrato.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContractDiffLineKind {
+    /// Linha presente nos dois textos.
+    Context,
+    /// Linha existente somente no texto proposto.
+    Added,
+    /// Linha existente somente no texto atual.
+    Removed,
+}
+
+/// Linha do diff, com as posições dos dois textos quando aplicável.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ContractDiffLine {
+    /// Tipo da mudança.
+    pub kind: ContractDiffLineKind,
+    /// Conteúdo da linha, sem o terminador.
+    pub text: String,
+    /// Número da linha no contrato atual, começando em `1`.
+    pub old_line: Option<usize>,
+    /// Número da linha no contrato proposto, começando em `1`.
+    pub new_line: Option<usize>,
+}
+
+/// Comparação determinística entre o contrato atual e a prévia aprovada.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ContractDiff {
+    /// Indica se há arquivo na raiz; preenchido pelo chamador quando a origem é o disco.
+    pub exists: bool,
+    /// Texto atual conferido antes da substituição.
+    pub current_text: String,
+    /// `true` quando pelo menos uma linha mudou.
+    pub changed: bool,
+    /// Linhas em ordem, incluindo as contextualmente iguais.
+    pub lines: Vec<ContractDiffLine>,
+}
+
+/// Compara linhas por igualdade exata; nenhuma regra arquitetural é aplicada.
+pub fn contract_diff(current: &str, proposed: &str) -> ContractDiff {
+    let old: Vec<&str> = current.lines().collect();
+    let new: Vec<&str> = proposed.lines().collect();
+    let (old_len, new_len) = (old.len(), new.len());
+    let mut longest = vec![vec![0usize; new_len + 1]; old_len + 1];
+    for index in (0..old_len).rev() {
+        for other in (0..new_len).rev() {
+            longest[index][other] = if old[index] == new[other] {
+                longest[index + 1][other + 1] + 1
+            } else {
+                longest[index + 1][other].max(longest[index][other + 1])
+            };
+        }
+    }
+
+    let mut lines = Vec::new();
+    let (mut index, mut other) = (0usize, 0usize);
+    while index < old_len && other < new_len {
+        if old[index] == new[other] {
+            lines.push(ContractDiffLine {
+                kind: ContractDiffLineKind::Context,
+                text: old[index].to_owned(),
+                old_line: Some(index + 1),
+                new_line: Some(other + 1),
+            });
+            index += 1;
+            other += 1;
+        } else if longest[index + 1][other] >= longest[index][other + 1] {
+            lines.push(ContractDiffLine {
+                kind: ContractDiffLineKind::Removed,
+                text: old[index].to_owned(),
+                old_line: Some(index + 1),
+                new_line: None,
+            });
+            index += 1;
+        } else {
+            lines.push(ContractDiffLine {
+                kind: ContractDiffLineKind::Added,
+                text: new[other].to_owned(),
+                old_line: None,
+                new_line: Some(other + 1),
+            });
+            other += 1;
+        }
+    }
+    while index < old_len {
+        lines.push(ContractDiffLine {
+            kind: ContractDiffLineKind::Removed,
+            text: old[index].to_owned(),
+            old_line: Some(index + 1),
+            new_line: None,
+        });
+        index += 1;
+    }
+    while other < new_len {
+        lines.push(ContractDiffLine {
+            kind: ContractDiffLineKind::Added,
+            text: new[other].to_owned(),
+            old_line: None,
+            new_line: Some(other + 1),
+        });
+        other += 1;
+    }
+
+    ContractDiff {
+        exists: !current.is_empty(),
+        current_text: current.to_owned(),
+        changed: lines
+            .iter()
+            .any(|line| line.kind != ContractDiffLineKind::Context),
+        lines,
+    }
+}
+
+/// Dados do contrato efetivamente gravado e reaberto pelo parser oficial.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SavedContract {
+    /// Texto lido do arquivo após a renomeação.
+    pub text: String,
+    /// Identidade calculada a partir do contrato reaberto.
+    pub identity: String,
+    /// Versão de schema do arquivo gravado.
+    pub schema_version: u32,
+}
+
+/// Resultado da gravação aprovada, incluindo a auditoria de conformidade posterior.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SaveOutcome {
+    /// Contrato lido do disco depois da gravação.
+    pub saved: SavedContract,
+    /// Auditoria executada com o contrato recém-gravado.
+    pub run: ComplianceRun,
+    /// `true` quando existia contrato antes da operação.
+    pub replaced: bool,
+}
+
+/// Falhas da gravação final, explícitas para a interface.
+#[derive(Debug)]
+pub enum SaveError {
+    /// O rascunho não passou nas regras do núcleo.
+    Validation(ContractError),
+    /// Não foi possível ler o contrato atual para conferir a autorização.
+    Read {
+        /// Arquivo lido.
+        path: PathBuf,
+        /// Erro original.
+        source: io::Error,
+    },
+    /// A autorização não corresponde ao estado atual do arquivo.
+    Conflict {
+        /// Arquivo que causou a recusa.
+        path: PathBuf,
+        /// Motivo legível da recusa.
+        reason: String,
+    },
+    /// Falha de E/S em uma das etapas da gravação.
+    Io {
+        /// Arquivo envolvido na etapa.
+        path: PathBuf,
+        /// Erro original.
+        source: io::Error,
+        /// Etapa que falhou.
+        phase: &'static str,
+    },
+    /// O arquivo gravado não passou no parser oficial.
+    Reparse {
+        /// Arquivo reaberto.
+        path: PathBuf,
+        /// Erro de parsing.
+        source: ContractError,
+    },
+    /// A auditoria posterior falhou; o contrato permanece gravado.
+    Audit(audit::AuditError),
+    /// Inconsistência interna detectada depois da gravação.
+    Unexpected(&'static str),
+}
+
+impl fmt::Display for SaveError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Validation(source) => write!(formatter, "rascunho inválido: {source}"),
+            Self::Read { path, source } => {
+                write!(
+                    formatter,
+                    "não foi possível ler {}: {source}",
+                    path.display()
+                )
+            }
+            Self::Conflict { path, reason } => {
+                write!(
+                    formatter,
+                    "gravação recusada em {}: {reason}",
+                    path.display()
+                )
+            }
+            Self::Io {
+                path,
+                source,
+                phase,
+            } => write!(formatter, "falha ao {phase} {}: {source}", path.display()),
+            Self::Reparse { path, source } => {
+                write!(
+                    formatter,
+                    "contrato gravado em {} é inválido: {source}",
+                    path.display()
+                )
+            }
+            Self::Audit(source) => write!(formatter, "auditoria após a gravação falhou: {source}"),
+            Self::Unexpected(message) => write!(formatter, "inconsistência interna: {message}"),
+        }
+    }
+}
+
+impl Error for SaveError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Validation(source) | Self::Reparse { source, .. } => Some(source),
+            Self::Read { source, .. } | Self::Io { source, .. } => Some(source),
+            Self::Audit(source) => Some(source),
+            Self::Conflict { .. } | Self::Unexpected(_) => None,
+        }
+    }
+}
+
+/// Contador do arquivo temporário, único dentro do processo.
+static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// Revalida, grava atomicamente e executa a conformidade com o contrato salvo.
+pub fn save_draft(
+    root: &Path,
+    draft: &ContractDraft,
+    authorization: &SaveAuthorization,
+) -> Result<SaveOutcome, SaveError> {
+    let temporary = root.join(format!(
+        "auditor.toml.{}-{}.tmp",
+        std::process::id(),
+        TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    save_draft_at(root, draft, authorization, &temporary)
+}
+
+/// Mesma operação de `save_draft`, com o caminho temporário explícito para testes.
+fn save_draft_at(
+    root: &Path,
+    draft: &ContractDraft,
+    authorization: &SaveAuthorization,
+    temporary: &Path,
+) -> Result<SaveOutcome, SaveError> {
+    let path = root.join("auditor.toml");
+    let contract = validate_draft(draft).map_err(SaveError::Validation)?;
+    let text = render_contract(&contract).map_err(SaveError::Validation)?;
+    parse_contract(&text).map_err(|source| SaveError::Reparse {
+        path: path.clone(),
+        source,
+    })?;
+
+    let expected_text = match authorization {
+        SaveAuthorization::Create => None,
+        SaveAuthorization::Replace { expected_text } => Some(expected_text.as_str()),
+    };
+    let current = match fs::read_to_string(&path) {
+        Ok(text) => Some(text),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => None,
+        Err(source) => return Err(SaveError::Read { path, source }),
+    };
+    let replaced = match (&current, expected_text) {
+        (Some(_), None) => {
+            return Err(SaveError::Conflict {
+                path,
+                reason: "auditor.toml já existe; substituição exige confirmação".to_owned(),
+            });
+        }
+        (None, Some(_)) => {
+            return Err(SaveError::Conflict {
+                path,
+                reason: "auditor.toml não existe; não há o que substituir".to_owned(),
+            });
+        }
+        (Some(existing), Some(expected)) if existing != expected => {
+            return Err(SaveError::Conflict {
+                path,
+                reason: "o contrato mudou desde a confirmação".to_owned(),
+            });
+        }
+        (Some(_), Some(_)) => true,
+        (None, None) => false,
+    };
+
+    // Reduz a janela entre a conferência da autorização e a renomeação.
+    if replaced {
+        let latest = fs::read_to_string(&path).map_err(|source| SaveError::Read {
+            path: path.clone(),
+            source,
+        })?;
+        if Some(&latest) != current.as_ref() {
+            return Err(SaveError::Conflict {
+                path,
+                reason: "o contrato mudou desde a conferência".to_owned(),
+            });
+        }
+    }
+
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(temporary)
+        .map_err(|source| SaveError::Io {
+            path: temporary.to_path_buf(),
+            source,
+            phase: "criar arquivo temporário",
+        })?;
+    file.write_all(text.as_bytes())
+        .map_err(|source| SaveError::Io {
+            path: temporary.to_path_buf(),
+            source,
+            phase: "escrever arquivo temporário",
+        })?;
+    file.sync_all().map_err(|source| SaveError::Io {
+        path: temporary.to_path_buf(),
+        source,
+        phase: "sincronizar arquivo temporário",
+    })?;
+    drop(file);
+
+    if let Err(source) = fs::rename(temporary, &path) {
+        let _ = fs::remove_file(temporary);
+        return Err(SaveError::Io {
+            path,
+            source,
+            phase: "renomear arquivo temporário",
+        });
+    }
+
+    let reopened = load_contract(&path).map_err(|source| SaveError::Reparse {
+        path: path.clone(),
+        source,
+    })?;
+    if reopened != contract {
+        return Err(SaveError::Unexpected(
+            "contrato reaberto difere do rascunho aprovado",
+        ));
+    }
+    let written = fs::read_to_string(&path).map_err(|source| SaveError::Io {
+        path: path.clone(),
+        source,
+        phase: "rel contrato gravado",
+    })?;
+    if written != text {
+        return Err(SaveError::Unexpected(
+            "texto reaberto difere da prévia aprovada",
+        ));
+    }
+    let run = match audit::project_run(root).map_err(SaveError::Audit)? {
+        ProjectRun::Compliance(run) => run,
+        ProjectRun::Discovery(_) => {
+            return Err(SaveError::Unexpected(
+                "a raiz voltou ao modo de descoberta após a gravação",
+            ));
+        }
+    };
+
+    Ok(SaveOutcome {
+        saved: SavedContract {
+            text: written,
+            identity: contract_identity(&reopened),
+            schema_version: reopened.schema_version,
+        },
+        run,
+        replaced,
+    })
 }
 
 /// Nome sugerido a partir do diretório raiz; sem inferência de manifesto.
@@ -1018,5 +1408,222 @@ allowed_dependencies = []
                 .iter()
                 .any(|note| note.contains("responsabilidade"))
         );
+    }
+
+    /// Diretório temporário que remove a própria cópia ao fim do teste.
+    struct TempProject(PathBuf);
+
+    impl TempProject {
+        fn new(fixture: &str) -> Self {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            use std::time::{SystemTime, UNIX_EPOCH};
+
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("relógio do sistema")
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!(
+                "auditor-etapa46-{}-{nanos}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            copy_directory(&project_fixture(fixture), &root);
+            Self(root)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempProject {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn copy_directory(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).expect("destino da cópia");
+        for entry in std::fs::read_dir(from).expect("origem da cópia") {
+            let entry = entry.expect("entrada legível");
+            let target = to.join(entry.file_name());
+            if entry.file_type().expect("tipo da entrada").is_dir() {
+                copy_directory(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), &target).expect("arquivo copiado");
+            }
+        }
+    }
+
+    #[test]
+    fn save_authorization_serializes_for_the_desktop_boundary() {
+        let create = serde_json::to_string(&SaveAuthorization::Create).expect("create serializa");
+        assert_eq!(create, "\"create\"");
+
+        let replace = serde_json::to_string(&SaveAuthorization::Replace {
+            expected_text: "atual".to_owned(),
+        })
+        .expect("replace serializa");
+        assert_eq!(replace, "{\"replace\":{\"expected_text\":\"atual\"}}");
+
+        let restored: SaveAuthorization =
+            serde_json::from_str(&replace).expect("authorization desserializa");
+        assert_eq!(
+            restored,
+            SaveAuthorization::Replace {
+                expected_text: "atual".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn contract_diff_reports_only_the_changed_lines() {
+        let current = "schema_version = 2\nname = \"antes\"\nfim = true\n";
+        let proposed = "schema_version = 2\nname = \"depois\"\nfim = true\n";
+        let diff = contract_diff(current, proposed);
+
+        assert!(diff.changed);
+        assert_eq!(
+            diff.lines
+                .iter()
+                .filter(|line| line.kind == ContractDiffLineKind::Context)
+                .count(),
+            2
+        );
+        assert!(diff.lines.iter().any(|line| {
+            line.kind == ContractDiffLineKind::Removed && line.text == "name = \"antes\""
+        }));
+        assert!(diff.lines.iter().any(|line| {
+            line.kind == ContractDiffLineKind::Added && line.text == "name = \"depois\""
+        }));
+
+        let equal = contract_diff(current, current);
+        assert!(!equal.changed);
+        assert!(
+            equal
+                .lines
+                .iter()
+                .all(|line| line.kind == ContractDiffLineKind::Context)
+        );
+    }
+
+    #[test]
+    fn invalid_draft_is_not_written() {
+        let project = TempProject::new("discovery_no_contract");
+        let mut draft = empty_draft("pendente");
+        draft.modules.push(module("futuro", "src/futuro/**"));
+        draft.modules[0].needs_confirmation = true;
+
+        let error = save_draft(project.path(), &draft, &SaveAuthorization::Create)
+            .expect_err("decisão pendente impede a gravação");
+        assert!(
+            matches!(error, SaveError::Validation(ContractError::Validation(_))),
+            "erro inesperado: {error}"
+        );
+        assert!(!project.path().join("auditor.toml").exists());
+    }
+
+    #[test]
+    fn save_draft_creates_contract_and_reopens_it_in_compliance_mode() {
+        let project = TempProject::new("discovery_no_contract");
+        let draft = empty_draft("projeto-salvo");
+        let expected = validate_draft(&draft).expect("draft válido");
+
+        let outcome = save_draft(project.path(), &draft, &SaveAuthorization::Create)
+            .expect("gravação deve suceder");
+
+        assert!(!outcome.replaced);
+        assert_eq!(outcome.run.mode, crate::audit::ExecutionMode::Compliance);
+        assert_eq!(outcome.saved.schema_version, 2);
+        let written =
+            std::fs::read_to_string(project.path().join("auditor.toml")).expect("contrato gravado");
+        assert_eq!(written, outcome.saved.text);
+        assert_eq!(parse_contract(&written).expect("reparso"), expected);
+        assert_eq!(
+            outcome.saved.identity,
+            crate::contract::contract_identity(&expected)
+        );
+        assert!(
+            std::fs::read_dir(project.path())
+                .expect("raiz legível")
+                .all(|entry| !entry
+                    .expect("entrada legível")
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".tmp")),
+            "arquivo temporário não pode restar"
+        );
+        let value = serde_json::to_value(&outcome).expect("outcome serializa");
+        assert_eq!(value["run"]["mode"], "compliance");
+        assert_eq!(value["replaced"], false);
+    }
+
+    #[test]
+    fn replacing_a_contract_requires_the_exact_current_text() {
+        let project = TempProject::new("clean");
+        let path = project.path().join("auditor.toml");
+        let current = std::fs::read_to_string(&path).expect("contrato da fixture");
+        let original = parse_contract(&current).expect("fixture válida");
+        let mut draft = draft_from_contract(&original);
+        draft.project_name = "projeto-revisado".to_owned();
+
+        let create = save_draft(project.path(), &draft, &SaveAuthorization::Create)
+            .expect_err("criação não pode sobrescrever");
+        assert!(matches!(create, SaveError::Conflict { .. }));
+        let stale = save_draft(
+            project.path(),
+            &draft,
+            &SaveAuthorization::Replace {
+                expected_text: "texto antigo".to_owned(),
+            },
+        )
+        .expect_err("aprovação obsoleta não pode sobrescrever");
+        assert!(matches!(stale, SaveError::Conflict { .. }));
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("contrato preservado"),
+            current
+        );
+
+        let outcome = save_draft(
+            project.path(),
+            &draft,
+            &SaveAuthorization::Replace {
+                expected_text: current.clone(),
+            },
+        )
+        .expect("substituição autorizada");
+        assert!(outcome.replaced);
+        assert_eq!(outcome.run.mode, crate::audit::ExecutionMode::Compliance);
+        let written = std::fs::read_to_string(&path).expect("contrato gravado");
+        assert!(written.contains("projeto-revisado"));
+        assert!(!written.contains(&original.project.name));
+        assert_eq!(outcome.saved.text, written);
+    }
+
+    #[test]
+    fn failed_temporary_creation_preserves_the_previous_contract() {
+        let project = TempProject::new("clean");
+        let path = project.path().join("auditor.toml");
+        let current = std::fs::read_to_string(&path).expect("contrato da fixture");
+        let draft = draft_from_contract(&parse_contract(&current).expect("fixture válida"));
+        let blocked = project.path().join("bloqueio.tmp");
+        std::fs::create_dir(&blocked).expect("diretório que bloqueia o temporário");
+
+        let error = save_draft_at(
+            project.path(),
+            &draft,
+            &SaveAuthorization::Replace {
+                expected_text: current.clone(),
+            },
+            &blocked,
+        )
+        .expect_err("criação do temporário deve falhar");
+        assert!(matches!(error, SaveError::Io { .. }));
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("contrato preservado"),
+            current
+        );
+        assert!(blocked.is_dir());
     }
 }

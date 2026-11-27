@@ -5,16 +5,23 @@ import {
   BUILDER_STEPS,
   addDraftLayer,
   addDraftModule,
+  complianceLines,
   decideObservedDependency,
   detectedStatus,
+  diffLinePrefix,
+  diffSummary,
   effectsLine,
   evidenceLine,
   nextStep,
+  observationLines,
   observedDecisionItems,
   previousStep,
   removeDraftModule,
   renameDraftLayer,
   renameDraftModule,
+  saveAuthorization,
+  saveConfirmationText,
+  savedOutcomeLine,
   setProfile,
   setResolution,
   toggleLayerModule,
@@ -22,10 +29,12 @@ import {
   updateDraftModule,
   validationMessage,
   warningText,
+  type ContractDiff,
   type ContractDraft,
   type DiscoveryReport,
   type DraftEffects,
   type ProjectRunStatus,
+  type SaveOutcome,
   type ValidationResult,
 } from './builderFlow.js';
 import { builderStatus, type ActionStatus } from './status.js';
@@ -34,6 +43,8 @@ interface BuilderWizardProps {
   root: string;
   onStatus: (status: ActionStatus) => void;
   onClose: () => void;
+  /// Atualiza o estado externo depois de uma gravação aprovada.
+  onSaved?: () => Promise<void> | void;
 }
 
 /// Linhas de texto viram padrões; linhas vazias não são enviadas ao núcleo.
@@ -49,13 +60,17 @@ function patternText(patterns: string[]): string {
 }
 
 /// Assistente somente leitura até a confirmação final da Etapa 4.6.
-export default function BuilderWizard({ root, onStatus, onClose }: BuilderWizardProps) {
+export default function BuilderWizard({ root, onStatus, onClose, onSaved }: BuilderWizardProps) {
   const [draft, setDraft] = useState<ContractDraft | null>(null);
   const [report, setReport] = useState<DiscoveryReport | null>(null);
   const [step, setStep] = useState(0);
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [effects, setEffects] = useState<DraftEffects | null>(null);
+  const [diff, setDiff] = useState<ContractDiff | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [saveOutcome, setSaveOutcome] = useState<SaveOutcome | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -93,12 +108,16 @@ export default function BuilderWizard({ root, onStatus, onClose }: BuilderWizard
     };
   }, [root, onStatus]);
 
-  /// Toda edição invalida a prévia anterior, que passa a estar desatualizada.
+  /// Toda edição invalida a prévia e qualquer confirmação anterior.
   const mutate = (change: (current: ContractDraft) => ContractDraft) => {
     setDraft((current) => (current ? change(current) : current));
     setValidation(null);
     setPreview(null);
     setEffects(null);
+    setDiff(null);
+    setConfirming(false);
+    setSaveOutcome(null);
+    setSaveError(null);
   };
 
   const review = async () => {
@@ -109,14 +128,65 @@ export default function BuilderWizard({ root, onStatus, onClose }: BuilderWizard
     try {
       const result = await invoke<ValidationResult>('validate_contract_draft', { draft });
       setValidation(result);
-      setPreview(
-        result.valid ? await invoke<string>('preview_contract', { draft }) : null,
-      );
+      const nextPreview = result.valid
+        ? await invoke<string>('preview_contract', { draft })
+        : null;
+      setPreview(nextPreview);
       setEffects(await invoke<DraftEffects>('draft_effects', { draft }));
+      setDiff(
+        nextPreview === null
+          ? null
+          : await invoke<ContractDiff>('contract_diff', { path: root, draft }),
+      );
+      setSaveOutcome(null);
+      setSaveError(null);
+      setConfirming(false);
       onStatus(
         builderStatus(validationMessage(result), result.valid ? 'success' : 'error'),
       );
     } catch (failure) {
+      setDiff(null);
+      onStatus(builderStatus(String(failure), 'error'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /// Gravação acontece somente depois da segunda confirmação explícita.
+  const confirmSave = async () => {
+    if (!draft || !diff || !validation?.valid) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const outcome = await invoke<SaveOutcome>('save_contract', {
+        path: root,
+        draft,
+        authorization: saveAuthorization(diff),
+      });
+      const observations = await invoke<DiscoveryReport>('discover_project', { path: root });
+      setSaveOutcome(outcome);
+      setReport(observations);
+      setConfirming(false);
+      setSaveError(null);
+      onStatus(
+        builderStatus(
+          `${savedOutcomeLine(outcome)} · ${outcome.replaced ? 'contrato substituído' : 'contrato criado'}`,
+          'success',
+        ),
+      );
+      try {
+        await onSaved?.();
+      } catch (refreshFailure) {
+        onStatus(
+          builderStatus(
+            `Contrato gravado; falha ao atualizar a interface: ${String(refreshFailure)}`,
+            'error',
+          ),
+        );
+      }
+    } catch (failure) {
+      setSaveError(String(failure));
       onStatus(builderStatus(String(failure), 'error'));
     } finally {
       setBusy(false);
@@ -515,6 +585,48 @@ export default function BuilderWizard({ root, onStatus, onClose }: BuilderWizard
     </>
   );
 
+  const comparison = () => {
+    if (!saveOutcome) {
+      return null;
+    }
+    const observations = observationLines(report, 8);
+    const compliance = complianceLines(saveOutcome, 8);
+    return (
+      <section className="comparison" aria-label="Comparação entre descoberta e conformidade">
+        <h3>Depois da gravação</h3>
+        <p className="status-success">{savedOutcomeLine(saveOutcome)}</p>
+        <div className="comparison-columns">
+          <div>
+            <h4>Observações da descoberta</h4>
+            <p className="detail">Fatos observados, sem classificação de violação.</p>
+            {observations.length === 0 ? (
+              <p className="detail">Nenhuma observação registrada.</p>
+            ) : (
+              <ul className="detail">
+                {observations.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div>
+            <h4>Violações e revisões da conformidade</h4>
+            <p className="detail">Achados do contrato aprovado pelo usuário.</p>
+            {compliance.length === 0 ? (
+              <p className="detail">Nenhum achado de conformidade.</p>
+            ) : (
+              <ul className="detail">
+                {compliance.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      </section>
+    );
+  };
+
   const reviewStep = () => (
     <>
       {validation === null ? (
@@ -550,9 +662,55 @@ export default function BuilderWizard({ root, onStatus, onClose }: BuilderWizard
       ) : (
         <pre className="preview">{preview}</pre>
       )}
-      <p className="hint">
-        Nenhum arquivo foi alterado. A gravação exigirá confirmação explícita na próxima etapa.
-      </p>
+      {diff !== null && (
+        <>
+          <h3>Diferenças em auditor.toml</h3>
+          <p className="detail">
+            {diffSummary(diff)} · {diff.exists ? 'substituição' : 'criação'}
+          </p>
+          {diff.changed ? (
+            <pre className="preview diff">
+              {diff.lines
+                .map(
+                  (line) =>
+                    `${diffLinePrefix(line.kind)} ${line.text || '(linha vazia)'}`,
+                )
+                .join('\n')}
+            </pre>
+          ) : (
+            <p className="detail">O contrato atual já corresponde ao rascunho aprovado.</p>
+          )}
+        </>
+      )}
+      {validation?.valid && diff !== null && saveOutcome === null && (
+        confirming ? (
+          <div className="confirmacao">
+            <p>
+              <strong>{saveConfirmationText(diff)}</strong>
+            </p>
+            <p className="hint">
+              O núcleo revalidará o rascunho, reabrirá o arquivo gravado e executará a conformidade.
+            </p>
+            <div className="actions">
+              <button type="button" disabled={busy} onClick={confirmSave}>
+                {busy ? 'Gravando…' : 'Confirmar gravação'}
+              </button>
+              <button type="button" disabled={busy} onClick={() => setConfirming(false)}>
+                Voltar
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button type="button" disabled={busy} onClick={() => setConfirming(true)}>
+            {diff.exists ? 'Substituir contrato' : 'Criar contrato'}
+          </button>
+        )
+      )}
+      {saveError !== null && <p className="status-error">{saveError}</p>}
+      {comparison()}
+      {saveOutcome === null && (
+        <p className="hint">Nenhum arquivo foi alterado até a confirmação final.</p>
+      )}
       <button type="button" disabled={busy} onClick={review}>
         {busy ? 'Validando…' : 'Validar rascunho'}
       </button>

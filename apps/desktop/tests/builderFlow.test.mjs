@@ -5,17 +5,24 @@ import {
   BUILDER_STEPS,
   addDraftLayer,
   addDraftModule,
+  complianceLines,
   decideDependency,
   decideObservedDependency,
   detectedStatus,
+  diffLinePrefix,
+  diffSummary,
   effectsLine,
   evidenceLine,
   nextStep,
+  observationLines,
   observedDecisionItems,
   previousStep,
   removeDraftModule,
   renameDraftLayer,
   renameDraftModule,
+  saveAuthorization,
+  saveConfirmationText,
+  savedOutcomeLine,
   setProfile,
   setResolution,
   toggleLayerModule,
@@ -309,4 +316,120 @@ test('efeitos, evidências e aviso vêm dos dados recebidos', () => {
   assert.match(effectsLine(effects), /dep\.layer_not_allowed/);
   assert.equal(evidenceLine('x'.repeat(300)).length, 123);
   assert.match(warningText(), /não são aprovadas automaticamente/);
+});
+
+function diff() {
+  return {
+    exists: true,
+    current_text: 'schema_version = 1\n',
+    changed: true,
+    lines: [
+      { kind: 'removed', text: 'schema_version = 1', old_line: 1, new_line: null },
+      { kind: 'added', text: 'schema_version = 2', old_line: null, new_line: 1 },
+      { kind: 'context', text: '', old_line: 2, new_line: 2 },
+    ],
+  };
+}
+
+function saveOutcome() {
+  return {
+    saved: { text: 'schema_version = 2\n', identity: 'abc123', schema_version: 2 },
+    run: {
+      mode: 'compliance',
+      contract: { status: 'present', schema_version: 2 },
+      report: {
+        project: 'exemplo',
+        schema_version: 2,
+        summary: {
+          files_included: 2,
+          files_skipped: 0,
+          modules: 1,
+          packages: 0,
+          edges: 1,
+          findings: 2,
+          errors: 1,
+          warnings: 1,
+          infos: 0,
+          needs_review: 0,
+        },
+        skip_summary: [],
+        findings: [
+          {
+            rule_id: 'dep.not_allowed',
+            severity: 'error',
+            title: 'Dependência não permitida',
+            message: 'application -> domain',
+            path: 'src/lib.rs',
+            line_start: 3,
+          },
+          {
+            rule_id: 'file.unmapped',
+            severity: 'warning',
+            title: 'Arquivo sem módulo',
+            message: 'src/solto.rs',
+            path: 'src/solto.rs',
+            line_start: null,
+          },
+        ],
+        limitations: [],
+        coverage: {
+          code_files_included: 2,
+          code_files_analyzed: 2,
+          code_files_not_analyzed: 0,
+          unsupported_code_extensions: [],
+          partial: false,
+        },
+      },
+    },
+    replaced: true,
+  };
+}
+
+test('autorização de gravação preserva o texto conferido pelo núcleo', () => {
+  assert.equal(saveAuthorization({ ...diff(), exists: false, current_text: '' }), 'create');
+  assert.deepEqual(saveAuthorization(diff()), {
+    replace: { expected_text: 'schema_version = 1\n' },
+  });
+});
+
+test('diff e confirmação são descritos sem reavaliar o contrato', () => {
+  assert.equal(diffLinePrefix('context'), ' ');
+  assert.equal(diffLinePrefix('added'), '+');
+  assert.equal(diffLinePrefix('removed'), '-');
+  assert.match(diffSummary(diff()), /1 linha adicionada/);
+  assert.match(diffSummary(diff()), /1 linha removida/);
+  assert.match(diffSummary({ ...diff(), changed: false, lines: [] }), /inalterado/);
+  assert.match(saveConfirmationText({ ...diff(), exists: false }), /Criar/);
+  assert.match(saveConfirmationText(diff()), /Substituir/);
+});
+
+test('painel lado a lado recorta apenas os dados do núcleo', () => {
+  const report = {
+    candidates: {
+      candidate_modules: [],
+      observed_dependencies: [
+        { source: 'a.rs', target: 'domain', resolution: 'observed', detail: 'use', line: 1, evidence: 'x' },
+        { source: 'b.rs', target: 'serde', resolution: 'external', detail: 'use', line: 2, evidence: 'y' },
+      ],
+      ambiguities: [],
+      languages: [],
+      limitations: ['analisador parcial'],
+    },
+    analysis: { limitations: [] },
+  };
+  const observations = observationLines(report, 1);
+  const findings = complianceLines(saveOutcome(), 1);
+
+  assert.equal(observations.length, 2, 'limite aplica-se às relações, não aos avisos');
+  assert.match(observations[0], /a\.rs → domain/);
+  assert.match(observations[1], /analisador parcial/);
+  assert.equal(findings.length, 1);
+  assert.match(findings[0], /dep\.not_allowed/);
+});
+
+test('resultado gravado informa identidade, modo e contrato aprovado', () => {
+  const line = savedOutcomeLine(saveOutcome());
+  assert.match(line, /abc123/);
+  assert.match(line, /conformidade/);
+  assert.match(line, /v2/);
 });

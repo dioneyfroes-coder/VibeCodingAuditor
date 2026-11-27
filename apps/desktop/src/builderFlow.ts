@@ -104,6 +104,51 @@ export interface DraftEffects {
   notes: string[];
 }
 
+export type ContractDiffLineKind = 'context' | 'added' | 'removed';
+
+export interface ContractDiffLine {
+  kind: ContractDiffLineKind;
+  text: string;
+  old_line: number | null;
+  new_line: number | null;
+}
+
+export interface ContractDiff {
+  exists: boolean;
+  current_text: string;
+  changed: boolean;
+  lines: ContractDiffLine[];
+}
+
+export type SaveAuthorization = 'create' | { replace: { expected_text: string } };
+
+export interface AuditFinding {
+  rule_id: string;
+  severity: string;
+  title: string;
+  message: string;
+  path: string;
+  line_start: number | null;
+}
+
+export interface ComplianceReport {
+  project: string;
+  schema_version: number;
+  summary: { findings: number; errors: number; warnings: number; needs_review: number };
+  findings: AuditFinding[];
+  limitations: string[];
+}
+
+export interface SaveOutcome {
+  saved: { text: string; identity: string; schema_version: number };
+  run: {
+    mode: string;
+    contract: { status: string; schema_version?: number };
+    report: ComplianceReport;
+  };
+  replaced: boolean;
+}
+
 export interface ProjectRunStatus {
   mode: string;
   contract: { status: string; schema_version?: number };
@@ -557,4 +602,66 @@ export function evidenceLine(evidence: string): string {
 /// Aviso curto exibido junto às sugestões.
 export function warningText(): string {
   return BUILDER_WARNING;
+}
+
+/// Símbolo textual de cada linha do diff; nenhum texto é alterado.
+export function diffLinePrefix(kind: ContractDiffLineKind): string {
+  if (kind === 'added') {
+    return '+';
+  }
+  if (kind === 'removed') {
+    return '-';
+  }
+  return ' ';
+}
+
+/// Resumo das contagens devolvidas pelo núcleo.
+export function diffSummary(diff: ContractDiff): string {
+  if (!diff.changed) {
+    return 'Contrato inalterado';
+  }
+  const added = diff.lines.filter((line) => line.kind === 'added').length;
+  const removed = diff.lines.filter((line) => line.kind === 'removed').length;
+  return `${added} ${added === 1 ? 'linha adicionada' : 'linhas adicionadas'} · ${removed} ${removed === 1 ? 'linha removida' : 'linhas removidas'}`;
+}
+
+/// Autorização enviada ao núcleo, com o texto conferido no painel de diff.
+export function saveAuthorization(diff: ContractDiff): SaveAuthorization {
+  return diff.exists
+    ? { replace: { expected_text: diff.current_text } }
+    : 'create';
+}
+
+/// Texto da confirmação final, distinto para criação e substituição.
+export function saveConfirmationText(diff: ContractDiff): string {
+  return diff.exists
+    ? 'Substituir auditor.toml com o texto revisado'
+    : 'Criar auditor.toml com o texto revisado';
+}
+
+/// Observações da descoberta, exibidas sem classificação de conformidade.
+export function observationLines(report: DiscoveryReport | null, limit = 8): string[] {
+  if (report === null) {
+    return [];
+  }
+  const dependencies = report.candidates.observed_dependencies
+    .slice(0, limit)
+    .map((dependency) =>
+      `${dependency.source} → ${dependency.target} [${dependency.resolution}]`,
+    );
+  return [...dependencies, ...report.candidates.limitations];
+}
+
+/// Achados da auditoria de conformidade executada após a gravação.
+export function complianceLines(outcome: SaveOutcome, limit = 8): string[] {
+  return outcome.run.report.findings
+    .slice(0, limit)
+    .map((finding) => `${finding.rule_id}: ${finding.message} (${finding.path})`);
+}
+
+/// Linha de identidade do contrato gravado e do modo da auditoria posterior.
+export function savedOutcomeLine(outcome: SaveOutcome): string {
+  const version = outcome.run.contract.schema_version ?? outcome.saved.schema_version;
+  const mode = outcome.run.mode === 'compliance' ? 'conformidade' : outcome.run.mode;
+  return `Contrato aprovado v${version} · identidade ${outcome.saved.identity} · modo ${mode}`;
 }

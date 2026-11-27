@@ -5,11 +5,15 @@
 //! produzidos pelo núcleo.
 
 use std::fs;
+use std::io;
 use std::path::Path;
 
 use auditor_core::analysis::{self, Analysis};
 use auditor_core::audit::{self, DiscoveryReport, ProjectRun};
-use auditor_core::builder::{self, ContractDraft, DraftEffects, ValidationResult};
+use auditor_core::builder::{
+    self, ContractDiff, ContractDraft, DraftEffects, SaveAuthorization, SaveOutcome,
+    ValidationResult,
+};
 use auditor_core::contract::{self, load_contract};
 use auditor_core::discovery::discover;
 use auditor_core::history::{History, RunSummary};
@@ -82,6 +86,35 @@ fn draft_effects(draft: ContractDraft) -> DraftEffects {
     builder::draft_effects(&draft)
 }
 
+/// Mostra o diff entre o contrato atual e a prévia, sem gravar arquivos.
+#[tauri::command]
+fn contract_diff(path: String, draft: ContractDraft) -> Result<ContractDiff, String> {
+    let root = Path::new(&path);
+    let contract_path = root.join("auditor.toml");
+    let current = match fs::read_to_string(&contract_path) {
+        Ok(text) => text,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => String::new(),
+        Err(source) => return Err(source.to_string()),
+    };
+    let contract = builder::validate_draft(&draft).map_err(|error| error.to_string())?;
+    let preview = contract::render_contract(&contract).map_err(|error| error.to_string())?;
+    let mut diff = builder::contract_diff(&current, &preview);
+    diff.exists = contract_path
+        .try_exists()
+        .map_err(|error| error.to_string())?;
+    Ok(diff)
+}
+
+/// Grava o contrato aprovado e executa a conformidade, tudo no núcleo.
+#[tauri::command]
+fn save_contract(
+    path: String,
+    draft: ContractDraft,
+    authorization: SaveAuthorization,
+) -> Result<SaveOutcome, String> {
+    builder::save_draft(Path::new(&path), &draft, &authorization).map_err(|error| error.to_string())
+}
+
 /// Lista execuções gravadas no banco local, da mais recente para a mais antiga.
 #[tauri::command]
 fn history_list(
@@ -120,6 +153,8 @@ pub fn run() {
             validate_contract_draft,
             preview_contract,
             draft_effects,
+            contract_diff,
+            save_contract,
             history_list,
             history_record
         ])
@@ -207,6 +242,110 @@ mod tests {
         assert_eq!(
             from_command.mode(),
             auditor_core::audit::ExecutionMode::Compliance
+        );
+    }
+
+    /// Cópia temporária de uma fixture, removida ao fim do teste.
+    struct TempProject(PathBuf);
+
+    impl TempProject {
+        fn new(fixture: &str) -> Self {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            use std::time::{SystemTime, UNIX_EPOCH};
+
+            static NEXT: AtomicU64 = AtomicU64::new(0);
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("relógio do sistema")
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!(
+                "auditor-tauri-e46-{}-{nanos}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            copy_directory(&project_fixture(fixture), &root);
+            Self(root)
+        }
+
+        fn text(&self) -> String {
+            self.0.to_string_lossy().into_owned()
+        }
+    }
+
+    impl Drop for TempProject {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn copy_directory(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).expect("destino da cópia");
+        for entry in std::fs::read_dir(from).expect("origem da cópia") {
+            let entry = entry.expect("entrada legível");
+            let target = to.join(entry.file_name());
+            if entry.file_type().expect("tipo da entrada").is_dir() {
+                copy_directory(&entry.path(), &target);
+            } else {
+                std::fs::copy(entry.path(), &target).expect("arquivo copiado");
+            }
+        }
+    }
+
+    #[test]
+    fn contract_diff_command_delegates_to_the_core() {
+        let root = project_fixture("clean");
+        let draft = start_draft(root.to_string_lossy().into_owned()).expect("draft must start");
+        let current = read_contract(root.to_string_lossy().into_owned()).expect("contract text");
+        let from_command =
+            contract_diff(root.to_string_lossy().into_owned(), draft.clone()).expect("command");
+
+        let contract = builder::validate_draft(&draft).expect("draft must be valid");
+        let preview = contract::render_contract(&contract).expect("preview must render");
+        let mut from_core = builder::contract_diff(&current, &preview);
+        from_core.exists = true;
+
+        assert_eq!(from_command, from_core);
+        assert!(from_command.exists);
+    }
+
+    #[test]
+    fn save_contract_command_refuses_overwrite_without_confirmation() {
+        let project = TempProject::new("clean");
+        let path = project.0.join("auditor.toml");
+        let original = std::fs::read_to_string(&path).expect("contract must exist");
+        let draft = start_draft(project.text()).expect("draft must start");
+
+        let error = save_contract(project.text(), draft, SaveAuthorization::Create)
+            .expect_err("create must not overwrite");
+        assert!(error.contains("substituição exige confirmação"), "{error}");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("contract preserved"),
+            original
+        );
+    }
+
+    #[test]
+    fn save_contract_command_delegates_to_the_core() {
+        let command_project = TempProject::new("discovery_no_contract");
+        let core_project = TempProject::new("discovery_no_contract");
+        let draft = builder::empty_draft("delegado");
+
+        let from_command = save_contract(
+            command_project.text(),
+            draft.clone(),
+            SaveAuthorization::Create,
+        )
+        .expect("command must save");
+        let from_core = builder::save_draft(&core_project.0, &draft, &SaveAuthorization::Create)
+            .expect("core must save");
+
+        assert_eq!(from_command.saved, from_core.saved);
+        assert_eq!(from_command.replaced, from_core.replaced);
+        assert_eq!(from_command.run.mode, from_core.run.mode);
+        assert_eq!(from_command.run.contract, from_core.run.contract);
+        assert_eq!(
+            from_command.run.report.summary,
+            from_core.run.report.summary
         );
     }
 

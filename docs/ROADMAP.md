@@ -15,7 +15,7 @@ Estado consolidado das Etapas 0–10 e dos trabalhos posteriores. Decisões e es
 | 8 | Criar a aplicação desktop com Tauri | Concluída em 25/11/2026 — Tauri/React compilados e iniciados; 78 testes passaram |
 | 9 | Criar a extensão VS Code | Concluída em 25/11/2026 — `.vsix` gerado; diagnósticos conferem com a CLI; 82 testes passaram |
 | 10 | Expandir linguagens e recursos | Concluída em 25/11/2026; extensões adicionais nesta rodada: TypeScript/JavaScript e Python no núcleo. Demais opções avaliadas e diferidas |
-| 4 (nova fase) | Descoberta automática e Architecture Builder | Em andamento — Etapas 4.0 a 4.5 concluídas em 26/11/2026; assistente visual somente leitura disponível |
+| 4 (nova fase) | Descoberta automática e Architecture Builder | Em andamento — Etapas 4.0 a 4.6 concluídas em 26/11/2026; ciclo descoberta → contrato aprovado → conformidade fechado no desktop |
 
 Etapa 2 (confiabilidade do motor): concluída em 26/11/2026 — itens 2.1 a 2.8 verificados localmente no Windows e cobertos pelo workflow de CI, cuja primeira execução remota (`CI Windows` #1, commit `7a07286`) terminou com sucesso.
 
@@ -529,9 +529,21 @@ Nova fase iniciada em 26/11/2026 a partir de `PLANO_ETAPA_4_DESCOBERTA_E_ARCHITE
 - [x] Verificação final: `cargo fmt --all --check` = `0`, `cargo check --workspace` = `0`, `cargo test --workspace` = `0` (247 testes: 221 no núcleo, 10 unitários na CLI, 5 de integração na CLI e 11 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` = `0`, `git diff --check` = `0` (somente avisos LF/CRLF do OneDrive), `npm --prefix apps/desktop test` = `0` (28), `npm --prefix apps/desktop run build` = `0` e `npm --prefix extensions/vscode test` = `0` (7). Testes focados: `cargo test -p auditor-core --lib builder::tests` = `0` (18) e `cargo test -p auditor-desktop --lib` = `0` (11).
 - [x] Limitações explícitas: não há gravação, confirmação final nem segunda auditoria nesta etapa; o agrupamento automático em camadas cria uma camada inicial com todos os módulos, sem inferir responsabilidades; `auditor init` continua gerando v1; a descoberta ainda não lê `package.json`, `pyproject.toml` ou `go.mod` para candidatos; a interface ainda não mostra modo/candidatos na extensão nem no histórico (Etapa 4.7).
 
-### Etapas 4.6 a 4.8 — Não iniciadas
+### Etapa 4.6 — Gravação, validação final e segunda auditoria — Concluída em 26/11/2026
 
-- [ ] 4.6 — gravação segura, validação final e segunda auditoria.
+- [x] Após o usuário responder “prossiga”, as mudanças ficaram restritas ao núcleo, ao adaptador Tauri e à interface desktop. CLI, extensão VS Code, SQLite e contratos de exemplo não mudaram em comportamento; nenhuma dependência Rust ou npm foi adicionada.
+- [x] O núcleo passa a expor `SaveAuthorization`, `SaveOutcome`, `SaveError`, `contract_diff()` e `save_draft()`. A gravação revalida o rascunho, renderiza a prévia, reparseia o texto, usa arquivo temporário no mesmo diretório com `create_new`, `sync_all` e `fs::rename`, reabre o arquivo pelo parser oficial e executa `project_run()`, que agora termina em modo de conformidade.
+- [x] Criação exige `Create` e falha se `auditor.toml` existir. Substituição exige `Replace { expected_text }` conferido com o texto lido e relido antes da renomeação; aprovação obsoleta é recusada sem tocar o arquivo anterior. Falha ao criar o temporário remove o que foi criado e preserva o contrato anterior.
+- [x] `contract_diff()` gera comparação determinística linha a linha no núcleo, sem crate novo. O comando Tauri `contract_diff` devolve também o texto atual e a indicação de existência, usados pelo assistente para mostrar o diff e construir a autorização conferida.
+- [x] Novos comandos Tauri finos: `contract_diff` e `save_contract`. O segundo delega integralmente a `builder::save_draft()` e devolve o contrato gravado, a identidade e a auditoria de conformidade; nenhuma regra foi movida para o adaptador.
+- [x] A revisão passa a mostrar o diff entre o contrato atual e a prévia, com resumo de linhas adicionadas/removidas. Criar ou substituir exige duas ações separadas: abrir a confirmação com o texto explícito e confirmar a gravação. Qualquer edição posterior invalida diff, confirmação, validação, prévia, efeitos e resultado anterior.
+- [x] Depois da gravação, o assistente exibe lado a lado as observações da descoberta (sem julgamento) e as violações/revisões da conformidade (contrato aprovado), com identidade, versão e modo explícitos. A aplicação atualiza a detecção e o relatório externo sem fechar o assistente.
+- [x] Testes escritos antes da implementação falharam na fase vermelha por tipos/funções inexistentes no núcleo, comandos ausentes no adaptador e exports ausentes em `builderFlow.ts`. A verificação inclui criação, recusa de sobrescrita, texto obsoleto, rascunho inválido, falha de escrita, reparso, modo de conformidade, serialização da autorização e delegação dos comandos.
+- [x] Verificação final: `cargo fmt --all --check` = `0`, `cargo check --workspace` = `0`, `cargo test --workspace` = `0` (256 testes: 227 no núcleo, 10 unitários na CLI, 5 de integração na CLI e 14 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` = `0`, `git diff --check` = `0` (somente avisos LF/CRLF do OneDrive), `npm --prefix apps/desktop test` = `0` (32), `npm --prefix apps/desktop run build` = `0` e `npm --prefix extensions/vscode test` = `0` (7). Testes focados: `cargo test -p auditor-core --lib builder::tests` = `0` (24) e `cargo test -p auditor-desktop --lib` = `0` (14).
+- [x] Limitações explícitas: a checagem do texto atual reduz, mas não elimina, a janela entre conferência e renomeação em cenários de escrita concorrente; se a auditoria posterior falhar, o contrato permanece gravado e o erro é exibido, sem rollback silencioso; o diff mostra o arquivo inteiro, sem agrupamento em hunks; não há comando CLI para o Builder, nem mudança em extensão/histórico nesta etapa; `auditor init` continua gerando v1; a descoberta ainda não lê `package.json`, `pyproject.toml` ou `go.mod` para candidatos.
+
+### Etapas 4.7 a 4.8 — Não iniciadas
+
 - [ ] 4.7 — consistência entre CLI, VS Code e histórico.
 - [ ] 4.8 — fixtures, validação manual e fechamento.
 

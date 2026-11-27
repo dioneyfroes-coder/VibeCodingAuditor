@@ -12,6 +12,9 @@ use serde::Serialize;
 
 use crate::contract::Contract;
 
+/// Candidatos de módulos e classificação neutra das relações observadas.
+pub mod candidates;
+
 /// Diretórios ignorados por padrão, em qualquer profundidade.
 pub const DEFAULT_IGNORED_DIRS: &[&str] = &[
     ".git",

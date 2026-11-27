@@ -12,6 +12,7 @@ use serde::Serialize;
 
 use crate::analysis::{self, Analysis, AnalysisError};
 use crate::contract::{self, Contract, ContractError};
+use crate::discovery::candidates::{self, DiscoveryCandidates};
 use crate::discovery::{self, DiscoveryError, Inventory};
 use crate::report::AuditReport;
 use crate::rules;
@@ -77,6 +78,8 @@ pub struct DiscoveryReport {
     pub inventory: Inventory,
     /// Relações observadas, sem classificação arquitetural.
     pub analysis: Analysis,
+    /// Material de descoberta: candidatos, relações classificadas e limites.
+    pub candidates: DiscoveryCandidates,
 }
 
 /// Resultado da conformidade com contrato válido.
@@ -152,10 +155,12 @@ fn audit_with_contract(root: &Path, contract: &Contract) -> Result<AuditReport, 
 pub fn discover_project(root: &Path) -> Result<DiscoveryReport, AuditError> {
     let inventory = discovery::discover_without_contract(root)?;
     let analysis = analysis::analyze_observations(root, &inventory)?;
+    let candidates = candidates::build_candidates(&inventory, &analysis);
     Ok(DiscoveryReport {
         contract: ContractStatus::Missing,
         inventory,
         analysis,
+        candidates,
     })
 }
 
@@ -1100,5 +1105,45 @@ mod tests {
         assert_eq!(value["mode"], "compliance");
         assert_eq!(value["contract"]["status"], "present");
         assert_eq!(value["contract"]["schema_version"], 1);
+    }
+
+    #[test]
+    fn discovery_report_exposes_candidates_and_analyzer_limits() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/projects/discovery_candidates");
+        let run = project_run(&root).expect("discovery run must succeed");
+        let ProjectRun::Discovery(report) = run else {
+            panic!("project without contract must not produce compliance");
+        };
+        let value = serde_json::to_value(&report).expect("report must serialize");
+
+        assert_eq!(
+            value["candidates"]["candidate_modules"][0]["name"],
+            "application"
+        );
+        assert_eq!(
+            value["candidates"]["candidate_modules"][0]["category"],
+            "direct"
+        );
+        assert_eq!(
+            value["candidates"]["candidate_modules"][0]["needs_confirmation"],
+            true
+        );
+        assert_eq!(
+            value["candidates"]["observed_dependencies"][1]["resolution"],
+            "external"
+        );
+        assert_eq!(value["candidates"]["languages"][0]["analyzer"], "rust");
+        assert_eq!(
+            value["candidates"]["languages"][1]["analyzer"],
+            "typescript_javascript"
+        );
+        assert!(
+            report
+                .candidates
+                .limitations
+                .iter()
+                .any(|limitation| limitation.contains("scan.include"))
+        );
     }
 }

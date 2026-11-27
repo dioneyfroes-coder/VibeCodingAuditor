@@ -476,9 +476,20 @@ Nova fase iniciada em 26/11/2026 a partir de `PLANO_ETAPA_4_DESCOBERTA_E_ARCHITE
 - [x] Verificação final: `cargo fmt --all` = `0`, `cargo fmt --all --check` = `0`, `cargo check --workspace` = `0`, `cargo test --workspace` = `0` (202 testes: 188 no núcleo, 10 na CLI e 4 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` = `0`, `git diff --check` = `0` (apenas avisos LF/CRLF do OneDrive), `npm --prefix apps/desktop test` = `0` (12), `npm --prefix apps/desktop run build` = `0` e `npm --prefix extensions/vscode test` = `0` (7).
 - [x] Limitações explícitas: ainda não há módulos candidatos nem agrupamento por evidência (4.2); os comandos da CLI e o contrato do relatório não expõem o novo modo (4.3); `auditor init` continua gerando v1 (risco já registrado na proposta); descoberta cobre somente os analisadores existentes e não resolve pacotes externos.
 
-### Etapa 4.2 a 4.8 — Não iniciadas
+### Etapa 4.2 — Descoberta de módulos candidatos e relações — Concluída em 26/11/2026
 
-- [ ] 4.2 — módulos candidatos e relações observadas.
+- [x] Após o usuário responder “prossiga”, a implementação ficou restrita ao núcleo. CLI, Tauri, React, extensão, SQLite e contratos não mudaram em comportamento; nenhuma dependência nova foi adicionada.
+- [x] `crates/auditor-core/src/discovery/candidates.rs` agrupa candidatos por evidência: `direct` (pacote de manifesto Cargo reconhecido), `inferred_path` (diretório, apenas heurística) e `ambiguous` (conflito preservado). Todo candidato tem `needs_confirmation: true`, nenhum é decisão aprovada.
+- [x] Pacotes/manifests são priorizados: limites `direct` são criados antes dos heurísticos, e arquivos já cobertos por um limite `direct` não geram candidato por diretório. Nomes de pacotes do workspace são excluídos da lista de dependências externas antes da classificação.
+- [x] Relações observadas reusam arquivo, linha e evidência das arestas existentes e são classificadas sem regras de conformidade em `resolved`, `unresolved`, `external` e `ambiguous`. Ambiguidades viram itens explícitos com descrição e opções distinguíveis pelo caminho.
+- [x] Ordenação determinística com `BTreeMap`/`BTreeSet` e ordenação explícita de candidatos, arestas, ambiguidades e limitações. O teste `candidate_building_is_deterministic` falhou na fase vermelha por evidências vindas de `HashSet`; a troca por `BTreeSet` corrigiu a causa.
+- [x] `DiscoveryReport` expõe `candidates`, com `candidate_modules`, `observed_dependencies`, `ambiguities`, `languages` e `limitations`. `languages` informa a extensão, a quantidade de arquivos e o analisador disponível; limitações registram arquivos na raiz sem candidato, escopo padrão de `scan.include` e manifests `package.json`/`pyproject.toml`/`go.mod` ainda não interpretados.
+- [x] Fixtures novas sem `auditor.toml`: `tests/fixtures/projects/discovery_candidates` (workspace Cargo, código TypeScript e `package.json`) e `tests/fixtures/projects/discovery_candidates_ambiguous` (dois pacotes com o mesmo nome). Nenhuma foi gravada sobre contrato existente.
+- [x] Verificação final: `cargo fmt --all` = `0`, `cargo fmt --all --check` = `0`, `cargo check --workspace` = `0`, `cargo test --workspace` = `0` (211 testes: 197 no núcleo, 10 na CLI e 4 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` = `0`, `git diff --check` = `0` (apenas avisos LF/CRLF do OneDrive), `npm --prefix apps/desktop test` = `0` (12), `npm --prefix apps/desktop run build` = `0` e `npm --prefix extensions/vscode test` = `0` (7). Testes focados: `cargo test -p auditor-core --lib discovery::candidates` = `0` (8), `cargo test -p auditor-core --lib project_run` = `0` (5) e `cargo test -p auditor-core --lib discovery_report_exposes_candidates_and_analyzer_limits` = `0` (1).
+- [x] Limitações explícitas: a descoberta ainda não lê `package.json`, `pyproject.toml` nem `go.mod` para extrair candidatos; não resolve pacotes externos nem usa analisadores além de Rust, TypeScript/JavaScript e Python; a CLI, o texto/Markdown, o histórico e a interface ainda não mostram o modo nem os candidatos (4.3); `auditor init` continua gerando v1 (risco já registrado na proposta).
+
+### Etapa 4.3 a 4.8 — Não iniciadas
+
 - [ ] 4.3 — CLI e contrato do relatório.
 - [ ] 4.4 — modelo do Architecture Builder.
 - [ ] 4.5 — interface visual do Builder.

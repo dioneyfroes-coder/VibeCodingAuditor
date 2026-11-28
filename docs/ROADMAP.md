@@ -17,7 +17,7 @@ Estado consolidado das Etapas 0–10 e dos trabalhos posteriores. Decisões e es
 | 10 | Expandir linguagens e recursos | Concluída em 25/11/2026; extensões adicionais nesta rodada: TypeScript/JavaScript e Python no núcleo. Demais opções avaliadas e diferidas |
 | 4 (nova fase) | Descoberta automática e Architecture Builder | Concluída em 27/11/2026 — descoberta, Builder, consistência, validação automatizada e validação manual desktop/VS Code confirmadas; ressalvas e UX registrados |
 | 5 (nova fase) | Suíte de testes E2E dedicada | Concluída em 27/11/2026 — CLI, extensão, desktop e CI Windows verdes no run `46067832029` |
-| 6 (nova fase) | Amadurecimento arquitetural e distribuição | Em andamento — 6.0 baseline registrado em `docs/validation/etapa-6/baseline.md`; 6.1 documentação coerente, 6.2 descoberta multi-ecossistema e 6.3 resolução determinística concluídas em 27/11/2026; 6.4–6.8 planejadas |
+| 6 (nova fase) | Amadurecimento arquitetural e distribuição | Em andamento — 6.0 baseline registrado em `docs/validation/etapa-6/baseline.md`; 6.1 documentação coerente, 6.2 descoberta multi-ecossistema e 6.3 resolução determinística concluídas em 27/11/2026; 6.4.0 proposta registrada e aguardando aprovação; 6.4.1–6.8 planejadas |
 
 Etapa 2 (confiabilidade do motor): concluída em 26/11/2026 — itens 2.1 a 2.8 verificados localmente no Windows e cobertos pelo workflow de CI, cuja primeira execução remota (`CI Windows` #1, commit `7a07286`) terminou com sucesso.
 
@@ -737,9 +737,18 @@ Nova fase iniciada em 26/11/2026 a partir de `PLANO_ETAPA_4_DESCOBERTA_E_ARCHITE
 - [x] Verificação: `git diff --check` = `0` (apenas avisos LF/CRLF esperados do OneDrive em arquivos Rust), `cargo fmt --all --check` = `0`, `cargo check --workspace` = `0`, `cargo test --workspace` = `0` (298 testes: 11 + 7 + 6 na CLI, 259 no núcleo e 15 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` = `0`, `npm --prefix apps/desktop test` = `0` (39), `npm --prefix apps/desktop run build` = `0`, `npm --prefix extensions/vscode test` = `0` (18) e `npm --prefix extensions/vscode run package` = `0` (`.vsix` com 10 arquivos, 15,23 kB).
 - [x] Limitações explícitas: nenhuma dependência, lockfile, workflow, `auditor.toml`, manifesto analisado, regra de conformidade, nome da CLI, `when` da extensão ou `bundle.active` foi alterado. `tsconfig` fora do subconjunto suportado, nomes Python sem equivalência determinística e ausência de analisador Go permanecem como limitações; nenhuma E2E foi reexecutada nesta subetapa.
 
+#### Etapa 6.4.0 — Proposta de contrato v3 — Registrada, aguardando aprovação
+
+- [x] Documento `docs/architecture/CONTRACT_V3_PROPOSAL.md` descreve os limites de v1/v2, a relação entre perfil e regras efetivas, os presets `modular_monolith`, `layered_monolith` e `clean_hexagonal`, domínios com no máximo uma associação por módulo, precedência módulo → camada → domínio → regra personalizada, exceções localizadas e justificadas, regras declarativas sem código executável e identidade canônica separada para v3.
+- [x] Decisão proposta: não gravar perfil no contrato, não aceitar múltiplos paths por módulo sem fixture que prove necessidade, não anunciar microsserviços, não aplicar expiração automática por relógio e não criar migração SQLite para v3.
+- [x] Compatibilidade proposta: leitura de v1/v2 preservada com hashes legados, escrita v3 somente após aprovação, `auditor init` gerando v3 mínimo, nenhuma reescrita automática de contrato existente e exceções aplicadas persistidas nas limitações já suportadas.
+- [x] Decisão `E6.4.0` registrada em `docs/DECISIONS.md`.
+- [x] Verificação: `git diff --check` = `0`; nenhuma suíte de código foi executada porque esta subetapa é somente documentação.
+- [ ] Gate: aprovação explícita da proposta antes de iniciar 6.4.1.
+
 #### Subetapas seguintes — planejadas, não iniciadas
 
-- [ ] 6.4 — Contrato v3: proposta de schema aprovada antes de qualquer implementação.
+- [ ] 6.4.1 — Implementação do contrato v3 após aprovação do desenho.
 - [ ] 6.5 — Autoauditoria multi-stack do próprio repositório.
 - [ ] 6.6 — Segurança, dependências e consistência do CI.
 - [ ] 6.7 — Empacotamento e estratégia de instalação.

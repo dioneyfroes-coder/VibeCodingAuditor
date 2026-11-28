@@ -11,8 +11,8 @@ use std::path::Path;
 use auditor_core::analysis::{self, Analysis};
 use auditor_core::audit::{self, DiscoveryReport, ProjectRun};
 use auditor_core::builder::{
-    self, ContractDiff, ContractDraft, DraftEffects, SaveAuthorization, SaveOutcome,
-    ValidationResult,
+    self, BuilderProfile, ContractDiff, ContractDraft, DraftEffects, DraftLayer, SaveAuthorization,
+    SaveOutcome, ValidationResult,
 };
 use auditor_core::contract::{self, load_contract};
 use auditor_core::discovery::discover;
@@ -65,6 +65,18 @@ fn start_draft(path: String) -> Result<ContractDraft, String> {
         let report = audit::discover_project(root).map_err(|error| error.to_string())?;
         Ok(builder::draft_from_discovery(&report))
     }
+}
+
+/// Devolve as camadas iniciais do preset escolhido, calculadas no núcleo.
+#[tauri::command]
+fn preset_layers(profile: String) -> Result<Vec<DraftLayer>, String> {
+    let profile = match profile.as_str() {
+        "modular_monolith" => BuilderProfile::ModularMonolith,
+        "layered_monolith" => BuilderProfile::LayeredMonolith,
+        "clean_hexagonal" => BuilderProfile::CleanHexagonal,
+        other => return Err(format!("perfil desconhecido: {other}")),
+    };
+    Ok(builder::preset_layers(profile))
 }
 
 /// Valida escolhas sem tratar decisões pendentes como falha operacional.
@@ -150,6 +162,7 @@ pub fn run() {
             load_project,
             discover_project,
             start_draft,
+            preset_layers,
             validate_contract_draft,
             preview_contract,
             draft_effects,
@@ -427,11 +440,23 @@ mod tests {
         let text = preview_contract(draft.clone()).expect("command must succeed");
         let contract = auditor_core::contract::parse_contract(&text).expect("TOML must be valid");
 
-        assert_eq!(contract.schema_version, 2);
+        assert_eq!(contract.schema_version, 3);
         assert_eq!(
             text,
             auditor_core::contract::render_contract(&contract).expect("core must render")
         );
+    }
+
+    #[test]
+    fn preset_layers_command_uses_the_core_preset() {
+        let layers = preset_layers("clean_hexagonal".to_owned()).expect("command must succeed");
+
+        assert_eq!(
+            layers,
+            builder::preset_layers(BuilderProfile::CleanHexagonal)
+        );
+        assert_eq!(layers.len(), 4);
+        assert!(preset_layers("desconhecido".to_owned()).is_err());
     }
 
     #[test]

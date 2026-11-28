@@ -34,6 +34,20 @@ export interface Finding {
   confidence: string | null;
 }
 
+/// Dispensa aplicada pelo núcleo, preservada para exibição humana.
+export interface AppliedException {
+  rule: string;
+  rule_id: string;
+  from: string;
+  to: string;
+  path: string | null;
+  justification: string;
+  expires_on: string | null;
+  finding_id: string;
+  finding_path: string;
+  finding_line: number | null;
+}
+
 /// Contagens devolvidas pelo núcleo.
 export interface ReportSummary {
   files_included: number;
@@ -55,6 +69,8 @@ export interface AuditReport {
   summary: ReportSummary;
   findings: Finding[];
   limitations: string[];
+  /// Dispensas aplicadas pelo núcleo; ausentes em relatórios legados.
+  exceptions_applied?: AppliedException[];
   /// Campos aditivos da CLI atual; ausentes em relatórios legados.
   mode?: ExecutionModeName;
   contract?: ContractStatus;
@@ -164,6 +180,13 @@ export function buildDiagnostics(report: AuditReport): DiagnosticDescriptor[] {
   }));
 }
 
+/// Dispensas aplicadas, exibidas como informação e nunca como ocultação de achado.
+export function exceptionMessages(report: AuditReport, limit = 8): string[] {
+  return (report.exceptions_applied ?? []).slice(0, limit).map((exception) =>
+    `exceção aplicada: ${exception.rule} ${exception.from} → ${exception.to} — ${exception.justification} (${exception.rule_id}: ${exception.finding_path})`,
+  );
+}
+
 /// Objeto JSON simples, sem interpretar regras nem conteúdo de arquivos.
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -247,7 +270,12 @@ export function runSummaryMessage(run: CliRun): string {
     return `${count} ${count === 1 ? 'relação observada' : 'relações observadas'} · sem contrato`;
   }
   const count = run.summary.findings;
-  return `${count} ${count === 1 ? 'achado' : 'achados'}`;
+  const parts = [`${count} ${count === 1 ? 'achado' : 'achados'}`];
+  const waivers = run.exceptions_applied?.length ?? 0;
+  if (waivers > 0) {
+    parts.push(`${waivers} ${waivers === 1 ? 'exceção aplicada' : 'exceções aplicadas'}`);
+  }
+  return parts.join(' · ');
 }
 
 /// Rótulo do modo, idêntico ao significado usado por CLI e desktop.

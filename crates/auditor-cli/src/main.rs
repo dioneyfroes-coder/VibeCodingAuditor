@@ -525,6 +525,18 @@ mod tests {
     }
 
     #[test]
+    fn init_template_uses_the_recommended_v3_schema() {
+        let template = auditor_core::contract::EXAMPLE_CONTRACT;
+        let contract = auditor_core::contract::parse_contract(template)
+            .expect("o modelo gerado pelo init deve ser válido");
+
+        assert_eq!(contract.schema_version, 3);
+        assert_eq!(contract.architecture.domains.len(), 3);
+        assert_eq!(contract.architecture.rules.len(), 1);
+        assert_eq!(contract.architecture.exceptions.len(), 1);
+    }
+
+    #[test]
     fn scan_subcommand_requires_explicit_root() {
         let args = Args::try_parse_from(["vibe-coding-auditor-cli", "scan", "projeto"])
             .expect("scan must parse");
@@ -672,6 +684,7 @@ mod tests {
             },
             skip_summary: SkipReasonSummary::default(),
             findings: Vec::new(),
+            exceptions_applied: Vec::new(),
             limitations: Vec::new(),
             coverage: AnalysisCoverage::default(),
             external_packages: Vec::new(),

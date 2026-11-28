@@ -2,13 +2,13 @@
 
 Data: 27/11/2026
 
-Status: proposta formal da Etapa 6.4.0; aguardando aprovação para a Etapa 6.4.1
+Status: proposta formal da Etapa 6.4.0 **aprovada e implementada na Etapa 6.4.1** (27/11/2026)
 
-Branch/HEAD de referência: `main` @ `5087fc4`
+Branch/HEAD de referência da proposta: `main` @ `5087fc4`
 
-Escopo desta subetapa: documentação. Nenhum código, contrato de projeto, manifesto, workflow ou schema SQLite foi alterado.
+Escopo original da subetapa 6.4.0: documentação. Nenhum código, contrato de projeto, manifesto, workflow ou schema SQLite foi alterado na proposta. A Etapa 6.4.1 implementou o desenho abaixo sem alterar dependências, workflows, manifests existentes, nome da CLI, `when` da extensão ou `bundle.active`.
 
-Este documento descreve o desenho proposto para `schema_version = 3`. Os campos só passam a existir se a proposta for aprovada, implementada e verificada na Etapa 6.4.1. Até lá, o auditor continua lendo e gravando exatamente como hoje.
+Este documento descreve o desenho aprovado para `schema_version = 3`, agora efetivo no núcleo, na CLI, no desktop e na extensão. Contratos v1 e v2 continuam sendo lidos exatamente como antes; nenhum arquivo existente é reescrito automaticamente.
 
 ## 1. Motivo e estado atual
 
@@ -375,4 +375,14 @@ Critérios de aceite da Etapa 6.4 como um todo permanecem os do plano: proposta 
 
 ## 16. Gate
 
-Esta proposta **não autoriza implementação**. A Etapa 6.4.1 só começa após aprovação explícita do desenho aqui registrado. A aprovação deve dizer, no mínimo, se são aceitos: domínio opcional por módulo, exceções com metadado de expiração não aplicado, regras personalizadas declarativas, não inclusão de múltiplos paths e `init` gerando v3.
+Gate concluído: o desenho foi aprovado explicitamente com `Aprovar e implementar`, cobrindo domínio opcional por módulo, exceções com metadado de expiração não aplicado, regras personalizadas declarativas, não inclusão de múltiplos paths e `init` gerando v3. A Etapa 6.4.1 implementou exatamente esse conjunto.
+
+## 17. Resultado da Etapa 6.4.1
+
+- `SUPPORTED_SCHEMA_VERSIONS = [1, 2, 3]`; contratos v3 com `domains`, `exceptions` e `rules` opcionais são aceitos, e campos desconhecidos são rejeitados pelo nome.
+- `contract_identity()` preserva os hashes legados de v1/v2 e usa projeção semântica ordenada para v3; `responsibility` não entra na identidade v3.
+- Precedência módulo → camada → domínio → regra personalizada, primeira negação vence, com `dep.domain_not_allowed` e `dep.custom_not_allowed`.
+- Exceções localizadas e justificadas suprimem o achado, mas aparecem em `exceptions_applied`, `limitations`, texto, Markdown, desktop, extensão e histórico; `expires_on` é apenas data de revisão.
+- Builder ganha o preset `clean_hexagonal`, sem gravar perfil no contrato; as camadas vêm do núcleo via comando Tauri, não de regra duplicada no React.
+- `auditor init` gera v3 sem sobrescrever contrato existente.
+- Fixtures v3, relatório/histórico e documentação alinhados. Nenhuma migração SQLite foi necessária: dispensas aplicadas viram linhas em `audit_limitations`, e a comparação ganhou `before_waivers`/`after_waivers`.

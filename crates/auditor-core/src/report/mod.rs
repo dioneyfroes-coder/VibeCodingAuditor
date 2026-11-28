@@ -12,7 +12,7 @@ use crate::analysis::{Analysis, AnalysisCoverage, describe_unsupported_code_exte
 use crate::audit::{ContractStatus, DiscoveryReport, ExecutionMode, execution_mode_label};
 use crate::contract::Contract;
 use crate::discovery::{Inventory, SkipReason, SkippedEntry};
-use crate::findings::{Finding, Severity};
+use crate::findings::{AppliedException, Finding, Severity};
 use crate::resolution::ExternalPackageRelation;
 
 /// Formato de saída de um relatório.
@@ -192,6 +192,8 @@ pub struct AuditReport {
     pub skip_summary: SkipReasonSummary,
     /// Achados ordenados por identificador.
     pub findings: Vec<Finding>,
+    /// Dispensas aplicadas, sempre visíveis mesmo quando o achado não é contado.
+    pub exceptions_applied: Vec<AppliedException>,
     /// Limitações explícitas da análise, sem conclusões inventadas.
     pub limitations: Vec<String>,
     /// Cobertura efetiva da análise sobre o código incluído no inventário.
@@ -234,6 +236,7 @@ impl AuditReport {
             },
             skip_summary: SkipReasonSummary::from_entries(&inventory.skipped),
             findings,
+            exceptions_applied: Vec::new(),
             limitations: analysis.limitations.clone(),
             coverage: analysis.coverage.clone(),
             external_packages: analysis.external_packages.clone(),
@@ -242,6 +245,19 @@ impl AuditReport {
                 schema_version: contract.schema_version,
             },
         }
+    }
+
+    /// Registra dispensas aplicadas e suas linhas de limitação persistentes.
+    pub fn with_exceptions(mut self, exceptions: Vec<AppliedException>) -> Self {
+        for exception in &exceptions {
+            let line = exception.limitation_line();
+            if !self.limitations.contains(&line) {
+                self.limitations.push(line);
+            }
+        }
+        self.limitations.sort();
+        self.exceptions_applied = exceptions;
+        self
     }
 
     /// Cria um relatório com um subconjunto de achados e contagens coerentes.
@@ -270,6 +286,7 @@ impl AuditReport {
             },
             skip_summary: self.skip_summary.clone(),
             findings,
+            exceptions_applied: self.exceptions_applied.clone(),
             limitations,
             coverage: self.coverage.clone(),
             external_packages: self.external_packages.clone(),
@@ -349,6 +366,29 @@ impl AuditReport {
                 }
                 lines.push(format!("    esperado: {}", finding.expected));
                 lines.push(format!("    sugestão: {}", finding.suggestion));
+            }
+        }
+
+        if !self.exceptions_applied.is_empty() {
+            lines.push(String::new());
+            lines.push("Exceções aplicadas:".to_owned());
+            for exception in &self.exceptions_applied {
+                let path = exception.path.as_deref().unwrap_or("qualquer arquivo");
+                let expires = exception.expires_on.as_deref().unwrap_or("sem data");
+                lines.push(format!(
+                    "  - [{}] {} -> {} em {}: {}",
+                    exception.rule, exception.from, exception.to, path, exception.justification
+                ));
+                lines.push(format!(
+                    "      achado dispensado: {} (regra {}, linha {})",
+                    exception.finding_id,
+                    exception.rule_id,
+                    exception
+                        .finding_line
+                        .map(|line| line.to_string())
+                        .unwrap_or_else(|| "?".to_owned())
+                ));
+                lines.push(format!("      revisão: {expires}"));
             }
         }
 
@@ -452,6 +492,32 @@ impl AuditReport {
                 "- **Sugestão:** {}",
                 markdown_text(&finding.suggestion)
             ));
+        }
+
+        if !self.exceptions_applied.is_empty() {
+            lines.push(String::new());
+            lines.push("## Exceções aplicadas".to_owned());
+            for exception in &self.exceptions_applied {
+                let path = exception.path.as_deref().unwrap_or("qualquer arquivo");
+                let expires = exception.expires_on.as_deref().unwrap_or("sem data");
+                lines.push(String::new());
+                lines.push(format!(
+                    "- **Regra:** `{}` — {} -> {} em `{}`",
+                    exception.rule,
+                    markdown_text(&exception.from),
+                    markdown_text(&exception.to),
+                    markdown_text(path)
+                ));
+                lines.push(format!(
+                    "- **Motivo:** {}",
+                    markdown_text(&exception.justification)
+                ));
+                lines.push(format!(
+                    "- **Achado dispensado:** `{}` (regra `{}`)",
+                    exception.finding_id, exception.rule_id
+                ));
+                lines.push(format!("- **Revisão:** {}", markdown_text(expires)));
+            }
         }
 
         if !self.external_packages.is_empty() {
@@ -1011,6 +1077,7 @@ mod tests {
                 },
             ]),
             findings: vec![sample_finding()],
+            exceptions_applied: Vec::new(),
             limitations: vec!["arquivo.rs não pôde ser analisado".to_owned()],
             coverage: AnalysisCoverage {
                 code_files_included: 4,
@@ -1254,8 +1321,62 @@ mod tests {
         assert!(value["summary"].is_object());
         assert!(value["skip_summary"].is_object());
         assert!(value["findings"].is_array());
+        assert!(value["exceptions_applied"].is_array());
         assert!(value["limitations"].is_array());
         assert!(value["coverage"].is_object());
+    }
+
+    #[test]
+    fn v3_report_exposes_applied_exceptions_in_all_formats() {
+        let report = crate::audit::audit_project(&project_fixture("contract_v3"))
+            .expect("v3 audit must succeed");
+        assert_eq!(report.schema_version, 3);
+        assert_eq!(report.exceptions_applied.len(), 2);
+        assert!(
+            report
+                .findings
+                .iter()
+                .all(|finding| finding.rule_id != "dep.domain_not_allowed")
+        );
+        assert!(
+            report
+                .findings
+                .iter()
+                .all(|finding| finding.rule_id != "dep.custom_not_allowed")
+        );
+        assert!(
+            report
+                .limitations
+                .iter()
+                .any(|line| line.starts_with("exceção aplicada:"))
+        );
+
+        let text = report
+            .render(ReportFormat::Text)
+            .expect("text rendering cannot fail");
+        let markdown = report
+            .render(ReportFormat::Markdown)
+            .expect("Markdown rendering cannot fail");
+        let output = report
+            .render(ReportFormat::Json)
+            .expect("JSON rendering must succeed");
+        let value: serde_json::Value = serde_json::from_str(&output).expect("JSON must be valid");
+
+        assert!(text.contains("Exceções aplicadas:"));
+        assert!(text.contains("Integração temporária revisada pelo time"));
+        assert!(markdown.contains("## Exceções aplicadas"));
+        assert!(markdown.contains("Leitura transitória durante a migração"));
+        assert_eq!(
+            value["exceptions_applied"].as_array().map(Vec::len),
+            Some(2)
+        );
+        assert!(
+            value["exceptions_applied"]
+                .as_array()
+                .expect("exceptions must be an array")
+                .iter()
+                .any(|item| item["rule"] == "dep.domain_not_allowed")
+        );
     }
 
     #[test]

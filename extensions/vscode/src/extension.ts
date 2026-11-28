@@ -20,6 +20,7 @@ import {
   Finding,
   buildDiagnostics,
   discoveryMessages,
+  exceptionMessages,
   hasViolationDiagnostics,
   modeLabel,
   parseCliRun,
@@ -106,6 +107,7 @@ function updateStatus(): void {
       details.push(
         `${run.project} · schema v${run.schema_version}`,
         `${run.limitations.length} limitação(ões)`,
+        `${run.exceptions_applied?.length ?? 0} exceção(ões) aplicada(s)`,
       );
     }
     statusBar.tooltip = details.join('\n');
@@ -243,8 +245,21 @@ async function runAudit(target?: vscode.Uri): Promise<void> {
         outputChannel.show(true);
       }
     } else {
+      const waivers = exceptionMessages(run);
+      if (waivers.length > 0) {
+        outputChannel.clear();
+        outputLines = [];
+        appendOutput(`[${recordedAt}] exceções aplicadas em ${root}`);
+        for (const waiver of waivers) {
+          appendOutput(`- ${waiver}`);
+        }
+      }
+      const waiverNote =
+        waivers.length > 0
+          ? ` ${waivers.length} exceção(ões) aplicada(s) no canal de saída.`
+          : '';
       vscode.window.showInformationMessage(
-        `Auditoria concluída: ${run.summary.findings} achado(s) no painel Problems.`,
+        `Auditoria concluída: ${run.summary.findings} achado(s) no painel Problems.${waiverNote}`,
       );
     }
   } catch (error) {

@@ -41,6 +41,62 @@ impl Severity {
     }
 }
 
+/// Dispensa aplicada a um achado que deixou de ser contado.
+///
+/// Ela não apaga o histórico: a linha de limitação derivada deste registro é
+/// persistida pelo módulo de histórico já existente.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AppliedException {
+    /// Nome da regra declarada na exceção, que pode ser um `id` personalizado.
+    pub rule: String,
+    /// Identificador da regra que produziria o achado.
+    pub rule_id: String,
+    /// Origem no escopo da regra.
+    pub from: String,
+    /// Destino no escopo da regra.
+    pub to: String,
+    /// Caminho exato da exceção, quando declarado.
+    pub path: Option<String>,
+    /// Motivo humano da dispensa.
+    pub justification: String,
+    /// Data de revisão humana, sem aplicação automática.
+    pub expires_on: Option<String>,
+    /// Identificador do achado que teria sido emitido.
+    pub finding_id: String,
+    /// Arquivo do achado dispensado.
+    pub finding_path: String,
+    /// Linha do achado dispensado, quando conhecida.
+    pub finding_line: Option<usize>,
+}
+
+impl AppliedException {
+    /// Prefixo estável usado para identificar dispensas nas limitações gravadas.
+    pub const PREFIX: &'static str = "exceção aplicada:";
+
+    /// Linha determinística gravada em `limitations` e exibida no histórico.
+    pub fn limitation_line(&self) -> String {
+        let path = self.path.as_deref().unwrap_or("-");
+        let expires = self.expires_on.as_deref().unwrap_or("-");
+        let line = self
+            .finding_line
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_owned());
+        format!(
+            "{} regra={} | origem={} | destino={} | arquivo={} | achado={} | emissao={} | linha={} | expira_em={} | justificativa={}",
+            Self::PREFIX,
+            self.rule,
+            self.from,
+            self.to,
+            path,
+            self.finding_id,
+            self.rule_id,
+            line,
+            expires,
+            self.justification
+        )
+    }
+}
+
 /// Achado estruturado com regra, evidência e sugestão rastreáveis.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Finding {

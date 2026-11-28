@@ -7,14 +7,18 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::analysis::{Analysis, DependencyEdge, DependencyKind, ReviewReason};
-use crate::contract::{Contract, Layer};
+use crate::contract::{Contract, CustomRule, Domain, Exception, Layer, RuleSeverity};
 use crate::discovery::{Inventory, matches_pattern};
-use crate::findings::{Finding, Severity};
+use crate::findings::{AppliedException, Finding, Severity};
 
 /// Identificador estável da regra de dependência proibida.
 pub const RULE_DEPENDENCY_NOT_ALLOWED: &str = "dep.not_allowed";
 /// Identificador estável da regra de dependência entre camadas proibida.
 pub const RULE_LAYER_NOT_ALLOWED: &str = "dep.layer_not_allowed";
+/// Identificador estável da regra de dependência entre domínios proibida.
+pub const RULE_DOMAIN_NOT_ALLOWED: &str = "dep.domain_not_allowed";
+/// Identificador estável da regra personalizada declarada no contrato v3.
+pub const RULE_CUSTOM_NOT_ALLOWED: &str = "dep.custom_not_allowed";
 /// Identificador estável da regra de dependência não resolvida.
 pub const RULE_DEPENDENCY_UNRESOLVED: &str = "dep.unresolved";
 /// Identificador estável da regra de arquivo fora dos módulos do contrato.
@@ -38,11 +42,49 @@ const CONCENTRATION_THRESHOLD: usize = 3;
 /// Limite de arestas exibidas como evidência de um componente cíclico.
 const CYCLE_EVIDENCE_LIMIT: usize = 8;
 
-/// Avalia as regras implementadas e devolve achados ordenados por identificador.
-pub fn evaluate(contract: &Contract, inventory: &Inventory, analysis: &Analysis) -> Vec<Finding> {
-    let mut findings = Vec::new();
-    findings.extend(forbidden_dependency_findings(contract, analysis));
-    findings.extend(layer_dependency_findings(contract, analysis));
+/// Resultado completo da avaliação, incluindo dispensas e limitações locais.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuleEvaluation {
+    /// Achados efetivos, após a aplicação de exceções.
+    pub findings: Vec<Finding>,
+    /// Dispensas aplicadas, sempre visíveis no relatório.
+    pub exceptions_applied: Vec<AppliedException>,
+    /// Limitações locais geradas pela avaliação das dimensões declaradas.
+    pub limitations: Vec<String>,
+}
+
+/// Achado candidato com os dados necessários para conferir exceções.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FindingCandidate {
+    /// Achado que será emitido se nenhuma exceção se aplicar.
+    finding: Finding,
+    /// Origem no escopo da regra que o produziu.
+    from: String,
+    /// Destino no escopo da regra que o produziu.
+    to: String,
+    /// Identificador da regra personalizada, quando aplicável.
+    custom_rule_id: Option<String>,
+}
+
+/// Avalia as regras e preserva exceções aplicadas e limitações locais.
+pub fn evaluate_detailed(
+    contract: &Contract,
+    inventory: &Inventory,
+    analysis: &Analysis,
+) -> RuleEvaluation {
+    let mut candidates = Vec::new();
+    candidates.extend(forbidden_dependency_candidates(contract, analysis));
+    candidates.extend(layer_dependency_candidates(contract, analysis));
+    candidates.extend(domain_dependency_candidates(contract, analysis));
+    candidates.extend(custom_rule_candidates(contract, analysis));
+
+    let mut limitations = Vec::new();
+    limitations.extend(layer_mapping_limitations(contract, analysis));
+    limitations.extend(domain_mapping_limitations(contract, analysis));
+    limitations.sort();
+    limitations.dedup();
+
+    let (mut findings, exceptions_applied) = apply_exceptions(contract, candidates);
     findings.extend(unresolved_dependency_findings(analysis));
     findings.extend(review_findings(analysis));
     findings.extend(cycle_findings(analysis));
@@ -59,11 +101,28 @@ pub fn evaluate(contract: &Contract, inventory: &Inventory, analysis: &Analysis)
     });
     let mut seen_ids = BTreeSet::new();
     findings.retain(|finding| seen_ids.insert(finding.id.clone()));
-    findings
+
+    RuleEvaluation {
+        findings,
+        exceptions_applied,
+        limitations,
+    }
 }
 
-/// Converte arestas proibidas em violações comprovadas.
-fn forbidden_dependency_findings(contract: &Contract, analysis: &Analysis) -> Vec<Finding> {
+/// Avalia as regras implementadas e devolve achados ordenados por identificador.
+///
+/// Esta função mantém a assinatura usada pelos testes e chamadores que só
+/// precisam dos achados. A auditoria usa `evaluate_detailed` para preservar
+/// também as exceções aplicadas.
+pub fn evaluate(contract: &Contract, inventory: &Inventory, analysis: &Analysis) -> Vec<Finding> {
+    evaluate_detailed(contract, inventory, analysis).findings
+}
+
+/// Converte arestas proibidas pelo módulo em candidatos a achado.
+fn forbidden_dependency_candidates(
+    contract: &Contract,
+    analysis: &Analysis,
+) -> Vec<FindingCandidate> {
     analysis
         .edges
         .iter()
@@ -83,35 +142,40 @@ fn forbidden_dependency_findings(contract: &Contract, analysis: &Analysis) -> Ve
                 })
                 .unwrap_or_else(|| "dependências do contrato".to_owned());
 
-            Finding {
-                id: format!(
-                    "{}:{}:{}:{}",
-                    RULE_DEPENDENCY_NOT_ALLOWED, edge.from, edge.to, edge.path
-                ),
-                rule_id: RULE_DEPENDENCY_NOT_ALLOWED.to_owned(),
-                severity: Severity::Error,
-                title: format!("Dependência não permitida: {} -> {}", edge.from, edge.to),
-                message: format!(
-                    "O módulo {} usa {}, mas o contrato não permite essa dependência.",
-                    edge.from, edge.to
-                ),
-                path: edge.path.clone(),
-                line_start: edge.line,
-                line_end: edge.line,
-                evidence: edge.evidence.clone().or_else(|| Some(edge.detail.clone())),
-                expected: allowed,
-                suggestion: format!(
-                    "Revise o uso de {} ou atualize allowed_dependencies de {} no contrato.",
-                    edge.to, edge.from
-                ),
-                confidence: None,
+            FindingCandidate {
+                finding: Finding {
+                    id: format!(
+                        "{}:{}:{}:{}",
+                        RULE_DEPENDENCY_NOT_ALLOWED, edge.from, edge.to, edge.path
+                    ),
+                    rule_id: RULE_DEPENDENCY_NOT_ALLOWED.to_owned(),
+                    severity: Severity::Error,
+                    title: format!("Dependência não permitida: {} -> {}", edge.from, edge.to),
+                    message: format!(
+                        "O módulo {} usa {}, mas o contrato não permite essa dependência.",
+                        edge.from, edge.to
+                    ),
+                    path: edge.path.clone(),
+                    line_start: edge.line,
+                    line_end: edge.line,
+                    evidence: edge.evidence.clone().or_else(|| Some(edge.detail.clone())),
+                    expected: allowed,
+                    suggestion: format!(
+                        "Revise o uso de {} ou atualize allowed_dependencies de {} no contrato.",
+                        edge.to, edge.from
+                    ),
+                    confidence: None,
+                },
+                from: edge.from.clone(),
+                to: edge.to.clone(),
+                custom_rule_id: None,
             }
         })
         .collect()
 }
 
 /// Converte arestas permitidas pelo módulo, mas proibidas pela camada.
-fn layer_dependency_findings(contract: &Contract, analysis: &Analysis) -> Vec<Finding> {
+fn layer_dependency_candidates(contract: &Contract, analysis: &Analysis) -> Vec<FindingCandidate> {
     let Some(layers) = contract.normalized_layers() else {
         return Vec::new();
     };
@@ -119,15 +183,7 @@ fn layer_dependency_findings(contract: &Contract, analysis: &Analysis) -> Vec<Fi
         return Vec::new();
     }
 
-    let module_layers: BTreeMap<&str, &Layer> = layers
-        .iter()
-        .flat_map(|layer| {
-            layer
-                .modules
-                .iter()
-                .map(move |module| (module.as_str(), layer))
-        })
-        .collect();
+    let module_layers = module_layers(layers);
 
     analysis
         .edges
@@ -150,32 +206,63 @@ fn layer_dependency_findings(contract: &Contract, analysis: &Analysis) -> Vec<Fi
                 source_layer.allowed_dependencies.join(", ")
             };
 
-            Some(Finding {
-                id: format!(
-                    "{}:{}:{}:{}",
-                    RULE_LAYER_NOT_ALLOWED, edge.from, edge.to, edge.path
-                ),
-                rule_id: RULE_LAYER_NOT_ALLOWED.to_owned(),
-                severity: Severity::Error,
-                title: format!(
-                    "Dependência entre camadas não permitida: {} -> {}",
-                    source_layer.name, target_layer.name
-                ),
-                message: format!(
-                    "A camada {} usa {}, mas a camada não permite essa dependência.",
-                    source_layer.name, target_layer.name
-                ),
-                path: edge.path.clone(),
-                line_start: edge.line,
-                line_end: edge.line,
-                evidence: edge.evidence.clone().or_else(|| Some(edge.detail.clone())),
-                expected: allowed,
-                suggestion: format!(
-                    "Revise o uso de {} ou atualize allowed_dependencies da camada {} no contrato.",
-                    edge.to, source_layer.name
-                ),
-                confidence: None,
+            Some(FindingCandidate {
+                finding: Finding {
+                    id: format!(
+                        "{}:{}:{}:{}",
+                        RULE_LAYER_NOT_ALLOWED, edge.from, edge.to, edge.path
+                    ),
+                    rule_id: RULE_LAYER_NOT_ALLOWED.to_owned(),
+                    severity: Severity::Error,
+                    title: format!(
+                        "Dependência entre camadas não permitida: {} -> {}",
+                        source_layer.name, target_layer.name
+                    ),
+                    message: format!(
+                        "A camada {} usa {}, mas a camada não permite essa dependência.",
+                        source_layer.name, target_layer.name
+                    ),
+                    path: edge.path.clone(),
+                    line_start: edge.line,
+                    line_end: edge.line,
+                    evidence: edge.evidence.clone().or_else(|| Some(edge.detail.clone())),
+                    expected: allowed,
+                    suggestion: format!(
+                        "Revise o uso de {} ou atualize allowed_dependencies da camada {} no contrato.",
+                        edge.to, source_layer.name
+                    ),
+                    confidence: None,
+                },
+                from: source_layer.name.clone(),
+                to: target_layer.name.clone(),
+                custom_rule_id: None,
             })
+        })
+        .collect()
+}
+
+/// Associa cada módulo à camada declarada, em mapa ordenado.
+fn module_layers(layers: &[Layer]) -> BTreeMap<&str, &Layer> {
+    layers
+        .iter()
+        .flat_map(|layer| {
+            layer
+                .modules
+                .iter()
+                .map(move |module| (module.as_str(), layer))
+        })
+        .collect()
+}
+
+/// Associa cada módulo ao domínio declarado, em mapa ordenado.
+fn module_domains(domains: &[Domain]) -> BTreeMap<&str, &Domain> {
+    domains
+        .iter()
+        .flat_map(|domain| {
+            domain
+                .modules
+                .iter()
+                .map(move |module| (module.as_str(), domain))
         })
         .collect()
 }
@@ -215,6 +302,324 @@ pub fn layer_mapping_limitations(contract: &Contract, analysis: &Analysis) -> Ve
     }
 
     limitations.into_iter().collect()
+}
+
+/// Registra arestas resolvidas cujos módulos não puderam ser associados a domínios.
+///
+/// Um módulo pode ficar fora de todos os domínios; isso não é violação. Quando
+/// apenas um dos lados possui domínio, nenhuma conclusão de domínio é emitida.
+pub fn domain_mapping_limitations(contract: &Contract, analysis: &Analysis) -> Vec<String> {
+    let Some(domains) = contract.normalized_domains() else {
+        return Vec::new();
+    };
+    if domains.is_empty() {
+        return Vec::new();
+    }
+
+    let mapped_modules: BTreeSet<&str> = domains
+        .iter()
+        .flat_map(|domain| domain.modules.iter().map(String::as_str))
+        .collect();
+    let mut limitations = BTreeSet::new();
+    for edge in analysis.edges.iter().filter(|edge| {
+        matches!(
+            edge.kind,
+            DependencyKind::Allowed | DependencyKind::Forbidden
+        )
+    }) {
+        if !mapped_modules.contains(edge.from.as_str())
+            || !mapped_modules.contains(edge.to.as_str())
+        {
+            limitations.insert(format!(
+                "aresta {} -> {} em {} não pôde ser associada a domínios; nenhuma conclusão de domínio foi emitida",
+                edge.from, edge.to, edge.path
+            ));
+        }
+    }
+
+    limitations.into_iter().collect()
+}
+
+/// Converte arestas permitidas por módulo e camada, mas proibidas pelo domínio.
+fn domain_dependency_candidates(contract: &Contract, analysis: &Analysis) -> Vec<FindingCandidate> {
+    let Some(domains) = contract.normalized_domains() else {
+        return Vec::new();
+    };
+    if domains.is_empty() {
+        return Vec::new();
+    }
+
+    let module_domains = module_domains(domains);
+    let layers = contract.normalized_layers().unwrap_or_default();
+    let layers_map = module_layers(layers);
+
+    analysis
+        .edges
+        .iter()
+        .filter(|edge| edge.kind == DependencyKind::Allowed)
+        .filter_map(|edge| {
+            if !layers.is_empty() {
+                let source_layer = layers_map.get(edge.from.as_str()).copied()?;
+                let target_layer = layers_map.get(edge.to.as_str()).copied()?;
+                if !source_layer
+                    .allowed_dependencies
+                    .iter()
+                    .any(|name| name == &target_layer.name)
+                {
+                    return None;
+                }
+            }
+
+            let source_domain = module_domains.get(edge.from.as_str()).copied()?;
+            let target_domain = module_domains.get(edge.to.as_str()).copied()?;
+            if source_domain
+                .allowed_dependencies
+                .iter()
+                .any(|name| name == &target_domain.name)
+            {
+                return None;
+            }
+
+            let allowed = if source_domain.allowed_dependencies.is_empty() {
+                "nenhuma dependência permitida".to_owned()
+            } else {
+                source_domain.allowed_dependencies.join(", ")
+            };
+
+            Some(FindingCandidate {
+                finding: Finding {
+                    id: format!(
+                        "{}:{}:{}:{}",
+                        RULE_DOMAIN_NOT_ALLOWED, edge.from, edge.to, edge.path
+                    ),
+                    rule_id: RULE_DOMAIN_NOT_ALLOWED.to_owned(),
+                    severity: Severity::Error,
+                    title: format!(
+                        "Dependência entre domínios não permitida: {} -> {}",
+                        source_domain.name, target_domain.name
+                    ),
+                    message: format!(
+                        "O domínio {} usa {}, mas o domínio não permite essa dependência.",
+                        source_domain.name, target_domain.name
+                    ),
+                    path: edge.path.clone(),
+                    line_start: edge.line,
+                    line_end: edge.line,
+                    evidence: edge.evidence.clone().or_else(|| Some(edge.detail.clone())),
+                    expected: allowed,
+                    suggestion: format!(
+                        "Revise o uso de {} ou atualize allowed_dependencies do domínio {} no contrato.",
+                        edge.to, source_domain.name
+                    ),
+                    confidence: None,
+                },
+                from: source_domain.name.clone(),
+                to: target_domain.name.clone(),
+                custom_rule_id: None,
+            })
+        })
+        .collect()
+}
+
+/// Avalia regras personalizadas que não foram antecipadas por uma negação nativa.
+fn custom_rule_candidates(contract: &Contract, analysis: &Analysis) -> Vec<FindingCandidate> {
+    if contract.architecture.rules.is_empty() {
+        return Vec::new();
+    }
+
+    let layers = contract.normalized_layers().unwrap_or_default();
+    let layers_map = module_layers(layers);
+    let domains = contract.normalized_domains().unwrap_or_default();
+    let domains_map = module_domains(domains);
+    let mut rules: Vec<&CustomRule> = contract.architecture.rules.iter().collect();
+    rules.sort_by(|left, right| left.id.cmp(&right.id));
+
+    let mut candidates = Vec::new();
+    for edge in analysis.edges.iter().filter(|edge| {
+        edge.kind == DependencyKind::Allowed
+            && !native_dimensions_deny(contract, edge, &layers_map, &domains_map)
+    }) {
+        for rule in &rules {
+            let (from, to) = match custom_rule_endpoints(rule, edge, &layers_map, &domains_map) {
+                Some(endpoints) => endpoints,
+                None => continue,
+            };
+            let severity = match rule.severity {
+                RuleSeverity::Error => Severity::Error,
+                RuleSeverity::NeedsReview => Severity::NeedsReview,
+            };
+            candidates.push(FindingCandidate {
+                finding: Finding {
+                    id: format!(
+                        "{}:{}:{}:{}:{}",
+                        RULE_CUSTOM_NOT_ALLOWED, rule.id, edge.from, edge.to, edge.path
+                    ),
+                    rule_id: RULE_CUSTOM_NOT_ALLOWED.to_owned(),
+                    severity,
+                    title: format!("Regra {} proíbe {} -> {}", rule.id, from, to),
+                    message: format!(
+                        "A regra personalizada {} proíbe a relação {} -> {}. {}",
+                        rule.id, from, to, rule.justification
+                    ),
+                    path: edge.path.clone(),
+                    line_start: edge.line,
+                    line_end: edge.line,
+                    evidence: edge.evidence.clone().or_else(|| Some(edge.detail.clone())),
+                    expected: format!("Regra {}: {}", rule.id, rule.justification),
+                    suggestion: format!(
+                        "Revise a relação {} -> {} ou remova a regra {} com revisão explícita.",
+                        from, to, rule.id
+                    ),
+                    confidence: None,
+                },
+                from: from.to_owned(),
+                to: to.to_owned(),
+                custom_rule_id: Some(rule.id.clone()),
+            });
+        }
+    }
+    candidates
+}
+
+/// Indica se módulo, camada ou domínio já negou a aresta.
+fn native_dimensions_deny(
+    contract: &Contract,
+    edge: &DependencyEdge,
+    layers_map: &BTreeMap<&str, &Layer>,
+    domains_map: &BTreeMap<&str, &Domain>,
+) -> bool {
+    let layers = contract.normalized_layers().unwrap_or_default();
+    if !layers.is_empty() {
+        let Some(source) = layers_map.get(edge.from.as_str()).copied() else {
+            return true;
+        };
+        let Some(target) = layers_map.get(edge.to.as_str()).copied() else {
+            return true;
+        };
+        if !source
+            .allowed_dependencies
+            .iter()
+            .any(|name| name == &target.name)
+        {
+            return true;
+        }
+    }
+
+    let domains = contract.normalized_domains().unwrap_or_default();
+    if !domains.is_empty() {
+        let Some(source) = domains_map.get(edge.from.as_str()).copied() else {
+            return true;
+        };
+        let Some(target) = domains_map.get(edge.to.as_str()).copied() else {
+            return true;
+        };
+        if !source
+            .allowed_dependencies
+            .iter()
+            .any(|name| name == &target.name)
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Resolve os participantes de uma regra personalizada para uma aresta.
+fn custom_rule_endpoints<'a>(
+    rule: &CustomRule,
+    edge: &'a DependencyEdge,
+    layers_map: &'a BTreeMap<&'a str, &'a Layer>,
+    domains_map: &'a BTreeMap<&'a str, &'a Domain>,
+) -> Option<(&'a str, &'a str)> {
+    match rule.scope {
+        crate::contract::RuleScope::Module => {
+            if rule.from == edge.from && rule.to == edge.to {
+                Some((edge.from.as_str(), edge.to.as_str()))
+            } else {
+                None
+            }
+        }
+        crate::contract::RuleScope::Layer => {
+            let source = layers_map.get(edge.from.as_str()).copied()?;
+            let target = layers_map.get(edge.to.as_str()).copied()?;
+            if source.name == rule.from && target.name == rule.to {
+                Some((source.name.as_str(), target.name.as_str()))
+            } else {
+                None
+            }
+        }
+        crate::contract::RuleScope::Domain => {
+            let source = domains_map.get(edge.from.as_str()).copied()?;
+            let target = domains_map.get(edge.to.as_str()).copied()?;
+            if source.name == rule.from && target.name == rule.to {
+                Some((source.name.as_str(), target.name.as_str()))
+            } else {
+                None
+            }
+        }
+    }
+}
+
+/// Aplica exceções locais aos candidatos, preservando as dispensas aplicadas.
+fn apply_exceptions(
+    contract: &Contract,
+    candidates: Vec<FindingCandidate>,
+) -> (Vec<Finding>, Vec<AppliedException>) {
+    let exceptions = &contract.architecture.exceptions;
+    let mut findings = Vec::new();
+    let mut applied = Vec::new();
+
+    for candidate in candidates {
+        let match_found = exceptions
+            .iter()
+            .find(|exception| exception_matches(exception, &candidate));
+        match match_found {
+            Some(exception) => applied.push(AppliedException {
+                rule: exception.rule.clone(),
+                rule_id: candidate.finding.rule_id.clone(),
+                from: exception.from.clone(),
+                to: exception.to.clone(),
+                path: exception.path.clone(),
+                justification: exception.justification.clone(),
+                expires_on: exception.expires_on.clone(),
+                finding_id: candidate.finding.id.clone(),
+                finding_path: candidate.finding.path.clone(),
+                finding_line: candidate.finding.line_start,
+            }),
+            None => findings.push(candidate.finding),
+        }
+    }
+
+    applied.sort_by(|left, right| {
+        left.finding_id
+            .cmp(&right.finding_id)
+            .then_with(|| left.rule.cmp(&right.rule))
+    });
+    (findings, applied)
+}
+
+/// Indica se uma exceção dispensa exatamente o candidato informado.
+fn exception_matches(exception: &Exception, candidate: &FindingCandidate) -> bool {
+    if exception.from != candidate.from || exception.to != candidate.to {
+        return false;
+    }
+    if let Some(path) = &exception.path
+        && path != &candidate.finding.path
+    {
+        return false;
+    }
+    exception.rule == candidate.finding.rule_id
+        || candidate.custom_rule_id.as_deref() == Some(exception.rule.as_str())
+}
+
+/// Adaptador de teste que expõe apenas os achados candidatos do módulo.
+#[cfg(test)]
+fn forbidden_dependency_findings(contract: &Contract, analysis: &Analysis) -> Vec<Finding> {
+    forbidden_dependency_candidates(contract, analysis)
+        .into_iter()
+        .map(|candidate| candidate.finding)
+        .collect()
 }
 
 /// Converte arestas não resolvidas em revisão necessária.
@@ -772,7 +1177,7 @@ mod tests {
     use super::*;
     use crate::analysis::{DependencyEdge, ReviewItem, analyze};
     use crate::audit::audit_project;
-    use crate::contract::{Module, load_contract, parse_contract};
+    use crate::contract::{Module, RuleScope, load_contract, parse_contract};
     use crate::discovery::discover;
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
@@ -1126,6 +1531,8 @@ allowed_dependencies = ["application"]
     fn stable_rule_ids_are_declared() {
         assert_eq!(RULE_DEPENDENCY_NOT_ALLOWED, "dep.not_allowed");
         assert_eq!(RULE_LAYER_NOT_ALLOWED, "dep.layer_not_allowed");
+        assert_eq!(RULE_DOMAIN_NOT_ALLOWED, "dep.domain_not_allowed");
+        assert_eq!(RULE_CUSTOM_NOT_ALLOWED, "dep.custom_not_allowed");
         assert_eq!(RULE_DEPENDENCY_UNRESOLVED, "dep.unresolved");
         assert_eq!(RULE_FILE_UNMAPPED, "file.unmapped");
         assert_eq!(RULE_FILE_AMBIGUOUS_MODULE, "file.ambiguous_module");
@@ -1512,5 +1919,171 @@ allowed_dependencies = ["application"]
             finding.evidence.as_deref(),
             Some("isolado -> isolado (src/isolado-isolado.rs:1)")
         );
+    }
+
+    /// Contrato v3 da fixture, sem exceções e com a travessia de domínio opcional.
+    fn v3_rule_contract(allow_sales_to_billing: bool) -> Contract {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/projects/contract_v3/auditor.toml");
+        let mut contract = load_contract(&path).expect("v3 fixture must load");
+        contract.architecture.exceptions.clear();
+        if allow_sales_to_billing {
+            contract.architecture.domains[1].allowed_dependencies = vec!["billing".to_owned()];
+            contract.architecture.domains[2]
+                .allowed_dependencies
+                .clear();
+        }
+        contract
+    }
+
+    /// Conta achados de um `rule_id` em uma lista de achados.
+    fn count_rule(findings: &[Finding], rule_id: &str) -> usize {
+        findings
+            .iter()
+            .filter(|finding| finding.rule_id == rule_id)
+            .count()
+    }
+
+    #[test]
+    fn module_denial_stops_the_v3_chain() {
+        let contract = v3_rule_contract(false);
+        let analysis = analysis_with_edges(vec![typed_edge(
+            "application",
+            "domain",
+            DependencyKind::Forbidden,
+        )]);
+
+        let findings = evaluate(&contract, &contract_inventory(&contract), &analysis);
+        assert_eq!(count_rule(&findings, RULE_DEPENDENCY_NOT_ALLOWED), 1);
+        assert_eq!(count_rule(&findings, RULE_LAYER_NOT_ALLOWED), 0);
+        assert_eq!(count_rule(&findings, RULE_DOMAIN_NOT_ALLOWED), 0);
+        assert_eq!(count_rule(&findings, RULE_CUSTOM_NOT_ALLOWED), 0);
+    }
+
+    #[test]
+    fn layer_denial_stops_before_domain_and_custom_rules() {
+        let mut contract = v3_rule_contract(true);
+        contract.architecture.layers[1].allowed_dependencies.clear();
+        contract.architecture.rules.push(CustomRule {
+            id: "guarda".to_owned(),
+            scope: RuleScope::Module,
+            from: "application".to_owned(),
+            to: "billing".to_owned(),
+            severity: RuleSeverity::Error,
+            justification: "Regra sintética".to_owned(),
+        });
+        let analysis = analysis_with_edges(vec![typed_edge(
+            "application",
+            "billing",
+            DependencyKind::Allowed,
+        )]);
+
+        let findings = evaluate(&contract, &contract_inventory(&contract), &analysis);
+        assert_eq!(count_rule(&findings, RULE_LAYER_NOT_ALLOWED), 1);
+        assert_eq!(count_rule(&findings, RULE_DOMAIN_NOT_ALLOWED), 0);
+        assert_eq!(count_rule(&findings, RULE_CUSTOM_NOT_ALLOWED), 0);
+    }
+
+    #[test]
+    fn domain_denial_stops_before_custom_rules() {
+        let mut contract = v3_rule_contract(false);
+        contract.architecture.rules.push(CustomRule {
+            id: "guarda".to_owned(),
+            scope: RuleScope::Domain,
+            from: "sales".to_owned(),
+            to: "billing".to_owned(),
+            severity: RuleSeverity::Error,
+            justification: "Regra sintética".to_owned(),
+        });
+        let analysis = analysis_with_edges(vec![typed_edge(
+            "application",
+            "billing",
+            DependencyKind::Allowed,
+        )]);
+
+        let findings = evaluate(&contract, &contract_inventory(&contract), &analysis);
+        assert_eq!(count_rule(&findings, RULE_DOMAIN_NOT_ALLOWED), 1);
+        assert_eq!(count_rule(&findings, RULE_CUSTOM_NOT_ALLOWED), 0);
+    }
+
+    #[test]
+    fn declarative_rule_flags_an_allowed_native_edge() {
+        let mut contract = v3_rule_contract(true);
+        contract.architecture.rules.push(CustomRule {
+            id: "guarda".to_owned(),
+            scope: RuleScope::Module,
+            from: "application".to_owned(),
+            to: "billing".to_owned(),
+            severity: RuleSeverity::NeedsReview,
+            justification: "Integração sensível exige revisão".to_owned(),
+        });
+        let analysis = analysis_with_edges(vec![typed_edge(
+            "application",
+            "billing",
+            DependencyKind::Allowed,
+        )]);
+
+        let findings = evaluate(&contract, &contract_inventory(&contract), &analysis);
+        assert_eq!(count_rule(&findings, RULE_CUSTOM_NOT_ALLOWED), 1);
+        let finding = findings
+            .iter()
+            .find(|finding| finding.rule_id == RULE_CUSTOM_NOT_ALLOWED)
+            .expect("custom finding must exist");
+        assert_eq!(finding.severity, Severity::NeedsReview);
+        assert!(finding.id.starts_with("dep.custom_not_allowed:guarda:"));
+        assert!(
+            finding
+                .message
+                .contains("Integração sensível exige revisão")
+        );
+    }
+
+    #[test]
+    fn exception_suppresses_the_finding_but_stays_visible() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/projects/contract_v3/auditor.toml");
+        let contract = load_contract(&path).expect("v3 fixture must load");
+        let analysis = analysis_with_edges(vec![DependencyEdge {
+            from: "application".to_owned(),
+            to: "billing".to_owned(),
+            kind: DependencyKind::Allowed,
+            path: "src/application/service.rs".to_owned(),
+            line: Some(1),
+            evidence: Some("use billing::Invoice;".to_owned()),
+            detail: "aresta sintética".to_owned(),
+        }]);
+
+        let evaluation = evaluate_detailed(&contract, &contract_inventory(&contract), &analysis);
+        assert_eq!(count_rule(&evaluation.findings, RULE_DOMAIN_NOT_ALLOWED), 0);
+        assert_eq!(
+            count_rule(&evaluation.findings, RULE_DEPENDENCY_NOT_ALLOWED),
+            0
+        );
+        assert_eq!(evaluation.exceptions_applied.len(), 1);
+        let applied = &evaluation.exceptions_applied[0];
+        assert_eq!(applied.rule, RULE_DOMAIN_NOT_ALLOWED);
+        assert_eq!(applied.rule_id, RULE_DOMAIN_NOT_ALLOWED);
+        assert_eq!(applied.from, "sales");
+        assert_eq!(applied.to, "billing");
+        assert_eq!(applied.expires_on.as_deref(), Some("2026-12-31"));
+        assert!(applied.limitation_line().contains("Integração temporária"));
+    }
+
+    #[test]
+    fn unmapped_domain_edge_is_a_limitation_not_an_error() {
+        let contract = v3_rule_contract(false);
+        let analysis = analysis_with_edges(vec![typed_edge(
+            "observabilidade",
+            "application",
+            DependencyKind::Allowed,
+        )]);
+
+        let evaluation = evaluate_detailed(&contract, &contract_inventory(&contract), &analysis);
+        assert_eq!(count_rule(&evaluation.findings, RULE_DOMAIN_NOT_ALLOWED), 0);
+        assert_eq!(count_rule(&evaluation.findings, RULE_CUSTOM_NOT_ALLOWED), 0);
+        assert!(evaluation.limitations.iter().any(|line| {
+            line.contains("observabilidade -> application")
+                && line.contains("nenhuma conclusão de domínio")
+        }));
     }
 }

@@ -2,7 +2,7 @@
 # Revise, ajuste e confirme explicitamente antes de considerar este contrato aprovado.
 # O auditor nunca altera este arquivo automaticamente.
 
-schema_version = 1
+schema_version = 3
 
 [project]
 name = "projeto-exemplo"
@@ -31,3 +31,37 @@ name = "infrastructure"
 path = "crates/app/src/infrastructure/**"
 responsibility = "Acesso a banco de dados, arquivos e serviços externos"
 allowed_dependencies = ["domain", "application"]
+
+# Domínios são recortes opcionais de módulos. Um módulo pertence a no máximo um domínio.
+[[architecture.domains]]
+name = "core"
+modules = ["domain"]
+allowed_dependencies = []
+
+[[architecture.domains]]
+name = "application"
+modules = ["application"]
+allowed_dependencies = ["core"]
+
+[[architecture.domains]]
+name = "infrastructure"
+modules = ["infrastructure"]
+allowed_dependencies = ["core", "application"]
+
+# Regras declarativas não executam texto livre; apenas descrevem escopo, origem e destino.
+[[architecture.rules]]
+id = "no-infrastructure-to-domain"
+scope = "module"
+from = "infrastructure"
+to = "domain"
+severity = "needs_review"
+justification = "Infraestrutura deve acessar o domínio apenas por casos de uso explícitos"
+
+# Exceções suprimem o achado, mas permanecem visíveis no relatório e no histórico.
+[[architecture.exceptions]]
+rule = "no-infrastructure-to-domain"
+from = "infrastructure"
+to = "domain"
+path = "crates/app/src/infrastructure/legacy.rs"
+justification = "Ponte legada revisada pelo time; remover na próxima iteração"
+expires_on = "2026-12-31"

@@ -17,8 +17,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::audit::{self, ComplianceRun, DiscoveryReport, ProjectRun};
 use crate::contract::{
-    Architecture, ArchitectureStyle, Contract, ContractError, Layer, Module, Project, Scan,
-    contract_identity, load_contract, parse_contract, render_contract,
+    Architecture, ArchitectureStyle, Contract, ContractError, CustomRule, Domain, Exception, Layer,
+    Module, Project, RuleScope, RuleSeverity, Scan, contract_identity, load_contract,
+    parse_contract, render_contract,
 };
 use crate::discovery::candidates::{Ambiguity, CandidateModule, ObservedDependency};
 use crate::discovery::{ScanOptions, matches_pattern};
@@ -29,14 +30,24 @@ use crate::discovery::{ScanOptions, matches_pattern};
 /// para satisfazer o campo obrigatório do schema e ser editado depois.
 pub const DEFAULT_RESPONSIBILITY: &str = "Responsabilidade a definir";
 
+/// Camadas e direções do preset Clean/Hexagonal, em ordem determinística.
+const CLEAN_HEXAGONAL_LAYERS: [(&str, &[&str]); 4] = [
+    ("domain", &[]),
+    ("application", &["domain"]),
+    ("adapters", &["application", "domain"]),
+    ("framework", &["adapters", "application", "domain"]),
+];
+
 /// Perfil escolhido pelo usuário. Não é gravado no `auditor.toml`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BuilderProfile {
     /// Módulos sem camadas; `layers` precisa permanecer vazio.
     ModularMonolith,
-    /// Módulos distribuídos em camadas declaradas no contrato v2.
+    /// Módulos distribuídos em camadas declaradas pelo usuário.
     LayeredMonolith,
+    /// Camadas explícitas `domain`, `application`, `adapters` e `framework`.
+    CleanHexagonal,
 }
 
 /// Módulo editável do rascunho.
@@ -69,6 +80,54 @@ pub struct DraftLayer {
     pub modules: Vec<String>,
     /// Camadas permitidas como destino.
     pub allowed_dependencies: Vec<String>,
+}
+
+/// Domínio editável do rascunho, representável no schema v3.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DraftDomain {
+    /// Identificador único do domínio.
+    pub name: String,
+    /// Módulos pertencentes a este domínio.
+    pub modules: Vec<String>,
+    /// Domínios permitidos como destino.
+    pub allowed_dependencies: Vec<String>,
+}
+
+/// Exceção editável do rascunho, representável no schema v3.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DraftException {
+    /// Regra nativa ou personalizada dispensada.
+    pub rule: String,
+    /// Origem no escopo da regra.
+    pub from: String,
+    /// Destino no escopo da regra.
+    pub to: String,
+    /// Arquivo exato de origem, quando a dispensa é localizada.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Motivo humano obrigatório.
+    pub justification: String,
+    /// Data de revisão humana, sem efeito automático.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_on: Option<String>,
+}
+
+/// Regra personalizada editável do rascunho, representável no schema v3.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DraftRule {
+    /// Identificador único da regra.
+    pub id: String,
+    /// Escopo de resolução de `from` e `to`.
+    pub scope: RuleScope,
+    /// Origem proibida no escopo escolhido.
+    pub from: String,
+    /// Destino proibido no escopo escolhido.
+    pub to: String,
+    /// Severidade do achado.
+    #[serde(default)]
+    pub severity: RuleSeverity,
+    /// Motivo humano obrigatório.
+    pub justification: String,
 }
 
 /// Tipo de decisão que o usuário precisa tomar antes de gerar o contrato.
@@ -120,7 +179,7 @@ pub struct AmbiguityResolution {
     pub choice: Option<String>,
 }
 
-/// Rascunho completo, editável e convertível em contrato v2.
+/// Rascunho completo, editável e convertível em contrato v3.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContractDraft {
     /// Nome legível do projeto.
@@ -141,9 +200,20 @@ pub struct ContractDraft {
     pub discovered_ambiguities: Vec<Ambiguity>,
     /// Camadas do perfil em camadas.
     pub layers: Vec<DraftLayer>,
+    /// Domínios revisados pelo usuário.
+    #[serde(default)]
+    pub domains: Vec<DraftDomain>,
+    /// Exceções revisadas pelo usuário.
+    #[serde(default)]
+    pub exceptions: Vec<DraftException>,
+    /// Regras personalizadas revisadas pelo usuário.
+    #[serde(default)]
+    pub rules: Vec<DraftRule>,
     /// Escolhas registradas para ambiguidades.
+    #[serde(default)]
     pub resolved_ambiguities: Vec<AmbiguityResolution>,
     /// Decisões ainda necessárias; impedem a geração final.
+    #[serde(default)]
     pub pending_decisions: Vec<PendingDecision>,
 }
 
@@ -160,8 +230,32 @@ pub fn empty_draft(project_name: &str) -> ContractDraft {
         observed_dependencies: Vec::new(),
         discovered_ambiguities: Vec::new(),
         layers: Vec::new(),
+        domains: Vec::new(),
+        exceptions: Vec::new(),
+        rules: Vec::new(),
         resolved_ambiguities: Vec::new(),
         pending_decisions: Vec::new(),
+    }
+}
+
+/// Camadas iniciais do perfil escolhido, ainda sujeitas à revisão humana.
+///
+/// O perfil é um preset do Builder: ele propõe campos declarativos, mas não é
+/// gravado no contrato nem vira uma afirmação de que o motor entende o estilo.
+pub fn preset_layers(profile: BuilderProfile) -> Vec<DraftLayer> {
+    match profile {
+        BuilderProfile::ModularMonolith | BuilderProfile::LayeredMonolith => Vec::new(),
+        BuilderProfile::CleanHexagonal => CLEAN_HEXAGONAL_LAYERS
+            .iter()
+            .map(|(name, allowed)| DraftLayer {
+                name: (*name).to_owned(),
+                modules: Vec::new(),
+                allowed_dependencies: allowed
+                    .iter()
+                    .map(|dependency| (*dependency).to_owned())
+                    .collect(),
+            })
+            .collect(),
     }
 }
 
@@ -230,13 +324,13 @@ pub fn draft_from_discovery(report: &DiscoveryReport) -> ContractDraft {
     draft
 }
 
-/// Converte o rascunho em contrato v2 validado pelo parser oficial.
+/// Converte o rascunho em contrato v3 validado pelo parser oficial.
 pub fn validate_draft(draft: &ContractDraft) -> Result<Contract, ContractError> {
     validate_decisions(draft)?;
     validate_profile(draft)?;
 
     let contract = Contract {
-        schema_version: 2,
+        schema_version: 3,
         project: Project {
             name: draft.project_name.clone(),
         },
@@ -263,6 +357,39 @@ pub fn validate_draft(draft: &ContractDraft) -> Result<Contract, ContractError> 
                     name: layer.name.clone(),
                     modules: layer.modules.clone(),
                     allowed_dependencies: layer.allowed_dependencies.clone(),
+                })
+                .collect(),
+            domains: draft
+                .domains
+                .iter()
+                .map(|domain| Domain {
+                    name: domain.name.clone(),
+                    modules: domain.modules.clone(),
+                    allowed_dependencies: domain.allowed_dependencies.clone(),
+                })
+                .collect(),
+            exceptions: draft
+                .exceptions
+                .iter()
+                .map(|exception| Exception {
+                    rule: exception.rule.clone(),
+                    from: exception.from.clone(),
+                    to: exception.to.clone(),
+                    path: exception.path.clone(),
+                    justification: exception.justification.clone(),
+                    expires_on: exception.expires_on.clone(),
+                })
+                .collect(),
+            rules: draft
+                .rules
+                .iter()
+                .map(|rule| CustomRule {
+                    id: rule.id.clone(),
+                    scope: rule.scope,
+                    from: rule.from.clone(),
+                    to: rule.to.clone(),
+                    severity: rule.severity,
+                    justification: rule.justification.clone(),
                 })
                 .collect(),
         },
@@ -320,10 +447,10 @@ pub struct DraftEffects {
 /// Descreve os efeitos do rascunho sem executar nenhuma regra ou auditoria.
 pub fn draft_effects(draft: &ContractDraft) -> DraftEffects {
     use crate::rules::{
-        RULE_CODE_DUPLICATED, RULE_DEPENDENCY_CYCLE, RULE_DEPENDENCY_NOT_ALLOWED,
-        RULE_DEPENDENCY_UNRESOLVED, RULE_FILE_AMBIGUOUS_MODULE, RULE_FILE_UNMAPPED,
-        RULE_LAYER_NOT_ALLOWED, RULE_MODULE_CONCENTRATION, RULE_MODULE_UNREFERENCED,
-        RULE_MODULE_WITHOUT_FILES,
+        RULE_CODE_DUPLICATED, RULE_CUSTOM_NOT_ALLOWED, RULE_DEPENDENCY_CYCLE,
+        RULE_DEPENDENCY_NOT_ALLOWED, RULE_DEPENDENCY_UNRESOLVED, RULE_DOMAIN_NOT_ALLOWED,
+        RULE_FILE_AMBIGUOUS_MODULE, RULE_FILE_UNMAPPED, RULE_LAYER_NOT_ALLOWED,
+        RULE_MODULE_CONCENTRATION, RULE_MODULE_UNREFERENCED, RULE_MODULE_WITHOUT_FILES,
     };
 
     let mut rule_ids = vec![
@@ -340,10 +467,31 @@ pub fn draft_effects(draft: &ContractDraft) -> DraftEffects {
     if !draft.layers.is_empty() {
         rule_ids.push(RULE_LAYER_NOT_ALLOWED.to_owned());
     }
+    if !draft.domains.is_empty() {
+        rule_ids.push(RULE_DOMAIN_NOT_ALLOWED.to_owned());
+    }
+    if !draft.rules.is_empty() {
+        rule_ids.push(RULE_CUSTOM_NOT_ALLOWED.to_owned());
+    }
     rule_ids.sort();
+    rule_ids.dedup();
+
+    let mut notes = vec![
+        "responsabilidade é texto descritivo, não é interpretada pelo motor".to_owned(),
+        "dependências observadas não são aprovadas automaticamente".to_owned(),
+    ];
+    if !draft.exceptions.is_empty() {
+        notes.push("exceções aplicadas continuam visíveis no relatório e no histórico".to_owned());
+    }
+    if draft.profile == BuilderProfile::CleanHexagonal {
+        notes.push(
+            "Clean/Hexagonal é um preset de camadas declaradas, não uma afirmação de estilo"
+                .to_owned(),
+        );
+    }
 
     DraftEffects {
-        schema_version: 2,
+        schema_version: 3,
         modules: draft.modules.len(),
         layers: draft.layers.len(),
         allowed_dependencies: draft
@@ -352,10 +500,7 @@ pub fn draft_effects(draft: &ContractDraft) -> DraftEffects {
             .map(|module| module.allowed_dependencies.len())
             .sum(),
         rule_ids,
-        notes: vec![
-            "responsabilidade é texto descritivo, não é interpretada pelo motor".to_owned(),
-            "dependências observadas não são aprovadas automaticamente".to_owned(),
-        ],
+        notes,
     }
 }
 
@@ -369,11 +514,7 @@ pub fn draft_from_contract(contract: &Contract) -> ContractDraft {
         include: contract.scan.include.clone(),
         exclude: contract.scan.exclude.clone(),
         style: contract.architecture.style,
-        profile: if contract.architecture.layers.is_empty() {
-            BuilderProfile::ModularMonolith
-        } else {
-            BuilderProfile::LayeredMonolith
-        },
+        profile: profile_from_layers(&contract.architecture.layers),
         modules: contract
             .architecture
             .modules
@@ -400,8 +541,56 @@ pub fn draft_from_contract(contract: &Contract) -> ContractDraft {
                 allowed_dependencies: layer.allowed_dependencies.clone(),
             })
             .collect(),
+        domains: contract
+            .architecture
+            .domains
+            .iter()
+            .map(|domain| DraftDomain {
+                name: domain.name.clone(),
+                modules: domain.modules.clone(),
+                allowed_dependencies: domain.allowed_dependencies.clone(),
+            })
+            .collect(),
+        exceptions: contract
+            .architecture
+            .exceptions
+            .iter()
+            .map(|exception| DraftException {
+                rule: exception.rule.clone(),
+                from: exception.from.clone(),
+                to: exception.to.clone(),
+                path: exception.path.clone(),
+                justification: exception.justification.clone(),
+                expires_on: exception.expires_on.clone(),
+            })
+            .collect(),
+        rules: contract
+            .architecture
+            .rules
+            .iter()
+            .map(|rule| DraftRule {
+                id: rule.id.clone(),
+                scope: rule.scope,
+                from: rule.from.clone(),
+                to: rule.to.clone(),
+                severity: rule.severity,
+                justification: rule.justification.clone(),
+            })
+            .collect(),
         resolved_ambiguities: Vec::new(),
         pending_decisions: Vec::new(),
+    }
+}
+
+/// Escolhe o perfil de revisão a partir da presença de camadas gravadas.
+///
+/// O perfil não está no contrato: uma prévia idêntica à do preset Clean/Hexagonal
+/// continua sendo apresentada como perfil em camadas genérico quando reaberta.
+fn profile_from_layers(layers: &[Layer]) -> BuilderProfile {
+    if layers.is_empty() {
+        BuilderProfile::ModularMonolith
+    } else {
+        BuilderProfile::LayeredMonolith
     }
 }
 
@@ -915,7 +1104,7 @@ fn validate_profile(draft: &ContractDraft) -> Result<(), ContractError> {
                 ));
             }
         }
-        BuilderProfile::LayeredMonolith => {
+        BuilderProfile::LayeredMonolith | BuilderProfile::CleanHexagonal => {
             if draft.layers.is_empty() {
                 return Err(invalid(
                     "perfil em camadas exige ao menos uma camada".to_owned(),
@@ -936,6 +1125,43 @@ fn validate_profile(draft: &ContractDraft) -> Result<(), ContractError> {
                     )));
                 }
             }
+        }
+    }
+
+    if draft.profile == BuilderProfile::CleanHexagonal {
+        validate_clean_preset(draft)?;
+    }
+    Ok(())
+}
+
+/// Confere que o perfil Clean/Hexagonal usa exatamente as camadas do preset.
+fn validate_clean_preset(draft: &ContractDraft) -> Result<(), ContractError> {
+    if draft.layers.len() != CLEAN_HEXAGONAL_LAYERS.len() {
+        return Err(invalid(format!(
+            "perfil clean_hexagonal exige {} camadas (encontrado {})",
+            CLEAN_HEXAGONAL_LAYERS.len(),
+            draft.layers.len()
+        )));
+    }
+    for (name, allowed) in CLEAN_HEXAGONAL_LAYERS {
+        let layer = draft
+            .layers
+            .iter()
+            .find(|candidate| candidate.name == name)
+            .ok_or_else(|| invalid(format!("perfil clean_hexagonal exige a camada {name}")))?;
+        let mut expected: Vec<&str> = allowed.to_vec();
+        let mut actual: Vec<&str> = layer
+            .allowed_dependencies
+            .iter()
+            .map(String::as_str)
+            .collect();
+        expected.sort_unstable();
+        actual.sort_unstable();
+        if expected != actual {
+            return Err(invalid(format!(
+                "camada {name} do preset clean_hexagonal deve permitir {:?}",
+                expected
+            )));
         }
     }
     Ok(())
@@ -1018,24 +1244,32 @@ mod tests {
     }
 
     #[test]
-    fn empty_draft_produces_valid_v2_without_modules() {
+    fn empty_draft_produces_valid_v3_without_modules() {
         let draft = empty_draft("projeto-novo");
         assert_eq!(draft.profile, BuilderProfile::ModularMonolith);
         assert!(draft.modules.is_empty());
         assert!(draft.layers.is_empty());
+        assert!(draft.domains.is_empty());
+        assert!(draft.exceptions.is_empty());
+        assert!(draft.rules.is_empty());
         assert!(draft.pending_decisions.is_empty());
 
         let contract = validate_draft(&draft).expect("draft vazio deve ser válido");
-        assert_eq!(contract.schema_version, 2);
+        assert_eq!(contract.schema_version, 3);
         assert_eq!(
             contract.architecture.style,
             ArchitectureStyle::ModularMonolith
         );
         assert!(contract.architecture.modules.is_empty());
         assert!(contract.architecture.layers.is_empty());
+        assert!(
+            !render_contract(&contract)
+                .expect("contrato deve serializar")
+                .contains("profile")
+        );
 
         let text = render_contract(&contract).expect("contrato deve serializar");
-        assert!(text.contains("schema_version = 2"));
+        assert!(text.contains("schema_version = 3"));
         assert!(text.contains("style = \"modular_monolith\""));
     }
 
@@ -1139,7 +1373,7 @@ mod tests {
         resolve_all_decisions(&mut draft);
 
         let contract = validate_draft(&draft).expect("draft com decisões tomadas deve ser válido");
-        assert_eq!(contract.schema_version, 2);
+        assert_eq!(contract.schema_version, 3);
         let application = contract
             .architecture
             .modules
@@ -1210,6 +1444,66 @@ mod tests {
         });
         let error = validate_draft(&draft).expect_err("módulo em duas camadas deve falhar");
         assert!(error.to_string().contains("camada"));
+    }
+
+    #[test]
+    fn clean_hexagonal_profile_presets_explicit_layers_and_directions() {
+        let mut draft = empty_draft("clean");
+        for name in ["domain", "application", "adapters", "framework"] {
+            draft.modules.push(module(name, &format!("src/{name}/**")));
+        }
+        draft.profile = BuilderProfile::CleanHexagonal;
+        draft.layers = preset_layers(draft.profile);
+        // O preset deixa a associação de módulos ao usuário; sem ela o rascunho
+        // ainda não é um contrato válido, como no perfil em camadas comum.
+        for layer in &mut draft.layers {
+            layer.modules = vec![layer.name.clone()];
+        }
+
+        let contract = validate_draft(&draft).expect("preset deve gerar contrato válido");
+        assert_eq!(contract.schema_version, 3);
+        assert_eq!(contract.architecture.layers.len(), 4);
+        let directions: BTreeMap<&str, Vec<&str>> = contract
+            .architecture
+            .layers
+            .iter()
+            .map(|layer| {
+                (
+                    layer.name.as_str(),
+                    layer
+                        .allowed_dependencies
+                        .iter()
+                        .map(String::as_str)
+                        .collect(),
+                )
+            })
+            .collect();
+        assert_eq!(directions["domain"], Vec::<&str>::new());
+        assert_eq!(directions["application"], ["domain"]);
+        assert_eq!(directions["adapters"], ["application", "domain"]);
+        assert_eq!(
+            directions["framework"],
+            ["adapters", "application", "domain"]
+        );
+        let text = render_contract(&contract).expect("prévia deve serializar");
+        assert!(!text.contains("profile"));
+        assert!(!text.contains("clean_hexagonal"));
+    }
+
+    #[test]
+    fn clean_hexagonal_profile_rejects_a_changed_direction() {
+        let mut draft = empty_draft("clean");
+        draft.modules.push(module("domain", "src/domain/**"));
+        draft.profile = BuilderProfile::CleanHexagonal;
+        draft.layers = preset_layers(draft.profile);
+        draft.layers[0].modules.push("domain".to_owned());
+        draft.layers[0]
+            .allowed_dependencies
+            .push("application".to_owned());
+
+        let error = validate_draft(&draft).expect_err("direção do preset não pode mudar");
+        assert!(error.to_string().contains("clean_hexagonal"));
+        assert!(error.to_string().contains("domain"));
     }
 
     #[test]
@@ -1305,7 +1599,7 @@ mod tests {
         assert!(draft.pending_decisions.is_empty());
         assert!(draft.observed_dependencies.is_empty());
         let reviewed = validate_draft(&draft).expect("draft must be valid");
-        assert_eq!(reviewed.schema_version, 2, "novo contrato é sempre v2");
+        assert_eq!(reviewed.schema_version, 3, "o Builder gera sempre v3");
         assert_eq!(reviewed.project, contract.project);
         assert_eq!(reviewed.scan, contract.scan);
         assert_eq!(reviewed.architecture, contract.architecture);
@@ -1345,9 +1639,14 @@ allowed_dependencies = []
         assert_eq!(draft.profile, BuilderProfile::LayeredMonolith);
         assert_eq!(draft.layers.len(), 1);
         assert_eq!(draft.layers[0].modules, ["domain"]);
+        let reviewed = validate_draft(&draft).expect("draft must be valid");
+
+        assert_eq!(reviewed.schema_version, 3);
+        assert_eq!(reviewed.architecture.layers, contract.architecture.layers);
+        assert_eq!(reviewed.architecture.modules, contract.architecture.modules);
         assert_eq!(
-            validate_draft(&draft).expect("draft must be valid"),
-            contract
+            contract.schema_version, 2,
+            "a fixture original não é reescrita"
         );
     }
 
@@ -1389,7 +1688,7 @@ allowed_dependencies = []
         });
 
         let effects = draft_effects(&draft);
-        assert_eq!(effects.schema_version, 2);
+        assert_eq!(effects.schema_version, 3);
         assert_eq!(effects.modules, 1);
         assert_eq!(effects.layers, 1);
         assert_eq!(effects.allowed_dependencies, 1);
@@ -1566,7 +1865,7 @@ allowed_dependencies = []
             .expect("projeto vazio pode receber contrato planejado");
 
         assert_eq!(outcome.run.mode, crate::audit::ExecutionMode::Compliance);
-        assert_eq!(outcome.saved.schema_version, 2);
+        assert_eq!(outcome.saved.schema_version, 3);
         assert_eq!(
             parse_contract(&outcome.saved.text).expect("reparso do contrato gravado"),
             expected
@@ -1584,7 +1883,7 @@ allowed_dependencies = []
 
         assert!(!outcome.replaced);
         assert_eq!(outcome.run.mode, crate::audit::ExecutionMode::Compliance);
-        assert_eq!(outcome.saved.schema_version, 2);
+        assert_eq!(outcome.saved.schema_version, 3);
         let written =
             std::fs::read_to_string(project.path().join("auditor.toml")).expect("contrato gravado");
         assert_eq!(written, outcome.saved.text);
@@ -1703,8 +2002,8 @@ allowed_dependencies = []
         let draft = draft_from_contract(&original);
 
         assert!(!draft.layers.is_empty(), "camadas devem entrar no rascunho");
-        let contract = validate_draft(&draft).expect("draft v2 válido");
-        assert_eq!(contract.schema_version, 2);
+        let contract = validate_draft(&draft).expect("draft revisado válido");
+        assert_eq!(contract.schema_version, 3);
         assert_eq!(contract.architecture.layers.len(), draft.layers.len());
         assert_eq!(
             std::fs::read(project.path().join("auditor.toml")).expect("contrato preservado"),

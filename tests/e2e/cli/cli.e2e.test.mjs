@@ -70,6 +70,10 @@ test('CLI E2E — init cria contrato sem sobrescrever existente', () => {
     const contractPath = path.join(root, 'auditor.toml');
     assert.ok(existsSync(contractPath));
     const original = readFileSync(contractPath, 'utf8');
+    assert.match(original, /schema_version = 3/);
+    assert.match(original, /\[\[architecture\.domains\]\]/);
+    assert.match(original, /\[\[architecture\.rules\]\]/);
+    assert.match(original, /\[\[architecture\.exceptions\]\]/);
 
     const second = runCli(['init', root]);
     assert.equal(second.code, 2);
@@ -98,6 +102,20 @@ test('CLI E2E — auditoria com contrato preserva modo e achados', () => {
   assert.equal(report.contract.status, 'present');
   assert.ok(Array.isArray(report.findings));
   assert.ok(report.findings.length > 0);
+});
+
+test('CLI E2E — contrato v3 apresenta exceções sem achados ocultos', () => {
+  const run = runCli(['audit', fixture('contract_v3'), '--format', 'json']);
+  assert.equal(run.code, 0, run.stderr);
+  const report = JSON.parse(run.stdout);
+  assert.equal(report.mode, 'compliance');
+  assert.equal(report.contract.schema_version, 3);
+  assert.ok(Array.isArray(report.findings));
+  assert.equal(report.findings.length, 0);
+  assert.ok(Array.isArray(report.exceptions_applied));
+  assert.equal(report.exceptions_applied.length, 2);
+  assert.ok(report.exceptions_applied.some((item) => item.rule === 'dep.domain_not_allowed'));
+  assert.ok(report.limitations.some((line) => line.startsWith('exceção aplicada:')));
 });
 
 test('CLI E2E — diff salvo é aplicado sem executar Git', () => {

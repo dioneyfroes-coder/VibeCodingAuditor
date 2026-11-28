@@ -3,8 +3,11 @@ import { useEffect, useState, type ReactNode } from 'react';
 
 import {
   BUILDER_STEPS,
+  addDraftDomain,
+  addDraftException,
   addDraftLayer,
   addDraftModule,
+  addDraftRule,
   complianceLines,
   decideObservedDependency,
   detectedStatus,
@@ -12,11 +15,15 @@ import {
   diffSummary,
   effectsLine,
   evidenceLine,
+  exceptionLines,
   nextStep,
   observationLines,
   observedDecisionItems,
   previousStep,
+  removeDraftDomain,
+  removeDraftException,
   removeDraftModule,
+  removeDraftRule,
   renameDraftLayer,
   renameDraftModule,
   saveAuthorization,
@@ -25,14 +32,18 @@ import {
   setProfile,
   setResolution,
   toggleLayerModule,
+  updateDraftDomain,
+  updateDraftException,
   updateDraftLayer,
   updateDraftModule,
+  updateDraftRule,
   validationMessage,
   warningText,
   type ContractDiff,
   type ContractDraft,
   type DiscoveryReport,
   type DraftEffects,
+  type DraftLayer,
   type ProjectRunStatus,
   type SaveOutcome,
   type ValidationResult,
@@ -118,6 +129,16 @@ export default function BuilderWizard({ root, onStatus, onClose, onSaved }: Buil
     setConfirming(false);
     setSaveOutcome(null);
     setSaveError(null);
+  };
+
+  /// O preset de camadas vem do núcleo; a interface não repete direções permitidas.
+  const chooseProfile = async (profile: ContractDraft['profile']) => {
+    try {
+      const preset = await invoke<DraftLayer[]>('preset_layers', { profile });
+      mutate((current) => setProfile(current, profile, preset));
+    } catch (failure) {
+      onStatus(builderStatus(String(failure), 'error'));
+    }
   };
 
   const review = async () => {
@@ -324,7 +345,7 @@ export default function BuilderWizard({ root, onStatus, onClose, onSaved }: Buil
           }))}
         />
       </label>
-      <p className="detail">O contrato gerado será v2, mesmo ao revisar um contrato v1.</p>
+      <p className="detail">O contrato gerado será v3, mesmo ao revisar um contrato v1 ou v2.</p>
     </>
   );
 
@@ -335,7 +356,7 @@ export default function BuilderWizard({ root, onStatus, onClose, onSaved }: Buil
           type="radio"
           name="perfil"
           checked={draft.profile === 'modular_monolith'}
-          onChange={() => mutate((currentDraft) => setProfile(currentDraft, 'modular_monolith'))}
+          onChange={() => void chooseProfile('modular_monolith')}
         />
         Monólito modular sem camadas
       </label>
@@ -344,12 +365,22 @@ export default function BuilderWizard({ root, onStatus, onClose, onSaved }: Buil
           type="radio"
           name="perfil"
           checked={draft.profile === 'layered_monolith'}
-          onChange={() => mutate((currentDraft) => setProfile(currentDraft, 'layered_monolith'))}
+          onChange={() => void chooseProfile('layered_monolith')}
         />
         Monólito modular em camadas
       </label>
+      <label className="choice">
+        <input
+          type="radio"
+          name="perfil"
+          checked={draft.profile === 'clean_hexagonal'}
+          onChange={() => void chooseProfile('clean_hexagonal')}
+        />
+        Clean/Hexagonal (preset de camadas explícitas)
+      </label>
       <p className="detail">
-        Estilo: <code>{draft.style}</code>. Camadas só são gravadas no perfil em camadas.
+        Estilo: <code>{draft.style}</code>. Perfis em camadas gravam <code>architecture.layers</code>;
+        o perfil não é escrito no contrato.
       </p>
     </>
   );
@@ -426,7 +457,7 @@ export default function BuilderWizard({ root, onStatus, onClose, onSaved }: Buil
   );
 
   const layersStep = () => {
-    if (draft.profile !== 'layered_monolith') {
+    if (draft.profile === 'modular_monolith') {
       return (
         <p className="detail">
           O perfil sem camadas não grava <code>architecture.layers</code>. Volte à etapa
@@ -485,6 +516,227 @@ export default function BuilderWizard({ root, onStatus, onClose, onSaved }: Buil
       </>
     );
   };
+
+  const domainsStep = () => (
+    <>
+      <p className="detail">
+        Domínios são recortes opcionais: um módulo pertence a no máximo um domínio.
+      </p>
+      {draft.domains.length === 0 && <p className="detail">Nenhum domínio declarado.</p>}
+      <ul className="builder-list">
+        {draft.domains.map((domain) => (
+          <li key={domain.name} className="builder-card">
+            <label>
+              Nome
+              <input
+                value={domain.name}
+                onChange={(event) => mutate((current) =>
+                  updateDraftDomain(current, domain.name, { name: event.target.value }),
+                )}
+              />
+            </label>
+            <label>
+              Módulos (separados por vírgula)
+              <input
+                value={domain.modules.join(', ')}
+                onChange={(event) => mutate((current) =>
+                  updateDraftDomain(current, domain.name, {
+                    modules: patternLines(event.target.value.replace(/,/g, '\n')),
+                  }),
+                )}
+              />
+            </label>
+            <label>
+              Domínios permitidos como destino
+              <input
+                value={domain.allowed_dependencies.join(', ')}
+                onChange={(event) => mutate((current) =>
+                  updateDraftDomain(current, domain.name, {
+                    allowed_dependencies: patternLines(event.target.value.replace(/,/g, '\n')),
+                  }),
+                )}
+              />
+            </label>
+            <button type="button" onClick={() => mutate((current) => removeDraftDomain(current, domain.name))}>
+              Remover
+            </button>
+          </li>
+        ))}
+      </ul>
+      <button type="button" onClick={() => mutate(addDraftDomain)}>
+        Adicionar domínio
+      </button>
+    </>
+  );
+
+  const rulesStep = () => (
+    <>
+      <p className="detail">
+        Regras são declarativas: apenas escopo, origem, destino e severidade. Nenhum texto livre
+        é executado.
+      </p>
+      {draft.rules.length === 0 && <p className="detail">Nenhuma regra personalizada.</p>}
+      <ul className="builder-list">
+        {draft.rules.map((rule) => (
+          <li key={rule.id} className="builder-card">
+            <div className="builder-grid">
+              <label>
+                ID
+                <input
+                  value={rule.id}
+                  onChange={(event) => mutate((current) =>
+                    updateDraftRule(current, rule.id, { id: event.target.value }),
+                  )}
+                />
+              </label>
+              <label>
+                Escopo
+                <select
+                  value={rule.scope}
+                  onChange={(event) => mutate((current) =>
+                    updateDraftRule(current, rule.id, {
+                      scope: event.target.value as typeof rule.scope,
+                    }),
+                  )}
+                >
+                  <option value="module">módulo</option>
+                  <option value="layer">camada</option>
+                  <option value="domain">domínio</option>
+                </select>
+              </label>
+              <label>
+                Origem
+                <input
+                  value={rule.from}
+                  onChange={(event) => mutate((current) =>
+                    updateDraftRule(current, rule.id, { from: event.target.value }),
+                  )}
+                />
+              </label>
+              <label>
+                Destino
+                <input
+                  value={rule.to}
+                  onChange={(event) => mutate((current) =>
+                    updateDraftRule(current, rule.id, { to: event.target.value }),
+                  )}
+                />
+              </label>
+              <label>
+                Severidade
+                <select
+                  value={rule.severity}
+                  onChange={(event) => mutate((current) =>
+                    updateDraftRule(current, rule.id, {
+                      severity: event.target.value as typeof rule.severity,
+                    }),
+                  )}
+                >
+                  <option value="error">erro</option>
+                  <option value="needs_review">precisa de revisão</option>
+                </select>
+              </label>
+            </div>
+            <label>
+              Justificativa
+              <input
+                value={rule.justification}
+                onChange={(event) => mutate((current) =>
+                  updateDraftRule(current, rule.id, { justification: event.target.value }),
+                )}
+              />
+            </label>
+            <button type="button" onClick={() => mutate((current) => removeDraftRule(current, rule.id))}>
+              Remover
+            </button>
+          </li>
+        ))}
+      </ul>
+      <button type="button" onClick={() => mutate(addDraftRule)}>
+        Adicionar regra
+      </button>
+    </>
+  );
+
+  const exceptionsStep = () => (
+    <>
+      <p className="detail">
+        Cada exceção precisa de justificativa. Ela suprime o achado, mas permanece visível no
+        relatório e no histórico; <code>expires_on</code> é só data de revisão humana.
+      </p>
+      {draft.exceptions.length === 0 && <p className="detail">Nenhuma exceção declarada.</p>}
+      <ul className="builder-list">
+        {draft.exceptions.map((exception, index) => (
+          <li key={`${exception.rule}-${exception.from}-${exception.to}-${index}`} className="builder-card">
+            <div className="builder-grid">
+              <label>
+                Regra
+                <input
+                  value={exception.rule}
+                  onChange={(event) => mutate((current) =>
+                    updateDraftException(current, index, { rule: event.target.value }),
+                  )}
+                />
+              </label>
+              <label>
+                Origem
+                <input
+                  value={exception.from}
+                  onChange={(event) => mutate((current) =>
+                    updateDraftException(current, index, { from: event.target.value }),
+                  )}
+                />
+              </label>
+              <label>
+                Destino
+                <input
+                  value={exception.to}
+                  onChange={(event) => mutate((current) =>
+                    updateDraftException(current, index, { to: event.target.value }),
+                  )}
+                />
+              </label>
+              <label>
+                Arquivo exato (opcional)
+                <input
+                  value={exception.path ?? ''}
+                  onChange={(event) => mutate((current) =>
+                    updateDraftException(current, index, { path: event.target.value || undefined }),
+                  )}
+                />
+              </label>
+              <label>
+                Revisão em (opcional)
+                <input
+                  value={exception.expires_on ?? ''}
+                  onChange={(event) => mutate((current) =>
+                    updateDraftException(current, index, {
+                      expires_on: event.target.value || undefined,
+                    }),
+                  )}
+                />
+              </label>
+            </div>
+            <label>
+              Justificativa
+              <input
+                value={exception.justification}
+                onChange={(event) => mutate((current) =>
+                  updateDraftException(current, index, { justification: event.target.value }),
+                )}
+              />
+            </label>
+            <button type="button" onClick={() => mutate((current) => removeDraftException(current, index))}>
+              Remover
+            </button>
+          </li>
+        ))}
+      </ul>
+      <button type="button" onClick={() => mutate(addDraftException)}>
+        Adicionar exceção
+      </button>
+    </>
+  );
 
   const dependenciesStep = () => (
     <>
@@ -591,6 +843,7 @@ export default function BuilderWizard({ root, onStatus, onClose, onSaved }: Buil
     }
     const observations = observationLines(report, 8);
     const compliance = complianceLines(saveOutcome, 8);
+    const waivers = exceptionLines(saveOutcome, 8);
     return (
       <section className="comparison" aria-label="Comparação entre descoberta e conformidade">
         <h3>Depois da gravação</h3>
@@ -617,6 +870,19 @@ export default function BuilderWizard({ root, onStatus, onClose, onSaved }: Buil
             ) : (
               <ul className="detail">
                 {compliance.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div>
+            <h4>Exceções aplicadas</h4>
+            <p className="detail">Dispensas ficam visíveis; nenhum achado é ocultado em silêncio.</p>
+            {waivers.length === 0 ? (
+              <p className="detail">Nenhuma exceção aplicada.</p>
+            ) : (
+              <ul className="detail">
+                {waivers.map((line) => (
                   <li key={line}>{line}</li>
                 ))}
               </ul>
@@ -723,6 +989,9 @@ export default function BuilderWizard({ root, onStatus, onClose, onSaved }: Buil
     organizacao: organizationStep,
     modulos: modulesStep,
     camadas: layersStep,
+    dominios: domainsStep,
+    regras: rulesStep,
+    excecoes: exceptionsStep,
     dependencias: dependenciesStep,
     revisao: reviewStep,
   };

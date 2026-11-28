@@ -1,0 +1,82 @@
+schema_version = 3
+
+[scan]
+include = ["src/**/*.rs"]
+exclude = []
+
+[architecture]
+style = "modular_monolith"
+
+[[architecture.modules]]
+name = "billing"
+path = "src/billing/**"
+responsibility = "Responsabilidade descrita de outro modo"
+allowed_dependencies = []
+
+[[architecture.modules]]
+name = "application"
+path = "src/application/**"
+responsibility = "Casos de uso e orquestração"
+allowed_dependencies = ["billing"]
+
+[[architecture.modules]]
+name = "domain"
+path = "src/domain/**"
+responsibility = "Modelos centrais"
+allowed_dependencies = ["application"]
+
+[[architecture.rules]]
+id = "no-direct-application"
+justification = "A aplicação deve ser acionada por um caso de uso explícito"
+to = "application"
+scope = "module"
+severity = "needs_review"
+from = "domain"
+
+[[architecture.exceptions]]
+justification = "Leitura transitória durante a migração"
+to = "application"
+rule = "no-direct-application"
+from = "domain"
+path = "src/domain/lib.rs"
+
+[[architecture.exceptions]]
+expires_on = "2026-12-31"
+justification = "Integração temporária revisada pelo time"
+path = "src/application/service.rs"
+to = "billing"
+from = "sales"
+rule = "dep.domain_not_allowed"
+
+[[architecture.domains]]
+name = "billing"
+allowed_dependencies = ["sales"]
+modules = ["billing"]
+
+[[architecture.domains]]
+modules = ["application"]
+name = "sales"
+allowed_dependencies = []
+
+[[architecture.domains]]
+allowed_dependencies = ["sales"]
+modules = ["domain"]
+name = "core"
+
+[[architecture.layers]]
+name = "billing"
+allowed_dependencies = []
+modules = ["billing"]
+
+[[architecture.layers]]
+allowed_dependencies = ["billing"]
+modules = ["application"]
+name = "application"
+
+[[architecture.layers]]
+modules = ["domain"]
+name = "domain"
+allowed_dependencies = ["application"]
+
+[project]
+name = "contrato-v3"

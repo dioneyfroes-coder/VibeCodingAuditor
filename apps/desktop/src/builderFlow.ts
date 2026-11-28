@@ -3,7 +3,7 @@
 /// Este módulo apenas organiza o estado enviado pelo núcleo e as escolhas do
 /// usuário. Nenhuma regra de auditoria, validação ou serialização é feita aqui.
 
-export type BuilderProfile = 'modular_monolith' | 'layered_monolith';
+export type BuilderProfile = 'modular_monolith' | 'layered_monolith' | 'clean_hexagonal';
 
 export interface DraftModule {
   name: string;
@@ -19,6 +19,33 @@ export interface DraftLayer {
   name: string;
   modules: string[];
   allowed_dependencies: string[];
+}
+
+/// Domínio opcional do rascunho, representável no schema v3.
+export interface DraftDomain {
+  name: string;
+  modules: string[];
+  allowed_dependencies: string[];
+}
+
+/// Regra declarativa do rascunho; texto livre nunca é interpretado como política.
+export interface DraftRule {
+  id: string;
+  scope: 'module' | 'layer' | 'domain';
+  from: string;
+  to: string;
+  severity: 'error' | 'needs_review';
+  justification: string;
+}
+
+/// Dispensa localizada do rascunho, sempre visível depois de aplicada.
+export interface DraftException {
+  rule: string;
+  from: string;
+  to: string;
+  path?: string;
+  justification: string;
+  expires_on?: string;
 }
 
 export interface AmbiguityResolution {
@@ -86,6 +113,9 @@ export interface ContractDraft {
   discovered_ambiguities: Ambiguity[];
   resolved_ambiguities: AmbiguityResolution[];
   layers: DraftLayer[];
+  domains: DraftDomain[];
+  exceptions: DraftException[];
+  rules: DraftRule[];
   pending_decisions: PendingDecision[];
 }
 
@@ -131,11 +161,26 @@ export interface AuditFinding {
   line_start: number | null;
 }
 
+/// Dispensa efetivamente aplicada pelo núcleo, nunca oculta a olho humano.
+export interface AppliedException {
+  rule: string;
+  rule_id: string;
+  from: string;
+  to: string;
+  path: string | null;
+  justification: string;
+  expires_on: string | null;
+  finding_id: string;
+  finding_path: string;
+  finding_line: number | null;
+}
+
 export interface ComplianceReport {
   project: string;
   schema_version: number;
   summary: { findings: number; errors: number; warnings: number; needs_review: number };
   findings: AuditFinding[];
+  exceptions_applied: AppliedException[];
   limitations: string[];
 }
 
@@ -186,6 +231,9 @@ export const BUILDER_STEPS: BuilderStep[] = [
   { id: 'organizacao', label: 'Organização', hint: 'Perfil da arquitetura' },
   { id: 'modulos', label: 'Módulos', hint: 'Nomes, paths e responsabilidades' },
   { id: 'camadas', label: 'Camadas', hint: 'Agrupamento quando aplicável' },
+  { id: 'dominios', label: 'Domínios', hint: 'Recortes opcionais de módulos' },
+  { id: 'regras', label: 'Regras', hint: 'Dimensões e severidades declaradas' },
+  { id: 'excecoes', label: 'Exceções', hint: 'Dispensas com justificativa' },
   { id: 'dependencias', label: 'Dependências', hint: 'Permitir ou rejeitar relações' },
   { id: 'revisao', label: 'Revisão', hint: 'Prévia e efeitos das regras' },
 ];
@@ -277,6 +325,15 @@ export function renameDraftModule(
       modules: layer.modules.map(renamed),
       allowed_dependencies: layer.allowed_dependencies.map(renamed),
     })),
+    domains: current.domains.map((domain) => ({
+      ...domain,
+      modules: domain.modules.map(renamed),
+    })),
+    rules: current.rules.map((rule) => ({
+      ...rule,
+      from: renamed(rule.from),
+      to: renamed(rule.to),
+    })),
     resolved_ambiguities: current.resolved_ambiguities.map((resolution) => ({
       ...resolution,
       choice: resolution.choice === null ? null : renamed(resolution.choice),
@@ -330,6 +387,11 @@ export function removeDraftModule(current: ContractDraft, name: string): Contrac
       modules: layer.modules.filter(kept),
       allowed_dependencies: layer.allowed_dependencies.filter(kept),
     })),
+    domains: current.domains.map((domain) => ({
+      ...domain,
+      modules: domain.modules.filter(kept),
+    })),
+    rules: current.rules.filter((rule) => rule.from !== name && rule.to !== name),
     resolved_ambiguities: current.resolved_ambiguities.map((resolution) => ({
       ...resolution,
       choice: resolution.choice === null || resolution.choice === name ? null : resolution.choice,
@@ -378,19 +440,29 @@ export function renameDraftLayer(
 }
 
 /// Ajusta as camadas ao perfil escolhido, sem avaliar regras arquiteturais.
-export function setProfile(current: ContractDraft, profile: BuilderProfile): ContractDraft {
+///
+/// `preset` vem do núcleo via Tauri; a interface apenas guarda o que o usuário
+/// escolheu e nunca recalcula direções permitidas pelo Clean/Hexagonal.
+export function setProfile(
+  current: ContractDraft,
+  profile: BuilderProfile,
+  preset?: DraftLayer[],
+): ContractDraft {
+  // Presets vazios (monólito em camadas) mantêm a camada inicial de sempre.
   const layers =
     profile === 'modular_monolith'
       ? []
-      : current.layers.length > 0
-        ? current.layers
-        : [
-            {
-              name: 'principal',
-              modules: current.modules.map((module) => module.name),
-              allowed_dependencies: [],
-            },
-          ];
+      : preset && preset.length > 0
+        ? preset
+        : current.layers.length > 0
+          ? current.layers
+          : [
+              {
+                name: 'principal',
+                modules: current.modules.map((module) => module.name),
+                allowed_dependencies: [],
+              },
+            ];
   return { ...current, profile, layers };
 }
 
@@ -442,6 +514,132 @@ export function toggleLayerModule(
           : [...layer.modules, moduleName],
       };
     }),
+  };
+}
+
+/// Nome novo determinístico para um domínio adicional.
+function nextDomainName(domains: DraftDomain[]): string {
+  let index = 1;
+  while (domains.some((domain) => domain.name === `dominio-${index}`)) {
+    index += 1;
+  }
+  return `dominio-${index}`;
+}
+
+/// Adiciona um domínio vazio; pertencimento e direções são decisões humanas.
+export function addDraftDomain(current: ContractDraft): ContractDraft {
+  return {
+    ...current,
+    domains: [
+      ...current.domains,
+      { name: nextDomainName(current.domains), modules: [], allowed_dependencies: [] },
+    ],
+  };
+}
+
+/// Substitui um domínio mantendo os demais intocados.
+export function updateDraftDomain(
+  current: ContractDraft,
+  name: string,
+  patch: Partial<DraftDomain>,
+): ContractDraft {
+  return {
+    ...current,
+    domains: current.domains.map((domain) => (domain.name === name ? { ...domain, ...patch } : domain)),
+  };
+}
+
+/// Remove um domínio e as referências a ele nas regras e exceções.
+export function removeDraftDomain(current: ContractDraft, name: string): ContractDraft {
+  const kept = (candidate: string) => candidate !== name;
+  return {
+    ...current,
+    domains: current.domains.filter((domain) => domain.name !== name),
+    rules: current.rules.filter((rule) => rule.from !== name && rule.to !== name),
+    exceptions: current.exceptions.filter(
+      (exception) => exception.from !== name && exception.to !== name,
+    ),
+  };
+}
+
+/// Identificador novo determinístico para uma regra adicional.
+function nextRuleName(rules: DraftRule[]): string {
+  let index = 1;
+  while (rules.some((rule) => rule.id === `regra-${index}`)) {
+    index += 1;
+  }
+  return `regra-${index}`;
+}
+
+/// Adiciona uma regra declarativa com campos obrigatórios em branco.
+export function addDraftRule(current: ContractDraft): ContractDraft {
+  return {
+    ...current,
+    rules: [
+      ...current.rules,
+      {
+        id: nextRuleName(current.rules),
+        scope: 'module',
+        from: '',
+        to: '',
+        severity: 'needs_review',
+        justification: '',
+      },
+    ],
+  };
+}
+
+/// Substitui uma regra mantendo as demais intocadas.
+export function updateDraftRule(
+  current: ContractDraft,
+  id: string,
+  patch: Partial<DraftRule>,
+): ContractDraft {
+  return {
+    ...current,
+    rules: current.rules.map((rule) => (rule.id === id ? { ...rule, ...patch } : rule)),
+  };
+}
+
+/// Remove uma regra e as exceções que a dispensavam.
+export function removeDraftRule(current: ContractDraft, id: string): ContractDraft {
+  return {
+    ...current,
+    rules: current.rules.filter((rule) => rule.id !== id),
+    exceptions: current.exceptions.filter((exception) => exception.rule !== id),
+  };
+}
+
+/// Adiciona uma exceção com justificativa obrigatória em branco.
+export function addDraftException(current: ContractDraft): ContractDraft {
+  return {
+    ...current,
+    exceptions: [
+      ...current.exceptions,
+      { rule: '', from: '', to: '', justification: '' },
+    ],
+  };
+}
+
+/// Substitui uma exceção pelo índice, mantendo as demais intocadas.
+export function updateDraftException(
+  current: ContractDraft,
+  index: number,
+  patch: Partial<DraftException>,
+): ContractDraft {
+  return {
+    ...current,
+    exceptions: current.exceptions.map((exception, position) =>
+      position === index ? { ...exception, ...patch } : exception,
+    ),
+  };
+}
+
+/// Remove uma exceção pelo índice.
+export function removeDraftException(current: ContractDraft, index: number): ContractDraft {
+  return {
+    ...current,
+    exceptions: current.exceptions.filter((_, position) => position !== index),
   };
 }
 
@@ -662,6 +860,15 @@ export function complianceLines(outcome: SaveOutcome, limit = 8): string[] {
   return outcome.run.report.findings
     .slice(0, limit)
     .map((finding) => `${finding.rule_id}: ${finding.message} (${finding.path})`);
+}
+
+/// Dispensas aplicadas, exibidas explicitamente junto dos achados.
+export function exceptionLines(outcome: SaveOutcome, limit = 8): string[] {
+  return (outcome.run.report.exceptions_applied ?? [])
+    .slice(0, limit)
+    .map((exception) =>
+      `exceção aplicada: ${exception.rule} ${exception.from} → ${exception.to} — ${exception.justification}`,
+    );
 }
 
 /// Linha de identidade do contrato gravado e do modo da auditoria posterior.

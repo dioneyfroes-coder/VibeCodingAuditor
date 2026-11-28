@@ -3,8 +3,11 @@ import test from 'node:test';
 
 import {
   BUILDER_STEPS,
+  addDraftDomain,
+  addDraftException,
   addDraftLayer,
   addDraftModule,
+  addDraftRule,
   complianceLines,
   decideDependency,
   decideObservedDependency,
@@ -13,11 +16,15 @@ import {
   diffSummary,
   effectsLine,
   evidenceLine,
+  exceptionLines,
   nextStep,
   observationLines,
   observedDecisionItems,
   previousStep,
+  removeDraftDomain,
+  removeDraftException,
   removeDraftModule,
+  removeDraftRule,
   renameDraftLayer,
   runModeLabel,
   renameDraftModule,
@@ -27,8 +34,11 @@ import {
   setProfile,
   setResolution,
   toggleLayerModule,
+  updateDraftDomain,
+  updateDraftException,
   updateDraftLayer,
   updateDraftModule,
+  updateDraftRule,
   validationMessage,
   warningText,
 } from '../out/builderFlow.js';
@@ -64,6 +74,9 @@ function draft() {
     discovered_ambiguities: [],
     resolved_ambiguities: [],
     layers: [],
+    domains: [],
+    exceptions: [],
+    rules: [],
     pending_decisions: [],
   };
 }
@@ -89,10 +102,21 @@ function withReferences() {
   };
 }
 
-test('as sete etapas mantêm ordem fixa e navegação limitada', () => {
+test('as dez etapas mantêm ordem fixa e navegação limitada', () => {
   assert.deepEqual(
     BUILDER_STEPS.map((step) => step.id),
-    ['descoberta', 'escopo', 'organizacao', 'modulos', 'camadas', 'dependencias', 'revisao'],
+    [
+      'descoberta',
+      'escopo',
+      'organizacao',
+      'modulos',
+      'camadas',
+      'dominios',
+      'regras',
+      'excecoes',
+      'dependencias',
+      'revisao',
+    ],
   );
   assert.equal(nextStep(0), 1);
   assert.equal(previousStep(0), 0);
@@ -134,6 +158,73 @@ test('trocar perfil limpa camadas ou cria uma camada inicial', () => {
   const modular = setProfile(layered, 'modular_monolith');
   assert.equal(modular.profile, 'modular_monolith');
   assert.deepEqual(modular.layers, []);
+});
+
+test('perfil clean hexagonal usa o preset vindo do núcleo sem recalcular direções', () => {
+  const preset = [
+    { name: 'domain', modules: [], allowed_dependencies: [] },
+    { name: 'application', modules: [], allowed_dependencies: ['domain'] },
+  ];
+  const clean = setProfile(draft(), 'clean_hexagonal', preset);
+
+  assert.equal(clean.profile, 'clean_hexagonal');
+  assert.deepEqual(clean.layers, preset);
+  assert.equal(setProfile(clean, 'modular_monolith').layers.length, 0);
+
+  const layered = setProfile(draft(), 'layered_monolith', []);
+  assert.deepEqual(layered.layers[0].modules, ['domain', 'application']);
+});
+
+test('domínios, regras e exceções são editáveis sem tocar no rascunho original', () => {
+  const original = draft();
+  const withDomain = addDraftDomain(original);
+  const renamedDomain = updateDraftDomain(withDomain, 'dominio-1', { name: 'core' });
+  const withRule = addDraftRule(renamedDomain);
+  const reviewedRule = updateDraftRule(withRule, 'regra-1', {
+    scope: 'domain',
+    from: 'core',
+    justification: 'Revisado',
+  });
+  const withException = addDraftException(reviewedRule);
+  const justified = updateDraftException(withException, 0, {
+    rule: 'regra-1',
+    from: 'core',
+    justification: 'Revisado',
+  });
+
+  assert.deepEqual(original.domains, []);
+  assert.deepEqual(original.rules, []);
+  assert.deepEqual(original.exceptions, []);
+  assert.equal(justified.domains[0].name, 'core');
+  assert.equal(justified.rules[0].scope, 'domain');
+  assert.equal(justified.exceptions[0].justification, 'Revisado');
+  assert.equal(removeDraftDomain(justified, 'core').rules.length, 0);
+  assert.equal(removeDraftRule(justified, 'regra-1').exceptions.length, 0);
+  assert.equal(removeDraftException(justified, 0).exceptions.length, 0);
+});
+
+test('renomear e remover módulo atualiza domínios e regras', () => {
+  const base = {
+    ...draft(),
+    domains: [{ name: 'core', modules: ['domain'], allowed_dependencies: [] }],
+    rules: [
+      {
+        id: 'guarda',
+        scope: 'module',
+        from: 'domain',
+        to: 'application',
+        severity: 'needs_review',
+        justification: 'Revisar',
+      },
+    ],
+  };
+  const renamed = renameDraftModule(base, 'domain', 'nucleo');
+  assert.deepEqual(renamed.domains[0].modules, ['nucleo']);
+  assert.equal(renamed.rules[0].from, 'nucleo');
+
+  const removed = removeDraftModule(base, 'domain');
+  assert.deepEqual(removed.domains[0].modules, []);
+  assert.deepEqual(removed.rules, []);
 });
 
 test('camadas podem ser criadas, renomeadas e receber módulos', () => {
@@ -362,6 +453,20 @@ function saveOutcome() {
           needs_review: 0,
         },
         skip_summary: [],
+        exceptions_applied: [
+          {
+            rule: 'guarda',
+            rule_id: 'dep.custom_not_allowed',
+            from: 'domain',
+            to: 'application',
+            path: 'src/domain/lib.rs',
+            justification: 'Integração temporária revisada',
+            expires_on: '2026-12-31',
+            finding_id: 'dep.custom_not_allowed:guarda:1',
+            finding_path: 'src/domain/lib.rs',
+            finding_line: 7,
+          },
+        ],
         findings: [
           {
             rule_id: 'dep.not_allowed',
@@ -410,6 +515,14 @@ test('diff e confirmação são descritos sem reavaliar o contrato', () => {
   assert.match(diffSummary({ ...diff(), changed: false, lines: [] }), /inalterado/);
   assert.match(saveConfirmationText({ ...diff(), exists: false }), /Criar/);
   assert.match(saveConfirmationText(diff()), /Substituir/);
+});
+
+test('exceções aplicadas aparecem como informação explícita', () => {
+  const lines = exceptionLines(saveOutcome());
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /exceção aplicada/);
+  assert.match(lines[0], /guarda/);
+  assert.match(lines[0], /Integração temporária revisada/);
 });
 
 test('painel lado a lado recorta apenas os dados do núcleo', () => {

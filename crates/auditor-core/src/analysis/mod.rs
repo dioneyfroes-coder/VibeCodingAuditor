@@ -2282,6 +2282,9 @@ mod tests {
                     style: ArchitectureStyle::ModularMonolith,
                     modules,
                     layers: Vec::new(),
+                    domains: Vec::new(),
+                    exceptions: Vec::new(),
+                    rules: Vec::new(),
                 },
             };
 

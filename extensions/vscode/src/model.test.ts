@@ -12,6 +12,7 @@ import {
   diagnosticMessage,
   diagnosticRange,
   discoveryMessages,
+  exceptionMessages,
   hasViolationDiagnostics,
   modeLabel,
   parseCliRun,
@@ -187,6 +188,65 @@ test('resumo e rótulo do modo vêm dos dados da CLI', () => {
   assert.match(runSummaryMessage(discoveryRun()), /2 relações observadas/);
   assert.equal(modeLabel(complianceRun()), 'conformidade (contrato v1)');
   assert.equal(modeLabel(discoveryRun()), 'descoberta (sem contrato)');
+});
+
+test('exceções aplicadas aparecem no resumo e nas mensagens sem ocultar achados', () => {
+  const report: AuditReport = {
+    ...reportWith('error'),
+    exceptions_applied: [
+      {
+        rule: 'guarda',
+        rule_id: 'dep.custom_not_allowed',
+        from: 'domain',
+        to: 'application',
+        path: 'src/domain/lib.rs',
+        justification: 'Integração temporária revisada',
+        expires_on: '2026-12-31',
+        finding_id: 'dep.custom_not_allowed:guarda:1',
+        finding_path: 'src/domain/lib.rs',
+        finding_line: 7,
+      },
+    ],
+  };
+  const run = parseCliRun({
+    ...report,
+    mode: 'compliance',
+    contract: { status: 'present', schema_version: 3 },
+  });
+  assert.equal(hasViolationDiagnostics(run), true);
+  if (!hasViolationDiagnostics(run)) {
+    return;
+  }
+
+  assert.match(runSummaryMessage(run), /1 achado/);
+  assert.match(runSummaryMessage(run), /1 exceção aplicada/);
+  assert.equal(buildDiagnostics(run).length, 1);
+  const lines = exceptionMessages(run);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /exceção aplicada: guarda domain → application/);
+  assert.match(lines[0], /Integração temporária revisada/);
+  assert.match(lines[0], /dep\.custom_not_allowed: src\/domain\/lib\.rs/);
+  assert.deepEqual(exceptionMessages(reportWith('error')), []);
+});
+
+test('novas regras de domínio e personalizada são convertidas sem lógica específica', () => {
+  for (const ruleId of ['dep.domain_not_allowed', 'dep.custom_not_allowed']) {
+    const report = {
+      ...reportWith('needs_review'),
+      findings: [
+        finding({
+          id: `${ruleId}:domain:application:src/domain/lib.rs`,
+          rule_id: ruleId,
+          title: 'Dependência não permitida pela regra declarada',
+          severity: 'needs_review' as Severity,
+        }),
+      ],
+    };
+    const [descriptor] = buildDiagnostics(report);
+    assert.equal(descriptor.code, ruleId);
+    assert.equal(descriptor.severity, 'warning');
+    assert.match(descriptor.message, new RegExp(`^\\[${ruleId.replaceAll('.', '\\.')}:`));
+  }
 });
 
 test('nova regra de camada é convertida sem lógica específica na extensão', () => {

@@ -20,7 +20,7 @@ use crate::analysis::AnalysisCoverage;
 use crate::audit::{DiscoveryReport, ExecutionMode, ProjectRun};
 use crate::contract::{self, load_contract};
 use crate::discovery::SkipReason;
-use crate::findings::{Finding, Severity};
+use crate::findings::{AppliedException, Finding, Severity};
 use crate::report::{AuditReport, ReportSummary, SkipReasonSummary, finding_location};
 use crate::rules::{RULE_DEPENDENCY_NOT_ALLOWED, RULE_DEPENDENCY_UNRESOLVED};
 
@@ -330,6 +330,10 @@ pub struct ExecutionComparison {
     pub resolved_findings: Vec<Finding>,
     /// Achados presentes nas duas execuções, com os dados da posterior.
     pub persistent_findings: Vec<Finding>,
+    /// Dispensas registradas na execução anterior.
+    pub before_waivers: Vec<String>,
+    /// Dispensas registradas na execução posterior.
+    pub after_waivers: Vec<String>,
     /// Cobertura da execução anterior, quando gravada.
     pub before_coverage: Option<StoredCoverage>,
     /// Cobertura da execução posterior, quando gravada.
@@ -598,6 +602,8 @@ impl History {
                 .filter(|finding| before_ids.contains(identity_key(&finding.id)))
                 .cloned()
                 .collect(),
+            before_waivers: waiver_lines(&before.limitations),
+            after_waivers: waiver_lines(&after.limitations),
             before_coverage: before.coverage,
             after_coverage: after.coverage,
         })
@@ -1118,6 +1124,15 @@ pub fn render_run_detail(detail: &RunDetail) -> String {
     lines.join("\n")
 }
 
+/// Seleciona linhas de limitação que registram dispensas aplicadas.
+fn waiver_lines(limitations: &[String]) -> Vec<String> {
+    limitations
+        .iter()
+        .filter(|line| line.starts_with(AppliedException::PREFIX))
+        .cloned()
+        .collect()
+}
+
 /// Renderiza a diferença entre duas execuções em texto estável.
 pub fn render_comparison(comparison: &ExecutionComparison) -> String {
     let mut lines = vec![format!(
@@ -1183,6 +1198,20 @@ pub fn render_comparison(comparison: &ExecutionComparison) -> String {
         comparison.persistent_findings.len()
     ));
     push_compact_findings(&mut lines, &comparison.persistent_findings);
+    lines.push(format!(
+        "Dispensas antes ({}):",
+        comparison.before_waivers.len()
+    ));
+    for waiver in &comparison.before_waivers {
+        lines.push(format!("  - {waiver}"));
+    }
+    lines.push(format!(
+        "Dispensas depois ({}):",
+        comparison.after_waivers.len()
+    ));
+    for waiver in &comparison.after_waivers {
+        lines.push(format!("  - {waiver}"));
+    }
 
     lines.join("\n")
 }
@@ -2244,6 +2273,64 @@ mod tests {
         assert!(output.contains("Novos achados (0):\n  (nenhum)"));
         assert!(output.contains("Achados resolvidos (0):\n  (nenhum)"));
         assert!(output.contains("Achados persistentes (5):"));
+    }
+
+    /// Dispensa aplicada determinística, usada nos testes de histórico.
+    fn applied_waiver() -> AppliedException {
+        AppliedException {
+            rule: "dep.domain_not_allowed".to_owned(),
+            rule_id: "dep.domain_not_allowed".to_owned(),
+            from: "sales".to_owned(),
+            to: "billing".to_owned(),
+            path: Some("src/application/service.rs".to_owned()),
+            justification: "Integração temporária revisada".to_owned(),
+            expires_on: Some("2026-12-31".to_owned()),
+            finding_id: "dep.domain_not_allowed:sales:billing".to_owned(),
+            finding_path: "src/application/service.rs".to_owned(),
+            finding_line: Some(7),
+        }
+    }
+
+    /// Dispensas adicionadas entre execuções aparecem na comparação sem alterar achados.
+    #[test]
+    fn comparison_tracks_waivers_added_between_runs() {
+        let database = TestDatabase::new();
+        let mut history = database.open();
+        let before_id = history
+            .record(&project_root(), &fixture_report())
+            .expect("baseline record must succeed");
+        let waived = fixture_report().with_exceptions(vec![applied_waiver()]);
+        let after_id = history
+            .record(&project_root(), &waived)
+            .expect("waived record must succeed");
+
+        let comparison = history
+            .compare(before_id, after_id)
+            .expect("comparison must succeed");
+        let output = render_comparison(&comparison);
+
+        assert!(comparison.before_waivers.is_empty());
+        assert_eq!(comparison.after_waivers.len(), 1);
+        assert!(comparison.after_waivers[0].contains("Integração temporária revisada"));
+        assert!(output.contains("Dispensas antes (0):"));
+        assert!(output.contains("Dispensas depois (1):"));
+        assert!(output.contains("exceção aplicada:"));
+    }
+
+    /// Dispensas aplicadas continuam visíveis no detalhe gravado da execução.
+    #[test]
+    fn run_detail_keeps_applied_waivers_visible() {
+        let database = TestDatabase::new();
+        let mut history = database.open();
+        let report = fixture_report().with_exceptions(vec![applied_waiver()]);
+        let id = history
+            .record(&project_root(), &report)
+            .expect("record must succeed");
+        let detail = history.get(id).expect("get must succeed");
+        let output = render_run_detail(&detail);
+
+        assert!(output.contains("exceção aplicada:"));
+        assert!(output.contains("Integração temporária revisada"));
     }
 
     /// Cobertura vazia e deltas zero não devem inventar dados nem sinais.

@@ -241,13 +241,16 @@ pub fn audit_project(root: &Path) -> Result<AuditReport, AuditError> {
 fn audit_with_contract(root: &Path, contract: &Contract) -> Result<AuditReport, AuditError> {
     let inventory = discovery::discover(root, contract)?;
     let analysis = analysis::analyze(root, contract, &inventory)?;
-    let findings = rules::evaluate(contract, &inventory, &analysis);
-    let mut report = AuditReport::from_pipeline(contract, &inventory, &analysis, findings);
-    for limitation in rules::layer_mapping_limitations(contract, &analysis) {
+    let evaluation = rules::evaluate_detailed(contract, &inventory, &analysis);
+    let mut report =
+        AuditReport::from_pipeline(contract, &inventory, &analysis, evaluation.findings)
+            .with_exceptions(evaluation.exceptions_applied);
+    for limitation in evaluation.limitations {
         if !report.limitations.contains(&limitation) {
             report.limitations.push(limitation);
         }
     }
+    report.limitations.sort();
     Ok(report)
 }
 

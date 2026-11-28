@@ -1,20 +1,23 @@
 //! Analisador determinístico de importações Python.
 //!
 //! O scanner não executa código do projeto: comentários `#` e strings,
-//! inclusive triplas, são mascarados antes da leitura. Nomes absolutos só são
-//! considerados quando o primeiro segmento é um módulo do contrato; nomes
-//! relativos são resolvidos contra o inventário. O que não pode ser resolvido
-//! vira revisão ou limitação, nunca uma conclusão inventada.
+//! inclusive triplas, são mascarados antes da leitura. Nomes absolutos só viram
+//! aresta quando o primeiro segmento é um módulo do contrato; nomes relativos
+//! são resolvidos contra o inventário. Fora disso, o nome é relacionado a uma
+//! distribuição declarada somente quando a equivalência é determinística, ou a
+//! um built-in conhecido. O que não pode ser resolvido vira revisão ou
+//! limitação, nunca uma conclusão inventada.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Component, Path};
 
 use super::{
     Analysis, DependencyKind, Module, ReviewItem, ReviewReason, find_word, record_dependency,
-    record_observed_dependency,
+    record_external_package, record_observed_dependency,
 };
 use crate::contract::Contract;
 use crate::discovery::{Inventory, matches_pattern};
+use crate::resolution::ResolutionContext;
 
 /// Extensões com analisador disponível.
 pub(super) fn is_supported_extension(extension: Option<&str>) -> bool {
@@ -264,21 +267,8 @@ fn candidate_files(base: &str) -> Vec<String> {
 
 /// Encontra arquivos do inventário que correspondem a um módulo absoluto.
 fn absolute_files(files: &HashSet<&str>, dotted: &str) -> Vec<String> {
-    let stem = dotted.replace('.', "/");
-    let mut found = Vec::new();
-
-    for suffix in MODULE_SUFFIXES {
-        let candidate = format!("{stem}{suffix}");
-        for file in files {
-            if *file == candidate || file.ends_with(&format!("/{candidate}")) {
-                found.push((*file).to_owned());
-            }
-        }
-    }
-
-    found.sort();
-    found.dedup();
-    found
+    let shared: BTreeSet<&str> = files.iter().copied().collect();
+    crate::resolution::resolve_python_module(dotted, &shared)
 }
 
 /// Classifica um especificador e registra arestas, revisões ou limitações.
@@ -287,6 +277,7 @@ fn classify_specifier(
     contract: &Contract,
     contract_names: &HashSet<String>,
     files: &HashSet<&str>,
+    context: &ResolutionContext,
     module: &Module,
     path: &str,
     line: usize,
@@ -321,6 +312,14 @@ fn classify_specifier(
             return;
         };
         if !contract_names.contains(first) {
+            record_external_package(
+                specifier,
+                context.classify_python(first),
+                evidence,
+                path,
+                line,
+                analysis,
+            );
             return;
         }
         absolute_files(files, specifier)
@@ -428,10 +427,11 @@ fn classify_specifier(
     );
 }
 
-/// Registra especificadores Python como relações observadas, sem classificação.
+/// Registra especificadores Python como relações observadas, com estado de pacote.
 pub(super) fn observe_text(
     path: &str,
     text: &str,
+    context: &ResolutionContext,
     analysis: &mut Analysis,
     seen_edges: &mut HashSet<String>,
 ) {
@@ -449,6 +449,17 @@ pub(super) fn observe_text(
                 analysis,
                 seen_edges,
             );
+            if !specifier.starts_with('.') {
+                let first = specifier.split('.').next().unwrap_or(&specifier);
+                record_external_package(
+                    &specifier,
+                    context.classify_python(first),
+                    raw_line.trim(),
+                    path,
+                    index + 1,
+                    analysis,
+                );
+            }
         }
     }
 }
@@ -459,6 +470,7 @@ pub(super) fn analyze_text(
     contract: Option<&Contract>,
     contract_names: &HashSet<String>,
     inventory: &Inventory,
+    context: &ResolutionContext,
     path: &str,
     text: &str,
     module: Option<&Module>,
@@ -467,7 +479,7 @@ pub(super) fn analyze_text(
 ) {
     let Some(module) = module else {
         if contract.is_none() {
-            observe_text(path, text, analysis, seen_edges);
+            observe_text(path, text, context, analysis, seen_edges);
         }
         return;
     };
@@ -487,6 +499,7 @@ pub(super) fn analyze_text(
                 contract,
                 contract_names,
                 &files,
+                context,
                 module,
                 path,
                 index + 1,
@@ -636,6 +649,7 @@ mod tests {
                 modules: Vec::new(),
                 workspace: None,
                 edges: Vec::new(),
+                external_packages: Vec::new(),
                 reviews: Vec::new(),
                 module_declarations: Vec::new(),
                 limitations: Vec::new(),
@@ -648,6 +662,7 @@ mod tests {
                 &contract,
                 &contract_names,
                 &files,
+                &ResolutionContext::default(),
                 &application,
                 "src/application/use_case.py",
                 1,

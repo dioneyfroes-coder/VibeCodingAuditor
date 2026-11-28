@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.local.json",
+  "compilerOptions": {
+    "paths": {
+      "@local/*": ["src/application/*", "src/domain/*"]
+    }
+  }
+}

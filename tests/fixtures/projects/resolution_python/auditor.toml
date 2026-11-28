@@ -1,0 +1,23 @@
+schema_version = 1
+
+[project]
+name = "projeto-resolucao-python"
+
+[scan]
+include = ["src/**/*.py"]
+exclude = []
+
+[architecture]
+style = "modular_monolith"
+
+[[architecture.modules]]
+name = "domain"
+path = "src/domain/**"
+responsibility = "Regras centrais"
+allowed_dependencies = []
+
+[[architecture.modules]]
+name = "application"
+path = "src/application/**"
+responsibility = "Casos de uso"
+allowed_dependencies = ["domain"]

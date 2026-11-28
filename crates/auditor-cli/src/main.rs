@@ -245,6 +245,27 @@ fn analyze_project(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    println!("Pacotes observados: {}", analysis.external_packages.len());
+    for relation in &analysis.external_packages {
+        match relation.line {
+            Some(line) => println!(
+                "  {} [{}] {}:{}",
+                relation.specifier,
+                relation.state.as_str(),
+                relation.path,
+                line
+            ),
+            None => println!(
+                "  {} [{}] {}",
+                relation.specifier,
+                relation.state.as_str(),
+                relation.path
+            ),
+        }
+        println!("      origem: {}", relation.origin);
+        println!("      evidência: {}", relation.evidence);
+    }
+
     println!("Declarações mod: {}", analysis.module_declarations.len());
     println!(
         "Cobertura do código: {} de {} arquivo(s) analisados",
@@ -653,6 +674,7 @@ mod tests {
             findings: Vec::new(),
             limitations: Vec::new(),
             coverage: AnalysisCoverage::default(),
+            external_packages: Vec::new(),
             mode: ExecutionMode::Compliance,
             contract: ContractStatus::Present { schema_version: 1 },
         }

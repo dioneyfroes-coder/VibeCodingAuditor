@@ -13,6 +13,7 @@ use crate::audit::{ContractStatus, DiscoveryReport, ExecutionMode, execution_mod
 use crate::contract::Contract;
 use crate::discovery::{Inventory, SkipReason, SkippedEntry};
 use crate::findings::{Finding, Severity};
+use crate::resolution::ExternalPackageRelation;
 
 /// Formato de saída de um relatório.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -195,6 +196,8 @@ pub struct AuditReport {
     pub limitations: Vec<String>,
     /// Cobertura efetiva da análise sobre o código incluído no inventário.
     pub coverage: AnalysisCoverage,
+    /// Pacotes e workspaces observados, com estado, origem e evidência.
+    pub external_packages: Vec<ExternalPackageRelation>,
     /// Modo explícito da execução, sempre `compliance` neste relatório.
     pub mode: ExecutionMode,
     /// Estado do contrato, sempre `present` neste relatório.
@@ -233,6 +236,7 @@ impl AuditReport {
             findings,
             limitations: analysis.limitations.clone(),
             coverage: analysis.coverage.clone(),
+            external_packages: analysis.external_packages.clone(),
             mode: ExecutionMode::Compliance,
             contract: ContractStatus::Present {
                 schema_version: contract.schema_version,
@@ -268,6 +272,7 @@ impl AuditReport {
             findings,
             limitations,
             coverage: self.coverage.clone(),
+            external_packages: self.external_packages.clone(),
             mode: self.mode,
             contract: self.contract.clone(),
         }
@@ -344,6 +349,22 @@ impl AuditReport {
                 }
                 lines.push(format!("    esperado: {}", finding.expected));
                 lines.push(format!("    sugestão: {}", finding.suggestion));
+            }
+        }
+
+        if !self.external_packages.is_empty() {
+            lines.push(String::new());
+            lines.push("Pacotes observados:".to_owned());
+            for relation in &self.external_packages {
+                let position = external_position(relation);
+                lines.push(format!(
+                    "  - {} [{}]{}",
+                    relation.specifier,
+                    relation.state.as_str(),
+                    position
+                ));
+                lines.push(format!("      origem: {}", relation.origin));
+                lines.push(format!("      evidência: {}", relation.evidence));
             }
         }
 
@@ -431,6 +452,24 @@ impl AuditReport {
                 "- **Sugestão:** {}",
                 markdown_text(&finding.suggestion)
             ));
+        }
+
+        if !self.external_packages.is_empty() {
+            lines.push(String::new());
+            lines.push("## Pacotes observados".to_owned());
+            for relation in &self.external_packages {
+                lines.push(format!(
+                    "- `{}` — {} {}",
+                    markdown_text(&relation.specifier),
+                    relation.state.as_str(),
+                    external_position(relation)
+                ));
+                lines.push(format!("  - Origem: {}", markdown_text(&relation.origin)));
+                lines.push(format!(
+                    "  - Evidência: {}",
+                    markdown_text(&relation.evidence)
+                ));
+            }
         }
 
         if !self.limitations.is_empty() {
@@ -581,6 +620,21 @@ impl DiscoveryReport {
                 if let Some(evidence) = &dependency.evidence {
                     lines.push(format!("      evidência: {evidence}"));
                 }
+            }
+        }
+
+        if !self.analysis.external_packages.is_empty() {
+            lines.push(String::new());
+            lines.push("Pacotes observados:".to_owned());
+            for relation in &self.analysis.external_packages {
+                lines.push(format!(
+                    "  - {} [{}] {}",
+                    relation.specifier,
+                    relation.state.as_str(),
+                    external_position(relation)
+                ));
+                lines.push(format!("      origem: {}", relation.origin));
+                lines.push(format!("      evidência: {}", relation.evidence));
             }
         }
 
@@ -737,6 +791,25 @@ impl DiscoveryReport {
             }
         }
 
+        if !self.analysis.external_packages.is_empty() {
+            lines.push(String::new());
+            lines.push("## Pacotes observados".to_owned());
+            for relation in &self.analysis.external_packages {
+                lines.push(String::new());
+                lines.push(format!(
+                    "- **Pacote:** `{}`",
+                    markdown_text(&relation.specifier)
+                ));
+                lines.push(format!("- **Estado:** {}", relation.state.as_str()));
+                lines.push(format!("- **Local:** `{}`", external_position(relation)));
+                lines.push(format!("- **Origem:** {}", markdown_text(&relation.origin)));
+                lines.push(format!(
+                    "- **Evidência:** `{}`",
+                    markdown_text(&relation.evidence)
+                ));
+            }
+        }
+
         if !self.candidates.ambiguities.is_empty() {
             lines.push(String::new());
             lines.push("## Ambiguidades".to_owned());
@@ -787,6 +860,14 @@ fn coverage_line(coverage: &AnalysisCoverage) -> String {
         ));
     }
     line
+}
+
+/// Local curto e estável de uma relação com pacote observada.
+fn external_position(relation: &ExternalPackageRelation) -> String {
+    match relation.line {
+        Some(line) => format!("({}:{})", relation.path, line),
+        None => format!("({})", relation.path),
+    }
 }
 
 /// Cabeçalho comum das saídas legíveis para o resumo de entradas ignoradas.
@@ -947,6 +1028,7 @@ mod tests {
                 ],
                 partial: true,
             },
+            external_packages: Vec::new(),
             mode: ExecutionMode::Compliance,
             contract: ContractStatus::Present { schema_version: 1 },
         }

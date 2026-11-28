@@ -14,6 +14,7 @@ pub mod discovery;
 pub mod findings;
 pub mod history;
 pub mod report;
+pub mod resolution;
 pub mod rules;
 
 /// Identificador estável do núcleo, usado em metadados e mensagens.

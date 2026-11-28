@@ -454,6 +454,7 @@ rename to src/new.rs\n";
             ],
             limitations: Vec::new(),
             coverage: AnalysisCoverage::default(),
+            external_packages: Vec::new(),
             mode: ExecutionMode::Compliance,
             contract: ContractStatus::Present { schema_version: 1 },
         };
@@ -502,6 +503,7 @@ rename to src/new.rs\n";
             ],
             limitations: Vec::new(),
             coverage: AnalysisCoverage::default(),
+            external_packages: Vec::new(),
             mode: ExecutionMode::Compliance,
             contract: ContractStatus::Present { schema_version: 1 },
         };
@@ -547,6 +549,7 @@ rename to src/new.rs\n";
             )],
             limitations: Vec::new(),
             coverage: AnalysisCoverage::default(),
+            external_packages: Vec::new(),
             mode: ExecutionMode::Compliance,
             contract: ContractStatus::Present { schema_version: 1 },
         };

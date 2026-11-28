@@ -353,6 +353,7 @@ mod tests {
     use crate::discovery::{SkipReason, SkippedEntry};
     use crate::findings::Severity;
     use crate::report::ReportFormat;
+    use crate::resolution::ExternalPackageState;
     use crate::rules::{
         RULE_DEPENDENCY_CYCLE, RULE_DEPENDENCY_NOT_ALLOWED, RULE_DEPENDENCY_UNRESOLVED,
         RULE_FILE_AMBIGUOUS_MODULE, RULE_FILE_UNMAPPED, RULE_LAYER_NOT_ALLOWED,
@@ -800,6 +801,96 @@ mod tests {
         );
     }
 
+    /// Alias local e pacotes externos ficam em canais separados na conformidade.
+    #[test]
+    fn typescript_resolution_keeps_external_packages_out_of_module_edges() {
+        let root = project_fixture("resolution_typescript");
+        let run = analyze_run(&root).expect("analyze must succeed");
+        let report = audit_project(&root).expect("audit must succeed");
+
+        assert!(run.analysis.edges.iter().any(|edge| {
+            edge.from == "application"
+                && edge.to == "domain"
+                && edge.kind == crate::analysis::DependencyKind::Allowed
+                && edge
+                    .evidence
+                    .as_deref()
+                    .is_some_and(|evidence| evidence.contains("@domain/entity"))
+        }));
+        assert!(run.analysis.edges.iter().all(|edge| {
+            !edge.to.starts_with("node:")
+                && edge.to != "react"
+                && edge.to != "desconhecido/nested"
+                && edge.to != "@demo/api"
+        }));
+
+        let state = |specifier: &str| {
+            report
+                .external_packages
+                .iter()
+                .find(|relation| relation.specifier == specifier)
+                .map(|relation| relation.state)
+                .unwrap_or_else(|| panic!("pacote observado ausente: {specifier}"))
+        };
+        assert_eq!(state("node:fs"), ExternalPackageState::Builtin);
+        assert_eq!(state("react"), ExternalPackageState::Declared);
+        assert_eq!(
+            state("desconhecido/nested"),
+            ExternalPackageState::Unconfirmed
+        );
+        assert_eq!(state("@demo/api"), ExternalPackageState::WorkspaceLocal);
+        assert!(
+            report
+                .findings
+                .iter()
+                .all(|finding| finding.rule_id != RULE_DEPENDENCY_NOT_ALLOWED)
+        );
+        assert!(
+            report
+                .external_packages
+                .iter()
+                .all(|relation| !relation.origin.is_empty() && !relation.evidence.is_empty())
+        );
+    }
+
+    /// Equivalência Python é usada só quando o mapeamento é determinístico.
+    #[test]
+    fn python_resolution_distinguishes_declared_unconfirmed_and_builtin() {
+        let root = project_fixture("resolution_python");
+        let report = audit_project(&root).expect("audit must succeed");
+
+        assert_eq!(report.summary.findings, 0);
+        let relation = |specifier: &str| {
+            report
+                .external_packages
+                .iter()
+                .find(|item| item.specifier == specifier)
+                .unwrap_or_else(|| panic!("pacote observado ausente: {specifier}"))
+        };
+        assert_eq!(relation("httpx").state, ExternalPackageState::Declared);
+        assert_eq!(
+            relation("PIL.Image").state,
+            ExternalPackageState::Unconfirmed
+        );
+        assert_eq!(relation("sys").state, ExternalPackageState::Builtin);
+        assert!(
+            relation("httpx")
+                .origin
+                .contains("distribuição `httpx` declarada")
+        );
+        assert!(
+            relation("PIL.Image")
+                .origin
+                .contains("sem mapeamento determinístico")
+        );
+        assert!(
+            report
+                .limitations
+                .iter()
+                .any(|item| item.contains("sem equivalência determinística"))
+        );
+    }
+
     /// Projeto Python com imports permitidos, proibidos, relativos e ruído.
     #[test]
     fn python_fixture_reports_resolved_edges_without_inventing_aliases() {
@@ -819,7 +910,7 @@ mod tests {
             report
                 .limitations
                 .iter()
-                .any(|item| item.contains("pacotes pip"))
+                .any(|item| item.contains("pacotes Python são lidos"))
         );
 
         let forbidden: Vec<_> = report

@@ -17,7 +17,7 @@ Estado consolidado das Etapas 0–10 e dos trabalhos posteriores. Decisões e es
 | 10 | Expandir linguagens e recursos | Concluída em 25/11/2026; extensões adicionais nesta rodada: TypeScript/JavaScript e Python no núcleo. Demais opções avaliadas e diferidas |
 | 4 (nova fase) | Descoberta automática e Architecture Builder | Concluída em 27/11/2026 — descoberta, Builder, consistência, validação automatizada e validação manual desktop/VS Code confirmadas; ressalvas e UX registrados |
 | 5 (nova fase) | Suíte de testes E2E dedicada | Concluída em 27/11/2026 — CLI, extensão, desktop e CI Windows verdes no run `46067832029` |
-| 6 (nova fase) | Amadurecimento arquitetural e distribuição | Em andamento — 6.0 baseline registrado em `docs/validation/etapa-6/baseline.md`; 6.1 documentação coerente e 6.2 descoberta multi-ecossistema concluídas em 27/11/2026; 6.3–6.8 planejadas |
+| 6 (nova fase) | Amadurecimento arquitetural e distribuição | Em andamento — 6.0 baseline registrado em `docs/validation/etapa-6/baseline.md`; 6.1 documentação coerente, 6.2 descoberta multi-ecossistema e 6.3 resolução determinística concluídas em 27/11/2026; 6.4–6.8 planejadas |
 
 Etapa 2 (confiabilidade do motor): concluída em 26/11/2026 — itens 2.1 a 2.8 verificados localmente no Windows e cobertos pelo workflow de CI, cuja primeira execução remota (`CI Windows` #1, commit `7a07286`) terminou com sucesso.
 
@@ -725,9 +725,20 @@ Nova fase iniciada em 26/11/2026 a partir de `PLANO_ETAPA_4_DESCOBERTA_E_ARCHITE
 - [x] Verificação: `git diff --check` = `0` (apenas avisos LF/CRLF esperados do OneDrive em arquivos Rust), `cargo fmt --all --check` = `0`, `cargo check --workspace` = `0`, `cargo test --workspace` = `0` (288 testes: 11 + 7 + 6 na CLI, 249 no núcleo e 15 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` = `0`, `npm --prefix apps/desktop test` = `0` (39), `npm --prefix apps/desktop run build` = `0`, `npm --prefix extensions/vscode test` = `0` (18) e `npm --prefix extensions/vscode run package` = `0` (`.vsix` com 10 arquivos, 15,23 kB).
 - [x] Limitações explícitas: nenhuma dependência, lockfile, workflow, `auditor.toml`, manifesto de projeto ou regra de conformidade foi alterado; o Builder ainda não transforma essas observações em sugestões editáveis, a resolução de imports/aliases permanece na 6.3, e arquivos Go continuam sem analisador.
 
+#### Etapa 6.3 — Resolução de imports, aliases e dependências externas — Concluída em 27/11/2026
+
+- [x] Módulo `crates/auditor-core/src/resolution.rs` reúne, somente dentro da raiz, `tsconfig*.json` local e os manifests da Etapa 6.2 em um contexto determinístico. `baseUrl` e `paths` aceitam zero ou um `*`; `extends` local é mesclado da configuração mais externa para a filha, com ciclo e padrão fora do subconjunto virando limitação; `extends` por pacote externo nunca é carregado.
+- [x] Ordem de resolução documentada e aplicada: relativo → alias local → pacote local de workspace → nome de módulo do contrato → built-in → externo declarado → externo não confirmado. Alias com vários destinos gera revisão com opções ordenadas; alias sem arquivo no inventário gera revisão explícita; nenhuma ambiguidade é resolvida por escolha silenciosa.
+- [x] TypeScript/JavaScript resolve aliases contra o inventário e registra arestas `permitida`/`proibida` quando o arquivo pertence a um único módulo do contrato. Built-ins Node (inclusive `node:`), scoped packages com subpath, workspaces locais e pacotes declarados/não confirmados viram relações separadas, nunca aresta de módulo.
+- [x] Python associa dependência declarada somente quando o nome importável tem equivalência determinística com a distribuição; `Pillow`/`PIL` permanece `unconfirmed` com limitação. Biblioteca padrão conhecida vira `builtin`, sem manifesto e sem juízo de conformidade. Módulos do contrato continuam sendo resolvidos por sufixo de arquivo no inventário.
+- [x] `Analysis.external_packages`, `AuditReport.external_packages` e `analysis.external_packages` na descoberta expõem estado, origem, evidência, arquivo e linha em JSON, texto, Markdown e `analyze`. `discovery::candidates` reutiliza o mesmo contexto para classificar `observed_dependencies`; nenhum estado externo gera `dep.not_allowed` ou aprovação de dependência.
+- [x] Fixtures novas `resolution_typescript` e `resolution_python` cobrem alias com zero/um/muitos destinos, `baseUrl`/`paths`, `extends` local e externo, workspace local, scoped package com subpath, built-in Node, equivalência e divergência de nomes Python, além das regressões existentes.
+- [x] Decisão `E6.3` registrada em `docs/DECISIONS.md` e documentação alinhada em `README.md`.
+- [x] Verificação: `git diff --check` = `0` (apenas avisos LF/CRLF esperados do OneDrive em arquivos Rust), `cargo fmt --all --check` = `0`, `cargo check --workspace` = `0`, `cargo test --workspace` = `0` (298 testes: 11 + 7 + 6 na CLI, 259 no núcleo e 15 no desktop), `cargo clippy --workspace --all-targets --config 'build.incremental=false' -- -D warnings` = `0`, `npm --prefix apps/desktop test` = `0` (39), `npm --prefix apps/desktop run build` = `0`, `npm --prefix extensions/vscode test` = `0` (18) e `npm --prefix extensions/vscode run package` = `0` (`.vsix` com 10 arquivos, 15,23 kB).
+- [x] Limitações explícitas: nenhuma dependência, lockfile, workflow, `auditor.toml`, manifesto analisado, regra de conformidade, nome da CLI, `when` da extensão ou `bundle.active` foi alterado. `tsconfig` fora do subconjunto suportado, nomes Python sem equivalência determinística e ausência de analisador Go permanecem como limitações; nenhuma E2E foi reexecutada nesta subetapa.
+
 #### Subetapas seguintes — planejadas, não iniciadas
 
-- [ ] 6.3 — Resolução de imports, aliases e dependências externas.
 - [ ] 6.4 — Contrato v3: proposta de schema aprovada antes de qualquer implementação.
 - [ ] 6.5 — Autoauditoria multi-stack do próprio repositório.
 - [ ] 6.6 — Segurança, dependências e consistência do CI.

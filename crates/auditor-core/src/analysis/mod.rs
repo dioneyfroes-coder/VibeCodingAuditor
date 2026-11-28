@@ -21,6 +21,7 @@ use syn::{Item, ItemMod, Meta, UseTree};
 
 use crate::contract::{Contract, Module};
 use crate::discovery::{Inventory, matches_pattern};
+use crate::resolution::{ExternalClassification, ExternalPackageRelation, ResolutionContext};
 
 /// Raízes da biblioteca padrão, que não são dependências arquiteturais.
 const IGNORED_ROOTS: &[&str] = &["std", "core", "alloc", "test"];
@@ -190,6 +191,8 @@ pub struct Analysis {
     pub workspace: Option<WorkspaceInfo>,
     /// Arestas direcionais entre módulos, com origem verificável.
     pub edges: Vec<DependencyEdge>,
+    /// Pacotes externos e workspaces observados, sem juízo de conformidade.
+    pub external_packages: Vec<ExternalPackageRelation>,
     /// Arquivos ou dependências que exigem decisão humana.
     pub reviews: Vec<ReviewItem>,
     /// Declarações `mod` encontradas nos arquivos analisados.
@@ -430,6 +433,7 @@ fn analyze_inner(
                 .collect()
         })
         .unwrap_or_default();
+    let resolution = ResolutionContext::for_inventory(inventory);
 
     let mut analysis = Analysis {
         modules: contract
@@ -444,12 +448,18 @@ fn analyze_inner(
             .unwrap_or_default(),
         workspace,
         edges: Vec::new(),
+        external_packages: Vec::new(),
         reviews: Vec::new(),
         module_declarations: Vec::new(),
         limitations: workspace_limitations,
         duplicate_lines: Vec::new(),
         coverage: AnalysisCoverage::default(),
     };
+    analysis
+        .limitations
+        .extend(resolution.limitations.iter().cloned());
+    analysis.limitations.sort();
+    analysis.limitations.dedup();
 
     let mut seen_edges = HashSet::new();
     let mut duplicate_candidates: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
@@ -544,6 +554,7 @@ fn analyze_inner(
                 contract,
                 &contract_names,
                 inventory,
+                &resolution,
                 &file.path,
                 &text,
                 module,
@@ -561,6 +572,7 @@ fn analyze_inner(
                 contract,
                 &contract_names,
                 inventory,
+                &resolution,
                 &file.path,
                 &text,
                 module,
@@ -588,13 +600,13 @@ fn analyze_inner(
 
     if typescript_files {
         analysis.limitations.push(
-            "pacotes npm não são enumerados: o contador de pacotes refere-se apenas ao Cargo"
+            "pacotes npm são lidos de package.json sem instalação ou consulta a registry; o contador estrutural continua referindo-se apenas ao Cargo"
                 .to_owned(),
         );
     }
     if python_files {
         analysis.limitations.push(
-            "pacotes pip não são enumerados: o contador de pacotes refere-se apenas ao Cargo"
+            "pacotes Python são lidos de [project] sem consultar ambientes instalados; o contador estrutural continua referindo-se apenas ao Cargo"
                 .to_owned(),
         );
     }
@@ -859,6 +871,29 @@ pub(crate) fn record_observed_dependency(
         evidence: evidence.map(str::to_owned),
         detail,
     });
+}
+
+/// Registra uma relação com pacote externo, com origem e evidência, sem virar achado.
+pub(crate) fn record_external_package(
+    specifier: &str,
+    classification: ExternalClassification,
+    evidence: &str,
+    path: &str,
+    line: usize,
+    analysis: &mut Analysis,
+) {
+    let relation = ExternalPackageRelation {
+        specifier: specifier.to_owned(),
+        base_name: classification.base_name,
+        state: classification.state,
+        origin: classification.origin,
+        evidence: evidence.to_owned(),
+        path: path.to_owned(),
+        line: Some(line),
+    };
+    if !analysis.external_packages.contains(&relation) {
+        analysis.external_packages.push(relation);
+    }
 }
 
 /// Extrai o primeiro destino nomeado de uma folha de caminho Rust.
@@ -2254,6 +2289,7 @@ mod tests {
                 modules: Vec::new(),
                 workspace: None,
                 edges: Vec::new(),
+                external_packages: Vec::new(),
                 reviews: Vec::new(),
                 module_declarations: Vec::new(),
                 limitations: Vec::new(),

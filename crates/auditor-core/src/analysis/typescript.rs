@@ -1,22 +1,24 @@
 //! Analisador determinístico de importações TypeScript e JavaScript.
 //!
-//! O scanner não executa código, não usa crate de regex, não lê `tsconfig.json`
-//! e não adiciona dependências. Comentários, strings, template literals e regex
+//! O scanner não executa código, não usa crate de regex e não adiciona
+//! dependências. Aliases vêm do contexto determinístico lido de `tsconfig*.json`
+//! local, sem `node_modules` e sem extends por pacote externo. Comentários, strings, template literals e regex
 //! são mascarados em um documento contínuo; declarações são limitadas pela
 //! profundidade de parênteses, colchetes e chaves. Assim um `import` multilinha
 //! é uma única declaração, enquanto `import.meta` não consome literais de outras
 //! instruções. Qualquer construção que não pode ser resolvida com segurança
 //! vira limitação ou item de revisão, nunca conclusão inventada.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Component, Path};
 
 use super::{
     Analysis, DependencyKind, Module, ReviewItem, ReviewReason, find_word, is_word_char,
-    record_dependency, record_observed_dependency,
+    record_dependency, record_external_package, record_observed_dependency,
 };
 use crate::contract::Contract;
 use crate::discovery::{Inventory, matches_pattern};
+use crate::resolution::{AliasResolution, ResolutionContext};
 
 /// Extensões com analisador disponível.
 pub(super) fn is_supported_extension(extension: Option<&str>) -> bool {
@@ -404,12 +406,14 @@ fn normalize_relative(path: &str, specifier: &str) -> Option<String> {
     }
 }
 
-/// Classifica um especificador e registra a aresta ou a incerteza correspondente.
+/// Classifica um especificador e registra a aresta, a revisão ou o pacote externo.
 #[allow(clippy::too_many_arguments)]
 fn classify_specifier(
     contract: &Contract,
     contract_names: &HashSet<String>,
     files: &HashSet<&str>,
+    alias_files: &BTreeSet<&str>,
+    context: &ResolutionContext,
     module: &Module,
     path: &str,
     line: usize,
@@ -438,69 +442,69 @@ fn classify_specifier(
             return;
         };
 
-        let targets: Vec<&Module> = contract
-            .architecture
-            .modules
-            .iter()
-            .filter(|candidate| matches_pattern(&candidate.path, &resolved_path))
-            .collect();
-
-        if targets.len() > 1 {
-            analysis.reviews.push(ReviewItem {
-                path: path.to_owned(),
-                line: Some(line),
-                reason: ReviewReason::UnresolvedDependency,
-                detail: format!("{specifier}: destino ambíguo ({resolved_path})"),
-            });
-            return;
-        }
-
-        let Some(target_module) = targets.first().copied() else {
-            analysis.reviews.push(ReviewItem {
-                path: path.to_owned(),
-                line: Some(line),
-                reason: ReviewReason::UnresolvedDependency,
-                detail: format!(
-                    "{specifier}: arquivo resolvido {resolved_path} não pertence a nenhum módulo do contrato"
-                ),
-            });
-            return;
-        };
-
-        let target = target_module.name.as_str();
-        if target == module.name {
-            return;
-        }
-
-        let (kind, detail) = if module
-            .allowed_dependencies
-            .iter()
-            .any(|allowed| allowed == target)
-        {
-            (
-                DependencyKind::Allowed,
-                "destino relativo resolvido e presente em allowed_dependencies".to_owned(),
-            )
-        } else {
-            (
-                DependencyKind::Forbidden,
-                "destino relativo resolvido no contrato, mas ausente de allowed_dependencies"
-                    .to_owned(),
-            )
-        };
-
-        record_dependency(
+        record_resolved_target(
+            contract,
             module,
-            target,
-            kind,
-            detail,
-            Some(line),
-            Some(evidence),
+            specifier,
+            &resolved_path,
             path,
+            line,
+            evidence,
+            "destino relativo",
             analysis,
             seen_edges,
         );
         return;
+    }
+
+    match context.resolve_alias(specifier, alias_files) {
+        AliasResolution::Resolved(resolved_path) => {
+            record_resolved_target(
+                contract,
+                module,
+                specifier,
+                &resolved_path,
+                path,
+                line,
+                evidence,
+                &format!("alias tsconfig `{specifier}`"),
+                analysis,
+                seen_edges,
+            );
+            return;
+        }
+        AliasResolution::Ambiguous(options) => {
+            record_dependency(
+                module,
+                specifier,
+                DependencyKind::Unresolved,
+                format!(
+                    "alias `{specifier}` com destinos ambíguos ({})",
+                    options.join(", ")
+                ),
+                Some(line),
+                Some(evidence),
+                path,
+                analysis,
+                seen_edges,
+            );
+            return;
+        }
+        AliasResolution::Unresolved(detail) => {
+            record_dependency(
+                module,
+                specifier,
+                DependencyKind::Unresolved,
+                detail,
+                Some(line),
+                Some(evidence),
+                path,
+                analysis,
+                seen_edges,
+            );
+            return;
+        }
+        AliasResolution::NoMatch => {}
     }
 
     if contract_names.contains(specifier) {
@@ -516,7 +520,94 @@ fn classify_specifier(
             analysis,
             seen_edges,
         );
+        return;
     }
+
+    record_external_package(
+        specifier,
+        context.classify_external(specifier),
+        evidence,
+        path,
+        line,
+        analysis,
+    );
+}
+
+/// Associa um arquivo já resolvido a um módulo do contrato, sem escolher ambiguidades.
+#[allow(clippy::too_many_arguments)]
+fn record_resolved_target(
+    contract: &Contract,
+    module: &Module,
+    specifier: &str,
+    resolved_path: &str,
+    path: &str,
+    line: usize,
+    evidence: &str,
+    origin: &str,
+    analysis: &mut Analysis,
+    seen_edges: &mut HashSet<String>,
+) {
+    let targets: Vec<&Module> = contract
+        .architecture
+        .modules
+        .iter()
+        .filter(|candidate| matches_pattern(&candidate.path, resolved_path))
+        .collect();
+
+    if targets.len() > 1 {
+        analysis.reviews.push(ReviewItem {
+            path: path.to_owned(),
+            line: Some(line),
+            reason: ReviewReason::UnresolvedDependency,
+            detail: format!("{specifier}: destino ambíguo ({resolved_path})"),
+        });
+        return;
+    }
+
+    let Some(target_module) = targets.first().copied() else {
+        analysis.reviews.push(ReviewItem {
+            path: path.to_owned(),
+            line: Some(line),
+            reason: ReviewReason::UnresolvedDependency,
+            detail: format!(
+                "{specifier}: arquivo resolvido {resolved_path} não pertence a nenhum módulo do contrato"
+            ),
+        });
+        return;
+    };
+
+    let target = target_module.name.as_str();
+    if target == module.name {
+        return;
+    }
+
+    let (kind, detail) = if module
+        .allowed_dependencies
+        .iter()
+        .any(|allowed| allowed == target)
+    {
+        (
+            DependencyKind::Allowed,
+            format!("{origin} resolvido e presente em allowed_dependencies"),
+        )
+    } else {
+        (
+            DependencyKind::Forbidden,
+            format!("{origin} resolvido no contrato, mas ausente de allowed_dependencies"),
+        )
+    };
+
+    record_dependency(
+        module,
+        target,
+        kind,
+        detail,
+        Some(line),
+        Some(evidence),
+        path,
+        analysis,
+        seen_edges,
+    );
 }
 
 /// Converte um deslocamento no documento mascarado em número de linha 1-based.
@@ -535,6 +626,8 @@ fn line_for_offset(line_starts: &[usize], offset: usize) -> usize {
 pub(super) fn observe_text(
     path: &str,
     text: &str,
+    files: &BTreeSet<&str>,
+    context: &ResolutionContext,
     analysis: &mut Analysis,
     seen_edges: &mut HashSet<String>,
 ) {
@@ -562,16 +655,33 @@ pub(super) fn observe_text(
         let evidence = source_lines[first..last].join(" ");
 
         match statement.specifier {
-            ParsedSpecifier::Static(specifier) => record_observed_dependency(
-                path,
-                &specifier,
-                "especificador observado; sem contrato para classificação".to_owned(),
-                Some(line),
-                Some(&evidence),
-                path,
-                analysis,
-                seen_edges,
-            ),
+            ParsedSpecifier::Static(specifier) => {
+                record_observed_dependency(
+                    path,
+                    &specifier,
+                    "especificador observado; sem contrato para classificação".to_owned(),
+                    Some(line),
+                    Some(&evidence),
+                    path,
+                    analysis,
+                    seen_edges,
+                );
+                let is_alias = !specifier.starts_with('.')
+                    && !matches!(
+                        context.resolve_alias(&specifier, files),
+                        AliasResolution::NoMatch
+                    );
+                if !is_alias {
+                    record_external_package(
+                        &specifier,
+                        context.classify_external(&specifier),
+                        &evidence,
+                        path,
+                        line,
+                        analysis,
+                    );
+                }
+            }
             ParsedSpecifier::DynamicLiteral(specifier) => {
                 analysis.limitations.push(format!(
                     "{path}:{line} especificador de template literal não é resolvido: {specifier}"
@@ -592,25 +702,27 @@ pub(super) fn analyze_text(
     contract: Option<&Contract>,
     contract_names: &HashSet<String>,
     inventory: &Inventory,
+    context: &ResolutionContext,
     path: &str,
     text: &str,
     module: Option<&Module>,
     analysis: &mut Analysis,
     seen_edges: &mut HashSet<String>,
 ) {
-    let Some(module) = module else {
-        if contract.is_none() {
-            observe_text(path, text, analysis, seen_edges);
-        }
-        return;
-    };
-    let contract = contract.expect("mapped module requires a contract");
-
     let files: HashSet<&str> = inventory
         .files
         .iter()
         .map(|file| file.path.as_str())
         .collect();
+    let alias_files: BTreeSet<&str> = files.iter().copied().collect();
+    let Some(module) = module else {
+        if contract.is_none() {
+            observe_text(path, text, &alias_files, context, analysis, seen_edges);
+        }
+        return;
+    };
+    let contract = contract.expect("mapped module requires a contract");
+
     let mut state = ScanState::default();
     let mut masked_document = String::new();
     let mut literals = Vec::new();
@@ -639,6 +751,8 @@ pub(super) fn analyze_text(
                 contract,
                 contract_names,
                 &files,
+                &alias_files,
+                context,
                 module,
                 path,
                 line,

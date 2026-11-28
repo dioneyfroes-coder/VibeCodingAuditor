@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use super::manifests::{ManifestDiscovery, ManifestObservation};
 use super::{Inventory, matches_pattern};
 use crate::analysis::{Analysis, DependencyKind};
+use crate::resolution::{AliasResolution, ExternalPackageState, ResolutionContext};
 
 /// Origem da evidência que sustenta um módulo candidato.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -147,9 +148,10 @@ pub fn build_candidates(inventory: &Inventory, analysis: &Analysis) -> Discovery
     candidates.extend(inferred);
     candidates.sort_by(|left, right| (&left.name, &left.path).cmp(&(&right.name, &right.path)));
 
+    let context = ResolutionContext::for_inventory(inventory);
     let mut ambiguities = mark_ambiguous(&mut candidates, &files);
     let observed_dependencies =
-        classify_observations(analysis, &candidates, &files, &mut ambiguities);
+        classify_observations(analysis, &candidates, &files, &context, &mut ambiguities);
     ambiguities.sort_by(|left, right| {
         (&left.subject, &left.detail, &left.options).cmp(&(
             &right.subject,
@@ -163,6 +165,7 @@ pub fn build_candidates(inventory: &Inventory, analysis: &Analysis) -> Discovery
         limitations.extend(observation.limitations.iter().cloned());
     }
     limitations.extend(manifests.limitations.iter().cloned());
+    limitations.extend(context.limitations.iter().cloned());
     if analysis.workspace.is_none() {
         limitations.push("sem manifesto Cargo reconhecido: não há candidatos direct".to_owned());
     }
@@ -331,6 +334,7 @@ fn classify_observations(
     analysis: &Analysis,
     candidates: &[CandidateModule],
     files: &BTreeSet<&str>,
+    context: &ResolutionContext,
     ambiguities: &mut Vec<Ambiguity>,
 ) -> Vec<ObservedDependency> {
     let workspace_packages: Vec<&str> = analysis
@@ -368,6 +372,10 @@ fn classify_observations(
         .filter(|edge| edge.kind == DependencyKind::Observed)
     {
         let root = target_root(&edge.to);
+        let relation = analysis
+            .external_packages
+            .iter()
+            .find(|relation| relation.path == edge.path && relation.specifier == edge.to);
         let (resolution, detail, options) = if declared
             .iter()
             .any(|name| names_match(name, root) || names_match(name, &edge.to))
@@ -397,32 +405,94 @@ fn classify_observations(
                 ),
             }
         } else {
-            let matches: Vec<&CandidateModule> = candidates
-                .iter()
-                .filter(|candidate| names_match(&candidate.name, root))
-                .collect();
-            match matches.len() {
-                0 => (
-                    ObservedResolution::External,
-                    "sem evidência de módulo interno; tratado como externo".to_owned(),
-                    Vec::new(),
-                ),
-                1 => (
+            match context.resolve_alias(&edge.to, files) {
+                AliasResolution::Resolved(path) => (
                     ObservedResolution::Resolved,
-                    format!(
-                        "associado ao candidato `{}` ({})",
-                        matches[0].name, matches[0].path
-                    ),
+                    format!("alias `{}` resolvido para {}", edge.to, path),
                     Vec::new(),
                 ),
-                _ => (
+                AliasResolution::Ambiguous(options) => (
                     ObservedResolution::Ambiguous,
-                    "destino corresponde a mais de um candidato".to_owned(),
-                    matches
-                        .iter()
-                        .map(|candidate| format!("{} ({})", candidate.name, candidate.path))
-                        .collect(),
+                    format!("alias `{}` com destinos ambíguos", edge.to),
+                    options,
                 ),
+                AliasResolution::Unresolved(detail) => {
+                    (ObservedResolution::Unresolved, detail, Vec::new())
+                }
+                AliasResolution::NoMatch => {
+                    let python_files = if Path::new(&edge.path)
+                        .extension()
+                        .and_then(|extension| extension.to_str())
+                        == Some("py")
+                        && edge.to.contains('.')
+                    {
+                        crate::resolution::resolve_python_module(&edge.to, files)
+                    } else {
+                        Vec::new()
+                    };
+                    if python_files.len() == 1 {
+                        (
+                            ObservedResolution::Resolved,
+                            format!("módulo Python resolvido para {}", python_files[0]),
+                            Vec::new(),
+                        )
+                    } else if python_files.len() > 1 {
+                        (
+                            ObservedResolution::Ambiguous,
+                            "mais de um arquivo Python corresponde ao módulo".to_owned(),
+                            python_files,
+                        )
+                    } else {
+                        let matches: Vec<&CandidateModule> = candidates
+                            .iter()
+                            .filter(|candidate| names_match(&candidate.name, root))
+                            .collect();
+                        match matches.len() {
+                            0 => {
+                                let (state, origin) = relation.map_or(
+                                    (
+                                        ExternalPackageState::Unconfirmed,
+                                        "sem declaração verificável",
+                                    ),
+                                    |relation| (relation.state, relation.origin.as_str()),
+                                );
+                                let detail = match state {
+                                    ExternalPackageState::Builtin => {
+                                        format!("embutida ({origin}); não é módulo interno")
+                                    }
+                                    ExternalPackageState::Declared => format!(
+                                        "externa declarada; origem: {origin}; não é módulo interno"
+                                    ),
+                                    ExternalPackageState::Unconfirmed => format!(
+                                        "externa não confirmada; origem: {origin}; não é módulo interno"
+                                    ),
+                                    ExternalPackageState::WorkspaceLocal => format!(
+                                        "local de workspace; origem: {origin}; não é módulo interno"
+                                    ),
+                                };
+                                (ObservedResolution::External, detail, Vec::new())
+                            }
+                            1 => (
+                                ObservedResolution::Resolved,
+                                format!(
+                                    "associado ao candidato `{}` ({})",
+                                    matches[0].name, matches[0].path
+                                ),
+                                Vec::new(),
+                            ),
+                            _ => (
+                                ObservedResolution::Ambiguous,
+                                "destino corresponde a mais de um candidato".to_owned(),
+                                matches
+                                    .iter()
+                                    .map(|candidate| {
+                                        format!("{} ({})", candidate.name, candidate.path)
+                                    })
+                                    .collect(),
+                            ),
+                        }
+                    }
+                }
             }
         };
 
@@ -628,6 +698,68 @@ mod tests {
         assert_eq!(
             resolution("web/broken.ts", "./absent"),
             ObservedResolution::Unresolved
+        );
+    }
+
+    #[test]
+    fn aliases_and_package_states_are_classified_without_contract() {
+        let candidates = candidates_for("resolution_typescript");
+        let observed = |target: &str| {
+            candidates
+                .observed_dependencies
+                .iter()
+                .find(|dependency| dependency.target == target)
+                .unwrap_or_else(|| panic!("dependência observada ausente: {target}"))
+        };
+
+        let alias = observed("@domain/entity");
+        assert_eq!(alias.resolution, ObservedResolution::Resolved);
+        assert!(alias.detail.contains("src/domain/entity.ts"));
+        assert_eq!(
+            observed("@local/duplo").resolution,
+            ObservedResolution::Ambiguous
+        );
+        assert_eq!(
+            observed("@local/ausente").resolution,
+            ObservedResolution::Unresolved
+        );
+
+        let builtin = observed("node:fs");
+        assert_eq!(builtin.resolution, ObservedResolution::External);
+        assert!(builtin.detail.contains("embutida"));
+        let declared = observed("react");
+        assert_eq!(declared.resolution, ObservedResolution::External);
+        assert!(declared.detail.contains("externa declarada"));
+        assert!(declared.detail.contains("package.json"));
+        let unconfirmed = observed("desconhecido/nested");
+        assert_eq!(unconfirmed.resolution, ObservedResolution::External);
+        assert!(unconfirmed.detail.contains("externa não confirmada"));
+        let workspace = observed("@demo/api");
+        assert_eq!(workspace.resolution, ObservedResolution::External);
+        assert!(workspace.detail.contains("local de workspace"));
+    }
+
+    #[test]
+    fn python_discovery_keeps_declared_and_unconfirmed_distributions_separate() {
+        let candidates = candidates_for("resolution_python");
+        let observed = |target: &str| {
+            candidates
+                .observed_dependencies
+                .iter()
+                .find(|dependency| dependency.target == target)
+                .unwrap_or_else(|| panic!("dependência observada ausente: {target}"))
+        };
+
+        assert!(observed("httpx").detail.contains("externa declarada"));
+        assert!(
+            observed("PIL.Image")
+                .detail
+                .contains("externa não confirmada")
+        );
+        assert!(observed("sys").detail.contains("embutida"));
+        assert_eq!(
+            observed("domain.entity").resolution,
+            ObservedResolution::Resolved
         );
     }
 
